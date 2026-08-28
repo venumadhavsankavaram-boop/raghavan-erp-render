@@ -18,17 +18,25 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json());
 
-// The public school website (a separate static site, on its own domain) posts new
-// admission inquiries straight to this one endpoint over the network — it isn't
-// hosted on the same origin as this ERP, so the browser needs an explicit CORS
-// allowance to make that cross-origin request. Scoped to just this resource
-// (not the whole /api/*) so the rest of the API — which includes things like
-// user records — stays inaccessible to any other site's frontend code.
+// The public school website (a separate static site, on its own domain) talks to
+// this ERP straight over the network for a handful of resources — it isn't hosted
+// on the same origin, so the browser needs an explicit CORS allowance for each one.
+// Listed per-resource (not the whole /api/*) so the rest of the API — which
+// includes things like user records — stays inaccessible to any other site's
+// frontend code. Methods are scoped to what the website actually does with each:
+// it only submits inquiries (POST), and only reads everything else (GET).
 const WEBSITE_ORIGIN = 'https://raghavan-school-website.onrender.com';
+const WEBSITE_CORS_RULES = {
+  '/api/admission-inquiries': 'POST, OPTIONS',
+  '/api/comms-messages': 'GET, OPTIONS',
+  '/api/website-gallery': 'GET, OPTIONS',
+  '/api/school-info': 'GET, OPTIONS',
+};
 app.use((req, res, next) => {
-  if (req.path === '/api/admission-inquiries') {
+  const allowedMethods = WEBSITE_CORS_RULES[req.path];
+  if (allowedMethods) {
     res.header('Access-Control-Allow-Origin', WEBSITE_ORIGIN);
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Methods', allowedMethods);
     res.header('Access-Control-Allow-Headers', 'Content-Type');
   }
   if (req.method === 'OPTIONS') return res.sendStatus(204);
@@ -111,6 +119,14 @@ const SIMPLE_RESOURCES = {
       { app: 'submittedDate', col: 'submitted_date' }, { app: 'status', col: 'status' },
     ],
   },
+  'website-gallery': {
+    table: 'website_gallery',
+    fields: [
+      { app: 'id', col: 'id' }, { app: 'dataUrl', col: 'data_url' }, { app: 'category', col: 'category' },
+      { app: 'caption', col: 'caption' }, { app: 'uploadedDate', col: 'uploaded_date' },
+      { app: 'uploadedBy', col: 'uploaded_by' },
+    ],
+  },
 };
 
 const HYBRID_RESOURCES = {
@@ -136,6 +152,13 @@ const HYBRID_RESOURCES = {
       { app: 'id', col: 'id' }, { app: 'staffId', col: 'staff_id' }, { app: 'month', col: 'month' },
       { app: 'status', col: 'status' },
     ],
+  },
+  // Notice Board / Communications messages — shape varies quite a bit record to
+  // record (a "channels" array, an optional "boardRemoved" flag, etc.), so only
+  // "id" is a real column; everything else rides in "extra" like the fields above.
+  'comms-messages': {
+    table: 'comms_messages',
+    core: [{ app: 'id', col: 'id' }],
   },
 };
 
@@ -358,6 +381,23 @@ async function handleFeeStructure(req, res) {
   return res.status(405).json({ error: 'Method not allowed.' });
 }
 
+async function handleSchoolInfo(req, res) {
+  if (req.method === 'GET') {
+    const rows = await sql`SELECT data FROM school_info WHERE id = 1`;
+    if (rows.length === 0) return res.status(200).json({});
+    return res.status(200).json(rows[0].data || {});
+  }
+  if (req.method === 'PUT') {
+    const info = req.body || {};
+    await sql`
+      INSERT INTO school_info (id, data) VALUES (1, ${JSON.stringify(info)}::jsonb)
+      ON CONFLICT (id) DO UPDATE SET data = ${JSON.stringify(info)}::jsonb
+    `;
+    return res.status(200).json({ ok: true });
+  }
+  return res.status(405).json({ error: 'Method not allowed.' });
+}
+
 async function handleAttendanceSettings(req, res) {
   if (req.method === 'GET') {
     const rows = await sql`SELECT * FROM attendance_settings WHERE id = 1`;
@@ -390,6 +430,7 @@ app.all('/api/:resource', async (req, res) => {
     if (resource === 'roles') return await handleRoles(req, res);
     if (resource === 'fee-structure') return await handleFeeStructure(req, res);
     if (resource === 'attendance-settings') return await handleAttendanceSettings(req, res);
+    if (resource === 'school-info') return await handleSchoolInfo(req, res);
     return res.status(404).json({ error: `Unknown resource: ${resource}` });
   } catch (err) {
     console.error(`${resource} API error:`, err);
