@@ -1637,6 +1637,14 @@
             <div class="f-field"><label>Other Recurring Deduction (₹/month)</label><input type="number" min="0" id="stfOtherDeduction" placeholder="e.g. Professional Tax — optional"></div>
           </div>
           <p style="font-size:0.76rem; color:var(--ink-soft); margin:10px 0 0;">Paid Leaves / Month is the number of Leave/Absent days each month that don't reduce pay (from Staff Attendance). Anything beyond that quota is deducted as Loss of Pay when payroll is generated.</p>
+          <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:20px 0 8px; display:block;">Bank Details — for salary disbursement</label>
+          <div class="form-grid">
+            <div class="f-field"><label>Bank Name</label><input type="text" id="stfBankName" placeholder="e.g. State Bank of India"></div>
+            <div class="f-field"><label>Account Holder Name</label><input type="text" id="stfBankAccountName" placeholder="As per bank records"></div>
+            <div class="f-field"><label>Account Number</label><input type="text" id="stfBankAccountNumber" placeholder="Bank account number"></div>
+            <div class="f-field"><label>IFSC Code</label><input type="text" id="stfBankIfsc" placeholder="e.g. SBIN0001234" style="text-transform:uppercase;"></div>
+          </div>
+          <p style="font-size:0.76rem; color:var(--ink-soft); margin:8px 0 0;">Optional — only used to prefill the Salary Disbursement Report (Staff → Payroll) so it's ready to hand off to your bank or accountant. Nobody outside Payroll access can see this.</p>
         </div>
 
         <div class="wtab-panel" id="stfpanel-contact" style="display:none;">
@@ -8573,6 +8581,10 @@
         document.getElementById('stfEsiEmployerAmt').value = st.esiEmployerAmount !== undefined && st.esiEmployerAmount !== '' ? st.esiEmployerAmount : '';
         document.getElementById('stfPaidLeaves').value = st.paidLeavesPerMonth !== undefined && st.paidLeavesPerMonth !== '' ? st.paidLeavesPerMonth : 1;
         document.getElementById('stfOtherDeduction').value = st.otherMonthlyDeduction || '';
+        document.getElementById('stfBankName').value = st.bankName || '';
+        document.getElementById('stfBankAccountName').value = st.bankAccountName || '';
+        document.getElementById('stfBankAccountNumber').value = st.bankAccountNumber || '';
+        document.getElementById('stfBankIfsc').value = st.bankIfsc || '';
         document.getElementById('stfClassTeacherOf').value = st.classTeacherClass ? (st.classTeacherClass+'|'+st.classTeacherSection) : '';
         document.getElementById('stfPhone').value = st.phone || '';
         document.getElementById('stfEmail').value = st.email || '';
@@ -8611,6 +8623,10 @@
       document.getElementById('stfEsiEmployerAmt').value = '';
       document.getElementById('stfPaidLeaves').value = 1;
       document.getElementById('stfOtherDeduction').value = '';
+      document.getElementById('stfBankName').value = '';
+      document.getElementById('stfBankAccountName').value = '';
+      document.getElementById('stfBankAccountNumber').value = '';
+      document.getElementById('stfBankIfsc').value = '';
     }
     renderStaffJobTypeCheckboxes(existingJobTypes);
     switchStaffWizardTab('personal');
@@ -8645,6 +8661,8 @@
       esiEmployeeAmount: g('stfEsiEmployeeAmt') || 0, esiEmployerAmount: g('stfEsiEmployerAmt') || 0,
       paidLeavesPerMonth: g('stfPaidLeaves') === '' ? 1 : g('stfPaidLeaves'),
       otherMonthlyDeduction: g('stfOtherDeduction') || 0,
+      bankName: g('stfBankName').trim(), bankAccountName: g('stfBankAccountName').trim(),
+      bankAccountNumber: g('stfBankAccountNumber').trim(), bankIfsc: g('stfBankIfsc').trim().toUpperCase(),
       classTeacherClass: ctClass, classTeacherSection: ctSection,
       phone: g('stfPhone').trim(), email: g('stfEmail').trim(), address: g('stfAddress').trim(),
       emergencyName: g('stfEmergencyName').trim(), emergencyPhone: g('stfEmergencyPhone').trim(),
@@ -8893,7 +8911,90 @@
         <button class="btn btn-ghost btn-sm" onclick="downloadStaffPayrollExcel()">📥 Excel</button>
         <button class="btn btn-ghost btn-sm" onclick="downloadStaffPayrollPDF()">📄 PDF</button>
       </div>
+      ${renderSalaryDisbursementCard()}
     `;
+  }
+  /* ===== Salary Disbursement Report =====
+     Deliberately separate from the payroll register above: this is the sheet you'd
+     actually hand to a bank or accountant to pay people, so it only ever includes
+     staff whose payroll is Approved (never a Draft, which can still change) for the
+     selected month, shows just what disbursing needs — net pay and bank details —
+     and calls out anyone approved but missing bank details so nobody gets missed. */
+  function salaryDisbursementData(monthStr){
+    const list = staffList.filter(staffIsActive).sort((a,b) => (a.firstName+a.lastName).localeCompare(b.firstName+b.lastName));
+    const ready = [], missingBank = [], notApproved = [];
+    list.forEach(st => {
+      const rec = findPayrollRecord(st.id, monthStr);
+      if(!rec || rec.status !== 'Approved'){ notApproved.push(st); return; }
+      const row = {
+        staffId: st.id, name: st.firstName+' '+st.lastName, designation: st.designation||'', department: st.department||'',
+        bankName: st.bankName||'', accountName: st.bankAccountName || (st.firstName+' '+st.lastName),
+        accountNumber: st.bankAccountNumber||'', ifsc: st.bankIfsc||'', netSalary: rec.netSalary,
+      };
+      if(st.bankAccountNumber && st.bankIfsc) ready.push(row); else missingBank.push(row);
+    });
+    const total = [...ready, ...missingBank].reduce((sum,r) => sum + r.netSalary, 0);
+    return { ready, missingBank, notApproved, total };
+  }
+  function renderSalaryDisbursementCard(){
+    const monthStr = staffPayrollMonth;
+    const { ready, missingBank, notApproved, total } = salaryDisbursementData(monthStr);
+    const monthLabel = new Date(monthStr+'-01').toLocaleString('en-IN',{month:'long',year:'numeric'});
+    const rowHtml = r => `
+      <tr>
+        <td class="name-cell" style="cursor:pointer;" onclick="openStaffProfile('${r.staffId}')">${r.name}<div style="font-size:0.7rem; color:var(--ink-soft); font-weight:400;">${r.designation}${r.department?' · '+r.department:''}</div></td>
+        <td>${r.bankName||'—'}</td>
+        <td>${r.accountName||'—'}</td>
+        <td style="font-family:'IBM Plex Mono',monospace;">${r.accountNumber||'—'}</td>
+        <td style="font-family:'IBM Plex Mono',monospace;">${r.ifsc||'—'}</td>
+        <td><b>${fmtMoney(r.netSalary)}</b></td>
+      </tr>`;
+    const hasAnyApproved = ready.length || missingBank.length;
+    return `
+      <div class="profile-card" style="margin-top:24px; border-top:4px solid var(--teal);">
+        <h4 style="margin:0 0 6px;">💸 Salary Disbursement Report — ${monthLabel}</h4>
+        <p style="font-size:0.8rem; color:var(--ink-soft); margin:0 0 16px;">Net salary payable, after every deduction (EPF, ESI, Loss of Pay, other deductions), for every staff member whose payroll is <b>Approved</b> this month — a Draft is never included here, so nothing half-calculated gets paid out. Add bank details under Staff → Edit → Payroll Setup to have them prefilled below.</p>
+        ${hasAnyApproved ? `
+        <div class="table-wrap" style="overflow-x:auto; margin-bottom:14px;">
+          <table><thead><tr><th>Staff</th><th>Bank</th><th>Account Holder</th><th>Account Number</th><th>IFSC</th><th>Net Salary</th></tr></thead>
+          <tbody>${ready.map(rowHtml).join('')}</tbody></table>
+        </div>
+        <div class="pay-summary-box" style="margin-bottom:16px;">
+          <div class="pay-summary-grid">
+            <div class="pay-summary-item"><span>Approved This Month</span><b>${ready.length + missingBank.length}</b></div>
+            <div class="pay-summary-item highlight"><span>Total to Disburse</span><b>${fmtMoney(total)}</b></div>
+          </div>
+        </div>
+        ` : ''}
+        ${missingBank.length ? `
+        <div class="profile-card" style="margin-bottom:16px; background:rgba(203,154,46,0.1); border-left:4px solid var(--gold);">
+          <h4 style="margin:0 0 8px;">⚠ ${missingBank.length} approved but missing bank details</h4>
+          <p style="font-size:0.78rem; color:var(--ink-soft); margin-bottom:10px;">Their salary is calculated and approved — included in the total above — but with no bank account/IFSC on file they're left out of the table, so a bank transfer can't be prepared for them yet.</p>
+          <div class="table-wrap"><table><thead><tr><th>Staff</th><th>Net Salary</th></tr></thead><tbody>
+            ${missingBank.map(r => `<tr><td class="name-cell" style="cursor:pointer;" onclick="openStaffProfile('${r.staffId}')">${r.name}</td><td>${fmtMoney(r.netSalary)}</td></tr>`).join('')}
+          </tbody></table></div>
+        </div>` : ''}
+        ${notApproved.length ? `<p style="font-size:0.78rem; color:var(--ink-soft);">${notApproved.length} active staff member${notApproved.length===1?'':'s'} not yet approved for ${monthLabel}, so not included here yet: ${notApproved.map(s=>s.firstName+' '+s.lastName).join(', ')}.</p>` : ''}
+        ${hasAnyApproved
+          ? `<div style="display:flex; gap:10px; margin-top:12px;"><button class="btn btn-ghost btn-sm" onclick="downloadSalaryDisbursementExcel()">📥 Excel</button><button class="btn btn-ghost btn-sm" onclick="downloadSalaryDisbursementPDF()">📄 PDF</button></div>`
+          : `<div class="empty-state"><b>Nothing to disburse yet</b>Approve at least one staff member's payroll for ${monthLabel} above, first.</div>`}
+      </div>
+    `;
+  }
+  function salaryDisbursementReportRows(){
+    const { ready, missingBank } = salaryDisbursementData(staffPayrollMonth);
+    return [...ready, ...missingBank].map(r => ({
+      'Staff': r.name, 'Designation': r.designation, 'Department': r.department,
+      'Bank Name': r.bankName, 'Account Holder': r.accountName, 'Account Number': r.accountNumber, 'IFSC': r.ifsc,
+      'Net Salary Payable': r.netSalary,
+    }));
+  }
+  function downloadSalaryDisbursementExcel(){
+    exportRowsToExcel('salary_disbursement_'+staffPayrollMonth+'.xlsx', 'Salary Disbursement', salaryDisbursementReportRows());
+  }
+  function downloadSalaryDisbursementPDF(){
+    const monthLabel = new Date(staffPayrollMonth+'-01').toLocaleString('en-IN',{month:'long',year:'numeric'});
+    exportRowsToPDF('Salary Disbursement — '+monthLabel, '', salaryDisbursementReportRows());
   }
   function resetPayrollField(staffId, monthStr, which){
     const rec = findPayrollRecord(staffId, monthStr);
