@@ -6,6 +6,10 @@
 <title>Raghavan EM High School — ERP</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<!-- Razorpay Checkout — powers the "Pay Online" button on the Student/Parent
+     Fees tab. Loading it here (rather than only when needed) keeps that button
+     instantly responsive; it's a small script and does nothing until opened. -->
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
   window.__xlsxReady = new Promise((resolve) => {
     const urls = [
@@ -1133,9 +1137,17 @@
       <div class="topbar">
         <div>
           <h1 id="myProfileTitle">My Profile</h1>
-          <p>Read-only view — contact the school office for any corrections.</p>
+          <p>Profile, fees, marks and notices — all in one place.</p>
         </div>
       </div>
+
+      <div class="mf-tabs">
+        <button type="button" class="mf-tab active" id="mptab-profile" onclick="switchMyProfileTab('profile')">👤 Profile</button>
+        <button type="button" class="mf-tab" id="mptab-fees" onclick="switchMyProfileTab('fees')">💳 Fees &amp; Payments</button>
+        <button type="button" class="mf-tab" id="mptab-marks" onclick="switchMyProfileTab('marks')">📝 Marks</button>
+        <button type="button" class="mf-tab" id="mptab-notices" onclick="switchMyProfileTab('notices')">📌 Notices</button>
+      </div>
+
       <div id="myProfileBody"></div>
     </div>
   </main>
@@ -2423,7 +2435,7 @@
     if(view === 'websiteinquiries'){ initWebsiteInquiriesView(); }
     if(view === 'websitegallery'){ initWebsiteGalleryView(); }
     if(view === 'myaccount'){ initMyAccountView(); }
-    if(view === 'myprofile'){ renderMyProfile(); }
+    if(view === 'myprofile'){ switchMyProfileTab(myProfileTab); }
   }
 
   /* ===== FINANCE DATA LAYER ===== */
@@ -12842,14 +12854,38 @@
     `;
   }
 
-  function renderMyProfile(){
+  /* ===== Student/Parent self-service portal: My Profile / Fees / Marks / Notices =====
+     One login (Student or Parent role) is linked to exactly one student record
+     (currentUser.linkedStudentId). Every tab below reads that same student's
+     already-loaded data (students/payments/examResults/commsMessages arrays —
+     no separate fetch needed, this is all same-origin, same app) and renders a
+     read-only view of it, plus a "Pay Online" action on the Fees tab. */
+  let myProfileTab = 'profile';
+  function switchMyProfileTab(tab){
+    myProfileTab = tab;
+    ['profile','fees','marks','notices'].forEach(t => {
+      const el = document.getElementById('mptab-'+t);
+      if(el) el.classList.toggle('active', t===tab);
+    });
+    renderMyProfileBody();
+  }
+  function myProfileStudent(){
+    return currentUser.linkedStudentId ? students.find(x => x.id === currentUser.linkedStudentId) : null;
+  }
+  function renderMyProfileBody(){
     const body = document.getElementById('myProfileBody');
-    const s = currentUser.linkedStudentId ? students.find(x => x.id === currentUser.linkedStudentId) : null;
+    document.getElementById('myProfileTitle').textContent = currentUser.role === 'Parent' ? "Child's Portal" : "My Portal";
+    const s = myProfileStudent();
     if(!s){
       body.innerHTML = `<div class="empty-state"><b>No student linked to this login yet</b>Ask the Admin to link this account to a student under Initial Setup → Users &amp; Roles.</div>`;
       return;
     }
-    document.getElementById('myProfileTitle').textContent = currentUser.role === 'Parent' ? "Child's Profile" : "My Profile";
+    if(myProfileTab === 'profile') return renderMyProfileProfileTab(body, s);
+    if(myProfileTab === 'fees') return renderMyFeesTab(body, s);
+    if(myProfileTab === 'marks') return renderMyMarksTab(body, s);
+    if(myProfileTab === 'notices') return renderMyNoticesTab(body);
+  }
+  function renderMyProfileProfileTab(body, s){
     body.innerHTML = `
       <div class="profile-head">
         ${s.photo ? `<img class="profile-photo" src="${s.photo}">` : `<div class="profile-photo">${initials(s)}</div>`}
@@ -12858,8 +12894,187 @@
           <div class="p-meta">${s.admissionNo} · ${s.className} — Section ${s.section} · <span class="pill">${s.status||'Active'}</span></div>
         </div>
       </div>
+      <p style="font-size:0.8rem; color:var(--ink-soft); margin:-10px 0 16px;">Read-only view — contact the school office for any corrections.</p>
       ${buildProfileCardsHTML(s)}
     `;
+  }
+
+  /* --- Fees & Payments tab: read-only fee ledger (same numbers as the office
+     sees) plus a Pay Online button per pending item, and a payment/receipt
+     history with Print Receipt for anything already paid. --- */
+  function renderMyFeesTab(body, s){
+    const { perCat, extras } = computeStudentFinance(s);
+    const studentPayments = payments.filter(p => p.studentId === s.id).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+    const catRows = Object.keys(CATS).filter(c => perCat[c].expected > 0).map(c => ({
+      type:'category', key:c, label:CATS[c],
+      total: perCat[c].expected, paid: perCat[c].collected, discount: perCat[c].discount,
+      outstanding: perCat[c].receivable, lateFee: computeLateFeeFor(perCat[c].receivable),
+    }));
+    const extraRows = extras.map(e => {
+      const paidAmt = Number(e.paidAmount) || 0;
+      const outstanding = Math.max((Number(e.amount)||0) - paidAmt, 0);
+      return { type:'extra', key: e.id, label: e.name, total: Number(e.amount)||0, paid: paidAmt, discount:0, outstanding, lateFee:0 };
+    });
+    const allRows = [...catRows, ...extraRows];
+    const pendingRows = allRows.filter(r => r.outstanding > 0);
+    const paidRows = allRows.filter(r => r.outstanding <= 0);
+    const totalOutstanding = pendingRows.reduce((sum,r) => sum + r.outstanding + r.lateFee, 0);
+
+    body.innerHTML = `
+      ${pendingRows.length ? `
+      <div class="dash-section-title"><div><h3>Pending Fees</h3></div></div>
+      <div class="table-wrap" style="overflow-x:auto; margin-bottom:16px;">
+        <table><thead><tr><th>Type</th><th>Total</th><th>Paid</th><th>Late Fee</th><th>Outstanding</th><th></th></tr></thead><tbody>
+        ${pendingRows.map(r => `
+          <tr>
+            <td><span class="pill">${r.label}</span></td>
+            <td>${fmtMoney(r.total)}</td>
+            <td>${fmtMoney(r.paid)}</td>
+            <td>${r.lateFee>0?`<span style="color:var(--magenta); font-weight:600;">${fmtMoney(r.lateFee)}</span>`:'-'}</td>
+            <td class="balance-tag due">${fmtMoney(r.outstanding + r.lateFee)}</td>
+            <td><button class="btn btn-primary btn-sm" onclick="payFeeOnline('${r.type}','${r.key}', ${r.outstanding + r.lateFee}, '${r.label.replace(/'/g,"\\'")}')">💳 Pay Online</button></td>
+          </tr>`).join('')}
+        </tbody></table>
+      </div>
+      <div class="pay-summary-box" style="margin-bottom:24px;">
+        <div class="pay-summary-grid"><div class="pay-summary-item highlight"><span>Total Outstanding</span><b>${fmtMoney(totalOutstanding)}</b></div></div>
+      </div>
+      ` : `<div class="empty-state" style="margin-bottom:24px;"><b>No pending fees</b>Everything's fully paid. 🎉</div>`}
+
+      ${paidRows.length ? `
+      <div class="dash-section-title"><div><h3>Fully Paid</h3></div></div>
+      <div class="table-wrap" style="margin-bottom:24px;"><table><thead><tr><th>Type</th><th>Total</th><th>Paid</th><th>Discount</th></tr></thead><tbody>
+        ${paidRows.map(r => `<tr><td><span class="pill">${r.label}</span></td><td>${fmtMoney(r.total)}</td><td>${fmtMoney(r.paid)}</td><td>${r.discount>0?fmtMoney(r.discount):'-'}</td></tr>`).join('')}
+      </tbody></table></div>` : ``}
+
+      <div class="dash-section-title"><div><h3>Payment History &amp; Receipts</h3></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Category</th><th>Mode</th><th>Amount</th><th></th></tr></thead><tbody>
+        ${studentPayments.length ? studentPayments.map(p => `<tr><td>${p.date||'—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${p.mode||'—'}</td><td>${fmtMoney(p.amount)}</td><td><button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button></td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
+      </tbody></table></div>
+    `;
+  }
+
+  /* Pays one pending row (a fee category or an extra fee) via Razorpay Checkout.
+     amount is the exact outstanding + late fee already shown on screen, so the
+     parent can't accidentally under/over-pay a line item. */
+  async function payFeeOnline(type, key, amount, label){
+    const s = myProfileStudent();
+    if(!s){ showToast('No student linked to this login.'); return; }
+    if(typeof Razorpay === 'undefined'){ showToast('Payment window failed to load — check your internet connection and try again.'); return; }
+    let order;
+    try{
+      const res = await fetch('/api/payments/create-order', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ amount }),
+      });
+      order = await res.json();
+      if(!res.ok) throw new Error(order.error || 'Could not start the payment.');
+    }catch(err){
+      showToast(err.message || "Online payments aren't set up yet — please pay at the school office.");
+      return;
+    }
+    const rzp = new Razorpay({
+      key: order.keyId,
+      order_id: order.orderId,
+      amount: order.amount,
+      currency: order.currency,
+      name: 'Raghavan EM High School',
+      description: `${label} — ${s.firstName} ${s.lastName}`,
+      prefill: { name: currentUser.name || '' },
+      theme: { color: '#1f3a63' },
+      handler: async function(response){
+        try{
+          const verifyRes = await fetch('/api/payments/verify', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              studentId: s.id, studentName: `${s.firstName} ${s.lastName}`,
+              amount, category: type==='extra' ? 'extra' : key, classAtPayment: s.className,
+              extraFeeName: type==='extra' ? label : undefined,
+              extraFeeId: type==='extra' ? key : undefined,
+            }),
+          });
+          const result = await verifyRes.json();
+          if(!verifyRes.ok) throw new Error(result.error || 'Could not confirm the payment.');
+          if(type === 'extra'){
+            const fee = studentExtraFees.find(x => x.id === key);
+            if(fee){
+              fee.paidAmount = (Number(fee.paidAmount)||0) + amount;
+              if(fee.paidAmount >= fee.amount) fee.paid = true;
+              await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
+            }
+          }
+          payments.push({
+            id: result.paymentId, receiptNo: result.receiptNo, studentId: s.id, studentName: `${s.firstName} ${s.lastName}`,
+            category: type==='extra' ? 'extra' : key, mode:'Online', amount, discount:0, instalment:'',
+            date: new Date().toISOString().slice(0,10), note:'Paid online via Razorpay', classAtPayment: s.className,
+            extraFeeName: type==='extra' ? label : undefined, extraFeeId: type==='extra' ? key : undefined,
+          });
+          showToast('Payment successful — receipt ' + result.receiptNo);
+          renderMyProfileBody();
+        }catch(err){
+          showToast(err.message || `Payment succeeded but couldn't be confirmed — contact the office with payment ID ${response.razorpay_payment_id}.`);
+        }
+      },
+      modal: { ondismiss: function(){ showToast('Payment cancelled.'); } },
+    });
+    rzp.open();
+  }
+
+  /* --- Marks tab: one card per exam that has at least one entered result for
+     this student, with a button that opens the same printable marks card the
+     office prints (reportCardPageHtml), just without the bulk/search tools. --- */
+  function renderMyMarksTab(body, s){
+    const examsWithResults = examDefs.filter(ex => examResults.some(r => r.examId === ex.id && r.studentId === s.id));
+    if(examsWithResults.length === 0){
+      body.innerHTML = `<div class="empty-state"><b>No marks published yet</b>Marks will appear here once a teacher enters them for an exam.</div>`;
+      return;
+    }
+    body.innerHTML = examsWithResults.map(ex => `
+      <div class="profile-card" style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div>
+          <h4 style="margin:0 0 4px;">${ex.name}</h4>
+          <p style="font-size:0.78rem; color:var(--ink-soft); margin:0;">${ex.examType||''}${ex.startDate?` · ${ex.startDate}${ex.endDate?' – '+ex.endDate:''}`:''}</p>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="printMyReportCard('${ex.id}')">🖨️ View / Print Marks Card</button>
+      </div>
+    `).join('');
+  }
+  function printMyReportCard(examId){
+    const s = myProfileStudent();
+    const exam = examDefs.find(e => e.id === examId);
+    if(!s || !exam) return;
+    const template = reportTemplates.find(t => t.isDefault) || reportTemplates[0];
+    if(!template){ showToast('No report template is set up yet — ask the office to create one under Result → Report Templates.'); return; }
+    const logoEl = document.querySelector('.sb-brand img');
+    const logoSrc = logoEl ? logoEl.src : '';
+    const w = window.open('', '_blank');
+    w.document.write(`
+      <html><head><title>Marks Card - ${s.firstName} ${s.lastName}</title>
+      <style>${reportCardPrintCss()}</style></head>
+      <body onload="window.print()">${reportCardPageHtml(s, exam, logoSrc, template)}</body></html>
+    `);
+    w.document.close();
+  }
+
+  /* --- Notices tab: same feed the public website shows, read-only (no
+     compose/edit/delete controls — those stay on the staff Notice Board). --- */
+  function renderMyNoticesTab(body){
+    const notices = commsMessages.filter(m => m.channels.includes('In-App') && !m.boardRemoved).slice().sort((a,b) => b.id.localeCompare(a.id));
+    if(notices.length === 0){
+      body.innerHTML = `<div class="empty-state"><b>No notices posted yet</b></div>`;
+      return;
+    }
+    body.innerHTML = notices.map(n => `
+      <div class="profile-card" style="margin-bottom:14px;">
+        <span class="pill" style="font-size:0.68rem;">${noticeTypeByName(n.type)?noticeTypeByName(n.type).icon:'📣'} ${n.type}</span>
+        <h4 style="margin:8px 0 4px;">${n.title}</h4>
+        <p style="font-size:0.85rem; color:var(--ink); white-space:pre-wrap; margin:6px 0;">${n.body}</p>
+        <p style="font-size:0.74rem; color:var(--ink-soft); margin-top:8px;">${n.sentDate}</p>
+      </div>
+    `).join('');
   }
 
   let searchDebounceTimer = null;
