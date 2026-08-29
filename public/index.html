@@ -2058,6 +2058,16 @@
     customRoles = await storageGet(CUSTOM_ROLES_KEY, []);
   }
   function findRoleOverride(role){
+    // Student and Parent logins are deliberately locked to their own child's
+    // data (the My Portal page), which the generic module-permission system
+    // has no concept of — "view" on Manage Fee or Exams there means "see the
+    // whole school's", not "see my own child's". So these two roles never
+    // participate in custom permission overrides, no matter what a saved
+    // override in the database says (this is what closes the gap where a
+    // custom "Parent"/"Student" role — created via Roles & Permissions'
+    // built-in "Edit Permissions" — used to leak every student's fee/marks
+    // data to every parent).
+    if(role === 'Student' || role === 'Parent') return undefined;
     return customRoles.find(r => r.name === role);
   }
   function getRoleViews(role){
@@ -11677,12 +11687,20 @@
 
   function renderPermissionsTab(body){
     if(permView === 'edit') return renderPermissionEditor(body);
-    const builtIns = ROLES.map(name => ({ name, builtIn: true, override: findRoleOverride(name) }));
+    // Student and Parent are deliberately left out here — they don't use the
+    // module-permission system at all. Their login always shows only "My
+    // Portal", scoped to their own linked child; there's no "view" checkbox
+    // that could safely mean "see every student's fees/marks" for them, so
+    // Roles & Permissions doesn't offer to edit them.
+    const builtIns = ROLES.filter(name => name !== 'Student' && name !== 'Parent').map(name => ({ name, builtIn: true, override: findRoleOverride(name) }));
     const customOnly = customRoles.filter(r => !ROLES.includes(r.name)).map(r => ({ name: r.name, builtIn: false, override: r }));
     const allRoles = [...builtIns, ...customOnly];
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">
         Every role — built-in or custom — can have its permissions adjusted here, module by module. Built-in roles start with their normal defaults; editing and saving overrides that default for everyone with that role. Modules marked <span class="pill" style="font-size:0.62rem;">Coming Soon</span> aren't built yet — set their permissions now and they'll be ready the moment those modules launch.
+      </p>
+      <p style="font-size:0.8rem; color:var(--ink-soft); margin:-8px 0 16px; max-width:680px;">
+        <b>Student</b> and <b>Parent</b> logins aren't listed here — they always see only "My Portal" (their own child's fees, marks, receipts and notices), which isn't part of this module system.
       </p>
       <div class="inline-add-form" style="margin-bottom:16px;">
         <input class="input" id="newRoleName" placeholder="e.g. Librarian, Transport Coordinator" style="max-width:260px;">
