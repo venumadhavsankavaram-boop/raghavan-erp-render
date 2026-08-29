@@ -6951,6 +6951,252 @@
     }).sort((a,b) => b['Average %'] - a['Average %'])
       .map((r,i) => { const { _name, ...rest } = r; return { 'Rank': i+1, ...rest }; });
   }
+
+  /* ===== Teacher Performance — on-screen Dashboard =====
+     The exports above (teacherPerformanceSummaryReport/DetailReport) already did the
+     hard work of matching each teacher's actual subject-section assignments against
+     the marks their students scored. This section reuses that same underlying data
+     (teacherPerformanceScopedRows) but renders it as a ranked, drill-down dashboard
+     right in the app instead of only as a downloadable file, and adds three things
+     real schools look for beyond a raw average: a fair baseline (compared against
+     other teachers of the SAME subject, since subjects vary in difficulty), a grade
+     distribution (the full spread, not just one number), and a trend across exams
+     (improving or declining), plus attendance as context alongside the marks. */
+  let tpDashExamId = '';
+  let tpDashExpandedId = '';
+  function onTeacherPerfDashExamChange(){
+    tpDashExamId = document.getElementById('tpDashExamSelect').value;
+    renderStaffReportsTab(document.getElementById('stfReportsBody'));
+  }
+  function toggleTeacherPerfDetail(teacherId){
+    tpDashExpandedId = (tpDashExpandedId === teacherId) ? '' : teacherId;
+    renderStaffReportsTab(document.getElementById('stfReportsBody'));
+  }
+  // Average % for each subject across every teacher of that subject in scope — the
+  // fair yardstick for "is this teacher's average actually good", since a 68% average
+  // in a historically hard subject can be a stronger result than a 78% in an easy one.
+  function teacherPerformanceBaselines(examId, filters){
+    const rows = teacherPerformanceScopedRows(examId, filters);
+    const bySubject = {};
+    rows.forEach(r => {
+      const b = bySubject[r.subject] || (bySubject[r.subject] = { sum:0, n:0 });
+      b.sum += r.avgPct * r.studentsEvaluated;
+      b.n += r.studentsEvaluated;
+    });
+    const baselines = {};
+    Object.keys(bySubject).forEach(k => { baselines[k] = bySubject[k].n ? bySubject[k].sum / bySubject[k].n : 0; });
+    return baselines;
+  }
+  function teacherPerformanceDashboardRows(examId, filters){
+    const rows = teacherPerformanceScopedRows(examId, filters);
+    const baselines = teacherPerformanceBaselines(examId, filters);
+    const byTeacher = {};
+    rows.forEach(r => {
+      const t = byTeacher[r.teacherId] || (byTeacher[r.teacherId] = {
+        teacherId: r.teacherId, name: r.teacherName, designation: r.designation,
+        subjects: new Set(), sections: new Set(), totalStudents: 0,
+        weightedPctSum: 0, weightedPassSum: 0, weightedBaselineSum: 0,
+        stdDevs: [], highest: -Infinity, lowest: Infinity,
+      });
+      t.subjects.add(r.subject);
+      t.sections.add(r.className + ' - ' + r.section);
+      t.totalStudents += r.studentsEvaluated;
+      t.weightedPctSum += r.avgPct * r.studentsEvaluated;
+      t.weightedPassSum += r.passRate * r.studentsEvaluated;
+      t.weightedBaselineSum += (baselines[r.subject] || 0) * r.studentsEvaluated;
+      t.stdDevs.push(r.stdDev);
+      t.highest = Math.max(t.highest, r.highest);
+      t.lowest = Math.min(t.lowest, r.lowest);
+    });
+    return Object.values(byTeacher).map(t => {
+      const avg = t.totalStudents ? t.weightedPctSum / t.totalStudents : 0;
+      const passRate = t.totalStudents ? t.weightedPassSum / t.totalStudents : 0;
+      const baseline = t.totalStudents ? t.weightedBaselineSum / t.totalStudents : 0;
+      const consistency = t.stdDevs.length ? t.stdDevs.reduce((a,b) => a+b, 0) / t.stdDevs.length : 0;
+      return {
+        teacherId: t.teacherId, name: t.name, designation: t.designation,
+        subjects: Array.from(t.subjects), sections: Array.from(t.sections), totalStudents: t.totalStudents,
+        avgPct: Math.round(avg*10)/10, passRate: Math.round(passRate*10)/10, consistency: Math.round(consistency*10)/10,
+        highest: Math.round(t.highest*10)/10, lowest: Math.round(t.lowest*10)/10,
+        baseline: Math.round(baseline*10)/10, delta: Math.round((avg-baseline)*10)/10,
+      };
+    }).sort((a,b) => b.avgPct - a.avgPct);
+  }
+  // Per-student grade spread for one teacher — mirrors teacherPerformanceRawRows'
+  // own filtering (same exam/subject/class/section matching) but keeps every
+  // individual result instead of collapsing straight to an average.
+  function teacherPerformanceGradeDistribution(teacherId, examId, filters){
+    const examsToUse = examId ? examDefs.filter(e => e.id === examId) : examDefs;
+    const counts = {};
+    gradingScale.forEach(g => { counts[g.grade] = 0; });
+    let total = 0;
+    subjectsList.forEach(subj => {
+      if(filters.className && subj.className !== filters.className) return;
+      (subj.sections || []).forEach(section => {
+        if(filters.section && section !== filters.section) return;
+        const teacherIds = subjectStaffForSection(subj, section);
+        if(!teacherIds || !teacherIds.includes(teacherId)) return;
+        examsToUse.forEach(exam => {
+          const cfg = getExamSubjects(exam, subj.className, section).find(s => s.name === subj.name);
+          if(!cfg || cfg.countable === false) return;
+          const classStudents = students.filter(s => s.className === subj.className && s.section === section && isActive(s));
+          classStudents.forEach(s => {
+            const r = examResults.find(er => er.examId === exam.id && er.studentId === s.id && er.subject === subj.name);
+            if(!r || r.absent) return;
+            if(r.marks === null || r.marks === undefined || r.marks === '') return;
+            const pct = (Number(r.marks) / (cfg.maxMarks || 100)) * 100;
+            const grade = gradeForPct(pct);
+            counts[grade] = (counts[grade] || 0) + 1;
+            total++;
+          });
+        });
+      });
+    });
+    return { counts, total };
+  }
+  // One average-% point per exam this teacher has marks in, oldest first — the
+  // "is this teacher trending up or down" signal, independent of any single exam.
+  function teacherPerformanceTrend(teacherId, filters){
+    return examDefs.slice()
+      .sort((a,b) => (a.startDate||'').localeCompare(b.startDate||''))
+      .map(exam => {
+        const rows = teacherPerformanceScopedRows(exam.id, filters).filter(r => r.teacherId === teacherId);
+        if(rows.length === 0) return null;
+        const totalStudents = rows.reduce((s,r) => s + r.studentsEvaluated, 0);
+        const avg = totalStudents ? rows.reduce((s,r) => s + r.avgPct * r.studentsEvaluated, 0) / totalStudents : 0;
+        return { examId: exam.id, examName: exam.name, avgPct: Math.round(avg*10)/10 };
+      })
+      .filter(Boolean);
+  }
+  // Average attendance % across every active student in the classes/sections this
+  // teacher currently teaches (attendance isn't tied to a specific exam, so this
+  // is scope-wide rather than per-exam) — context for reading the marks, since
+  // poor attendance often explains poor marks better than teaching quality does.
+  function teacherPerformanceAttendanceContext(teacherId, filters){
+    const combos = new Set();
+    subjectsList.forEach(subj => {
+      if(filters.className && subj.className !== filters.className) return;
+      (subj.sections || []).forEach(section => {
+        if(filters.section && section !== filters.section) return;
+        const ids = subjectStaffForSection(subj, section);
+        if(ids && ids.includes(teacherId)) combos.add(subj.className + '||' + section);
+      });
+    });
+    let sum = 0, n = 0;
+    combos.forEach(key => {
+      const [cls, sec] = key.split('||');
+      students.filter(s => s.className === cls && s.section === sec && isActive(s)).forEach(s => {
+        const stats = computeAttendanceStats(s.id);
+        if(stats.total > 0){ sum += stats.pct; n++; }
+      });
+    });
+    return n ? Math.round(sum / n) : null;
+  }
+  function renderTeacherPerfDashboard(filters){
+    const examId = tpDashExamId;
+    const dashRows = teacherPerformanceDashboardRows(examId, filters);
+    const exam = examId ? examDefs.find(e => e.id === examId) : null;
+    const examOptions = `<option value="">All Exams (Cumulative)</option>` +
+      examDefs.map(ex => `<option value="${ex.id}" ${examId===ex.id?'selected':''}>${ex.name}</option>`).join('');
+    const header = `
+      <div class="profile-card" style="margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <h4 style="margin:0;">📊 Teacher Performance Dashboard</h4>
+          <select id="tpDashExamSelect" onchange="onTeacherPerfDashExamChange()" style="font-size:0.8rem; padding:6px 10px; border-radius:8px; border:1.5px solid var(--border);">${examOptions}</select>
+        </div>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:8px 0 0;">Ranked by average marks scored by their own students${exam?` in ${exam.name}`:' across all exams'}. "vs subject avg" compares a teacher only against others teaching the <i>same</i> subject(s) — a fairer yardstick than a flat school-wide average. Click any row for the full breakdown.</p>
+      </div>
+    `;
+    if(dashRows.length === 0){
+      return header + `<div class="empty-state" style="margin-bottom:24px;"><b>No marks recorded yet for this scope</b>Enter marks under Manage Exams, then come back here.</div>`;
+    }
+    const bodyRows = dashRows.map((t, i) => {
+      const deltaColor = t.delta > 0 ? 'var(--teal)' : (t.delta < 0 ? 'var(--magenta)' : 'var(--ink-soft)');
+      const deltaLabel = (t.delta > 0 ? '+' : '') + t.delta + '% vs subject avg';
+      const expanded = tpDashExpandedId === t.teacherId;
+      const detailRow = expanded
+        ? `<tr><td colspan="8" style="padding:0; background:var(--cream); border-bottom:2px solid var(--border);">${renderTeacherPerfDetail(t, examId, filters)}</td></tr>`
+        : '';
+      return `
+        <tr style="cursor:pointer;" onclick="toggleTeacherPerfDetail('${t.teacherId}')">
+          <td style="font-family:'Baloo 2',cursive; font-weight:700; color:var(--gold);">#${i+1}</td>
+          <td class="name-cell">${t.name}<div style="font-size:0.7rem; color:var(--ink-soft); font-weight:400;">${t.designation}</div></td>
+          <td style="font-size:0.78rem;">${t.subjects.join(', ')}</td>
+          <td>${t.totalStudents}</td>
+          <td><b>${t.avgPct}%</b><div style="font-size:0.72rem; color:${deltaColor};">${deltaLabel}</div></td>
+          <td>${t.highest}%</td>
+          <td>${t.lowest}%</td>
+          <td>${t.passRate}%</td>
+        </tr>${detailRow}`;
+    }).join('');
+    return header + `
+      <div class="table-wrap" style="overflow-x:auto; margin-bottom:28px;">
+        <table><thead><tr>
+          <th>Rank</th><th>Teacher</th><th>Subjects</th><th>Students</th><th>Average</th><th>Highest</th><th>Lowest</th><th>Pass Rate</th>
+        </tr></thead><tbody>${bodyRows}</tbody></table>
+      </div>
+    `;
+  }
+  function renderTeacherPerfDetail(t, examId, filters){
+    const dist = teacherPerformanceGradeDistribution(t.teacherId, examId, filters);
+    const trend = teacherPerformanceTrend(t.teacherId, filters);
+    const attendancePct = teacherPerformanceAttendanceContext(t.teacherId, filters);
+    const maxDistCount = Math.max(1, ...Object.values(dist.counts));
+    const maxTrend = Math.max(1, ...trend.map(x => x.avgPct), 1);
+
+    const distBars = gradingScale.map(g => {
+      const count = dist.counts[g.grade] || 0;
+      const pct = dist.total ? Math.round((count/dist.total)*100) : 0;
+      const width = Math.round((count/maxDistCount)*100);
+      return `
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+          <div style="width:34px; font-size:0.76rem; font-weight:700; color:var(--navy); flex-shrink:0;">${g.grade}</div>
+          <div style="flex:1; background:var(--border); border-radius:6px; height:16px; overflow:hidden;">
+            <div style="width:${width}%; background:var(--teal); height:100%; border-radius:6px;"></div>
+          </div>
+          <div style="width:76px; font-size:0.74rem; color:var(--ink-soft); flex-shrink:0; text-align:right;">${count} (${pct}%)</div>
+        </div>`;
+    }).join('');
+
+    const trendBars = trend.length ? trend.map(x => {
+      const width = Math.round((x.avgPct/maxTrend)*100);
+      return `
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+          <div style="width:120px; font-size:0.74rem; color:var(--ink-soft); flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${x.examName}">${x.examName}</div>
+          <div style="flex:1; background:var(--border); border-radius:6px; height:16px; overflow:hidden;">
+            <div style="width:${width}%; background:var(--gold); height:100%; border-radius:6px;"></div>
+          </div>
+          <div style="width:50px; font-size:0.74rem; color:var(--ink-soft); flex-shrink:0; text-align:right;">${x.avgPct}%</div>
+        </div>`;
+    }).join('') : `<p style="font-size:0.78rem; color:var(--ink-soft);">Not enough exam history yet to show a trend.</p>`;
+
+    return `
+      <div style="padding:18px 20px;">
+        <div class="pay-summary-grid" style="margin-bottom:20px;">
+          <div class="pay-summary-item"><span>Average</span><b>${t.avgPct}%</b></div>
+          <div class="pay-summary-item"><span>Highest</span><b>${t.highest}%</b></div>
+          <div class="pay-summary-item"><span>Lowest</span><b>${t.lowest}%</b></div>
+          <div class="pay-summary-item highlight"><span>Pass Rate</span><b>${t.passRate}%</b></div>
+          <div class="pay-summary-item"><span>Consistency (Std. Dev., lower is steadier)</span><b>${t.consistency}</b></div>
+          ${attendancePct !== null ? `<div class="pay-summary-item after"><span>Class Attendance</span><b>${attendancePct}%</b></div>` : ''}
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:28px;">
+          <div>
+            <h4 style="margin:0 0 10px; font-size:0.9rem;">Grade Distribution${dist.total ? ` — ${dist.total} results` : ''}</h4>
+            ${dist.total ? distBars : `<p style="font-size:0.78rem; color:var(--ink-soft);">No marks in this scope yet.</p>`}
+          </div>
+          <div>
+            <h4 style="margin:0 0 10px; font-size:0.9rem;">Trend Across Exams</h4>
+            ${trendBars}
+          </div>
+        </div>
+        <p style="font-size:0.72rem; color:var(--ink-soft); margin-top:16px;">
+          Classes: ${t.sections.join(', ')}${attendancePct !== null ? ` · Average attendance across these classes: ${attendancePct}% — low marks alongside low attendance usually points to an attendance problem, not a teaching one.` : ''}
+        </p>
+      </div>
+    `;
+  }
+
   function generateTeacherPerfReport(kind, format, filtersOverride){
     const examSel = document.getElementById('libTeacherPerfExamSelect');
     const examId = examSel ? examSel.value : '';
@@ -7029,6 +7275,7 @@
       <div style="background:${tpStyle.bg}; border-left:5px solid ${tpStyle.color}; border-radius:10px; padding:10px 16px; margin-bottom:14px;">
         <h3 style="margin:0; color:${tpStyle.color}; font-family:'Baloo 2',cursive;">Teacher Performance Reports</h3>
       </div>
+      ${renderTeacherPerfDashboard(filters)}
       <div class="profile-card" style="max-width:520px; margin-bottom:20px; border-top:4px solid ${tpStyle.color};">
         <h4>🧑‍🏫 Evaluate teachers by subject &amp; results</h4>
         <p style="font-size:0.8rem; color:var(--ink-soft); margin:8px 0 12px;">Matches each teacher's actual subject-section assignments (from Manage Subjects) against the marks their students scored — average %, pass rate, highest/lowest, and consistency. Pick one exam, or leave "All Exams" for a cumulative view. The scope above still applies. Visibility of this section is controlled per role in Roles &amp; Permissions → Administration → Staff — Reports.</p>
