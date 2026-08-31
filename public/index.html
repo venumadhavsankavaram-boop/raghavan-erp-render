@@ -13185,14 +13185,91 @@
     const outOfStock = inventoryItems.filter(it => it.quantity <= 0);
     const lowStock = inventoryItems.filter(it => it.quantity > 0 && it.quantity <= it.threshold);
     const totalStockValue = inventoryItems.reduce((sum,it) => sum+it.quantity*it.costPrice, 0);
+
+    const totalRevenue = inventorySales.reduce((sum,s) => sum+s.totalAmount, 0);
+    const totalCost = inventorySales.reduce((sum,s) => sum+s.totalCost, 0);
+    const totalProfit = totalRevenue - totalCost;
+    const totalCollected = inventorySales.reduce((sum,s) => sum+(s.paidAmount||0), 0);
+    const totalDue = Math.max(0, totalRevenue - totalCollected);
+    const collectionPct = totalRevenue > 0 ? Math.round((totalCollected/totalRevenue)*100) : 0;
+    const totalUnitsSold = inventorySales.reduce((sum,s) => sum+s.qty, 0);
+    const totalTransactions = inventorySales.length;
+    const avgSaleValue = totalTransactions > 0 ? totalRevenue/totalTransactions : 0;
+
+    const byItem = {};
+    inventorySales.forEach(s => {
+      if(!byItem[s.itemId]) byItem[s.itemId] = { name:s.itemName, qty:0, revenue:0, cost:0 };
+      byItem[s.itemId].qty += s.qty;
+      byItem[s.itemId].revenue += s.totalAmount;
+      byItem[s.itemId].cost += s.totalCost;
+    });
+    const topItems = Object.values(byItem).sort((a,b) => b.revenue-a.revenue).slice(0,5);
+
+    const byMode = {};
+    inventorySales.forEach(s => {
+      const m = s.mode || 'Not specified';
+      byMode[m] = (byMode[m]||0) + (s.paidAmount||0);
+    });
+    const modeEntries = Object.entries(byMode).sort((a,b) => b[1]-a[1]);
+
     body.innerHTML = `
-      <div style="margin-bottom:16px;"><button class="btn btn-ghost btn-sm" onclick="switchInventoryTab('items')">← Back to Items</button></div>
+      <div style="margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="switchInventoryTab('items')">← Back to Items</button>
+        ${getInventoryTabAccess(currentUser.role,'inventory_saleshistory') ? `<button class="btn btn-ghost btn-sm" onclick="switchInventoryTab('saleshistory')">View Full Sales History →</button>` : ''}
+      </div>
+
+      <div class="dash-section-title"><div><span class="eyebrow-sm">Sales Performance</span><h3>Revenue, Collections &amp; Profit</h3></div></div>
+      <div class="fee-summary-row" style="margin-bottom:20px;">
+        <div class="fee-sum-card"><b>${fmtMoney(totalRevenue)}</b><span>Sale Done (Revenue)</span></div>
+        <div class="fee-sum-card"><b style="color:#0f6a63;">${fmtMoney(totalCollected)}</b><span>Amount Collected</span></div>
+        <div class="fee-sum-card"><b style="color:var(--magenta);">${fmtMoney(totalDue)}</b><span>Amount To Be Collected</span></div>
+        <div class="fee-sum-card"><b style="color:${totalProfit>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(totalProfit)}</b><span>Total Profit</span></div>
+      </div>
+
+      <div class="overview-panel" style="margin-bottom:24px;">
+        <div class="overview-ring">
+          ${ringSVG(collectionPct, 'var(--teal)', 132, 13)}
+          <div class="overview-ring-label"><b>${collectionPct}%</b><span>Collected</span></div>
+        </div>
+        <div class="overview-legend">
+          <div class="ov-row"><span class="ov-swatch" style="background:var(--teal);"></span>Collected<b>${fmtMoney(totalCollected)}</b></div>
+          <div class="ov-row"><span class="ov-swatch" style="background:var(--magenta);"></span>To Be Collected<b>${fmtMoney(totalDue)}</b></div>
+          <div class="ov-row total"><span class="ov-swatch" style="background:var(--gold);"></span>Total Sale<b>${fmtMoney(totalRevenue)}</b></div>
+        </div>
+      </div>
+
+      <div class="fee-summary-row" style="margin-bottom:24px;">
+        <div class="fee-sum-card"><b>${totalTransactions}</b><span>Sales Done (Transactions)</span></div>
+        <div class="fee-sum-card"><b>${totalUnitsSold}</b><span>Units Sold</span></div>
+        <div class="fee-sum-card"><b>${fmtMoney(avgSaleValue)}</b><span>Average Sale Value</span></div>
+        <div class="fee-sum-card"><b>${fmtMoney(totalCost)}</b><span>Cost of Goods Sold</span></div>
+      </div>
+
+      <div class="dash-section-title"><div><span class="eyebrow-sm">Stock Levels</span><h3>Inventory On Hand</h3></div></div>
       <div class="fee-summary-row" style="margin-bottom:24px;">
         <div class="fee-sum-card"><b>${total}</b><span>Total Products</span></div>
         <div class="fee-sum-card"><b style="color:var(--magenta);">${outOfStock.length}</b><span>Out of Stock</span></div>
         <div class="fee-sum-card"><b style="color:#8a6a1f;">${lowStock.length}</b><span>Low Stock</span></div>
         <div class="fee-sum-card"><b>${fmtMoney(totalStockValue)}</b><span>Stock Value (at cost)</span></div>
       </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px,1fr)); gap:16px; margin-bottom:24px;">
+        <div class="profile-card">
+          <h4>Top Selling Items</h4>
+          <div class="table-wrap" style="margin-top:10px;">
+            <table><thead><tr><th>Item</th><th>Units Sold</th><th>Revenue</th><th>Profit</th></tr></thead>
+            <tbody>${topItems.length ? topItems.map(it => `<tr><td class="name-cell">${it.name}</td><td>${it.qty}</td><td>${fmtMoney(it.revenue)}</td><td style="color:${(it.revenue-it.cost)>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(it.revenue-it.cost)}</td></tr>`).join('') : '<tr><td colspan="4" style="color:var(--ink-soft);">No sales yet</td></tr>'}</tbody></table>
+          </div>
+        </div>
+        <div class="profile-card">
+          <h4>Collections by Payment Mode</h4>
+          <div class="table-wrap" style="margin-top:10px;">
+            <table><thead><tr><th>Mode</th><th>Amount Collected</th></tr></thead>
+            <tbody>${modeEntries.length ? modeEntries.map(([mode,amt]) => `<tr><td>${mode}</td><td>${fmtMoney(amt)}</td></tr>`).join('') : '<tr><td colspan="2" style="color:var(--ink-soft);">No collections yet</td></tr>'}</tbody></table>
+          </div>
+        </div>
+      </div>
+
       <div class="dash-section-title"><div><h3>Needs Attention</h3></div></div>
       <div class="table-wrap">
         <table><thead><tr><th>Item</th><th>Quantity</th><th>Threshold</th><th>Status</th></tr></thead>
