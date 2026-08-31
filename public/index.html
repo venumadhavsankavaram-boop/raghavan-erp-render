@@ -7945,7 +7945,7 @@
     const st = staffList.find(x => x.id === staffId);
     if(!st) return;
     switchView('usersroles');
-    setTimeout(() => openUserModal(st.firstName + ' ' + st.lastName), 60);
+    setTimeout(() => openUserModal(st.firstName + ' ' + st.lastName, undefined, undefined, 'staff'), 60);
   }
 
   function openStaffProfile(id){
@@ -8867,11 +8867,40 @@
     const deptF = document.getElementById('staffDeptFilter') ? document.getElementById('staffDeptFilter').value : '';
     const list = staffList.filter(staffIsActive).filter(st => !deptF || st.department === deptF)
       .sort((a,b) => (a.firstName+a.lastName).localeCompare(b.firstName+b.lastName));
+    // Computed once per staff member so both the table rows and the totals below use
+    // the exact same numbers — every active staff member counts here (Draft or
+    // Approved), unlike the Salary Disbursement Report further down which
+    // deliberately only counts Approved ones. This is the "what is this month's
+    // whole payroll going to cost" view; that one is the "who do I actually pay
+    // right now" view.
+    const computed = list.map(st => ({ st, ...staffPayrollRowData(st.id, staffPayrollMonth) }));
+    const totals = computed.reduce((acc, c) => ({
+      basic: acc.basic + (Number(c.preview.basic)||0),
+      lopDeduction: acc.lopDeduction + (Number(c.preview.lopDeduction)||0),
+      epfEmployee: acc.epfEmployee + (Number(c.preview.epfEmployee)||0),
+      esiEmployee: acc.esiEmployee + (Number(c.preview.esiEmployee)||0),
+      otherDeductions: acc.otherDeductions + (Number(c.preview.otherDeductions)||0),
+      bonus: acc.bonus + (Number(c.preview.bonus)||0),
+      grossSalary: acc.grossSalary + (Number(c.preview.grossSalary)||0),
+      netSalary: acc.netSalary + (Number(c.preview.netSalary)||0),
+    }), { basic:0, lopDeduction:0, epfEmployee:0, esiEmployee:0, otherDeductions:0, bonus:0, grossSalary:0, netSalary:0 });
+    const totalDeductions = totals.lopDeduction + totals.epfEmployee + totals.esiEmployee + totals.otherDeductions;
+    const monthLabel = new Date(staffPayrollMonth+'-01').toLocaleString('en-IN',{month:'long',year:'numeric'});
     body.innerHTML = `
       <div class="profile-card" style="margin-bottom:20px; max-width:520px;">
         <h4>Payroll Month</h4>
         <select id="staffPayrollMonthSelect" onchange="onStaffPayrollMonthChange()" style="width:100%; margin-top:8px;">${payrollMonthOptions()}</select>
         <p style="font-size:0.76rem; color:var(--ink-soft); margin:10px 0 0;">EPF and ESI (Employee) are pulled automatically from the fixed ₹/month amount set once per staff member (Add/Edit Staff → Payroll tab) — nothing to re-enter here every month. Edit either amount directly only for a one-off exception in a specific month; it's saved as typed and won't be overwritten later. Use ↺ to go back to the standing amount.</p>
+      </div>
+      <div class="pay-summary-box" style="margin-bottom:16px;">
+        <h4 style="margin:0 0 10px;">Payroll Summary — ${monthLabel}${deptF ? ' · '+deptF : ''}</h4>
+        <div class="pay-summary-grid">
+          <div class="pay-summary-item"><span>Staff Included</span><b>${computed.length}</b></div>
+          <div class="pay-summary-item"><span>Gross Payroll</span><b>${fmtMoney(totals.grossSalary)}</b></div>
+          <div class="pay-summary-item"><span>Total Deductions</span><b>${fmtMoney(totalDeductions)}</b></div>
+          <div class="pay-summary-item highlight"><span>Total Payroll This Month (Net)</span><b>${fmtMoney(totals.netSalary)}</b></div>
+        </div>
+        <p style="font-size:0.74rem; color:var(--ink-soft); margin:10px 0 0;">Every active staff member above, whatever their approval status — this is the full month's payroll cost, not just what's ready to pay out today.</p>
       </div>
       <div class="table-wrap">
         <table><thead><tr>
@@ -8879,8 +8908,7 @@
           <th>EPF (Emp)</th><th>ESI (Emp)</th><th>Other Ded.</th><th>Bonus</th><th>Gross</th><th>Net</th><th>Status</th><th>Actions</th>
         </tr></thead>
         <tbody>
-        ${list.map(st => {
-          const { rec, preview, locked } = staffPayrollRowData(st.id, staffPayrollMonth);
+        ${computed.map(({ st, rec, preview, locked }) => {
           return `<tr>
             <td class="name-cell" style="cursor:pointer;" onclick="openStaffProfile('${st.id}')">${st.firstName} ${st.lastName}</td>
             <td>${st.department||'—'}</td>
@@ -8904,7 +8932,21 @@
             </td>
           </tr>`;
         }).join('')}
-        </tbody></table>
+        </tbody>
+        ${computed.length ? `<tfoot><tr style="font-weight:700; background:var(--cream);">
+          <td colspan="2">TOTAL — ${monthLabel}</td>
+          <td>${fmtMoney(totals.basic)}</td>
+          <td></td>
+          <td>${fmtMoney(totals.lopDeduction)}</td>
+          <td>${fmtMoney(totals.epfEmployee)}</td>
+          <td>${fmtMoney(totals.esiEmployee)}</td>
+          <td>${fmtMoney(totals.otherDeductions)}</td>
+          <td>${fmtMoney(totals.bonus)}</td>
+          <td>${fmtMoney(totals.grossSalary)}</td>
+          <td>${fmtMoney(totals.netSalary)}</td>
+          <td colspan="2"></td>
+        </tr></tfoot>` : ``}
+        </table>
         ${list.length===0 ? `<div class="empty-state"><b>No active staff to show</b></div>` : ``}
       </div>
       <div style="display:flex; gap:10px; margin-top:16px;">
@@ -9010,7 +9052,7 @@
     storageSet(STAFF_PAYROLL_KEY, staffPayrollRecords).then(() => renderStaffBody());
   }
   function staffPayrollReportRows(){
-    return staffList.filter(staffIsActive).map(st => {
+    const rows = staffList.filter(staffIsActive).map(st => {
       const { preview } = staffPayrollRowData(st.id, staffPayrollMonth);
       return {
         'Staff': st.firstName+' '+st.lastName, 'Department': st.department||'', 'Designation': st.designation||'',
@@ -9020,6 +9062,17 @@
         'Status': (findPayrollRecord(st.id, staffPayrollMonth) || {}).status || 'Not generated',
       };
     });
+    if(rows.length){
+      const sum = key => rows.reduce((a,r) => a + (Number(r[key])||0), 0);
+      rows.push({
+        'Staff': 'TOTAL — '+rows.length+' staff', 'Department': '', 'Designation': '',
+        'Basic': sum('Basic'), 'Leaves Taken': '', 'Quota': '', 'LOP Days': '',
+        'LOP Deduction': sum('LOP Deduction'), 'EPF (Employee)': sum('EPF (Employee)'), 'ESI (Employee)': sum('ESI (Employee)'),
+        'Other Deductions': sum('Other Deductions'), 'Bonus': sum('Bonus'), 'Gross Salary': sum('Gross Salary'), 'Net Salary': sum('Net Salary'),
+        'Status': '',
+      });
+    }
+    return rows;
   }
   function downloadStaffPayrollExcel(){ exportRowsToExcel('staff_payroll_'+staffPayrollMonth+'.xlsx', 'Staff Payroll', staffPayrollReportRows()); }
   function downloadStaffPayrollPDF(){ exportRowsToPDF('Staff Payroll — '+staffPayrollMonth, '', staffPayrollReportRows()); }
@@ -9168,7 +9221,7 @@
         <td class="name-cell">${s.firstName} ${s.lastName}</td>
         <td>${s.className}${s.section?'-'+s.section:''}</td>
         <td>${s.admissionNo||'—'}</td>
-        <td><button class="btn-edit-text" onclick="openUserModal('${(s.firstName+' '+s.lastName).replace(/'/g,"\\'")}', 'Student', '${s.id}')">+ Create Login</button></td>
+        <td><button class="btn-edit-text" onclick="openUserModal('${(s.firstName+' '+s.lastName).replace(/'/g,"\\'")}', 'Student', '${s.id}', 'studentparent')">+ Create Login</button></td>
       </tr>
     `).join('');
     body.innerHTML = `
@@ -9178,7 +9231,7 @@
       </p>
       <div style="display:flex; gap:10px; align-items:center; margin-bottom:20px; flex-wrap:wrap;">
         <input class="input" id="splSearch" placeholder="Search by student name, admission no., or username..." style="max-width:340px;" value="${q}" oninput="onStudentParentLoginSearch()">
-        <button class="btn btn-primary" onclick="openUserModal()">+ Add Login</button>
+        <button class="btn btn-primary" onclick="openUserModal(undefined, undefined, undefined, 'studentparent')">+ Add Login</button>
       </div>
       ${missing.length ? `
         <div class="profile-card" style="margin-bottom:20px; background:rgba(203,154,46,0.08); border-left:4px solid var(--gold);">
@@ -12416,20 +12469,26 @@
     renderClassesTab(document.getElementById('classesSetupBody'));
   }
 
-  /* --- Users & Roles --- */
+  /* --- Users & Roles ---
+     Staff/Admin-side logins only (Admin, Principal, Accountant, Office
+     Assistant, Teacher, Staff, and any custom roles). Student and Parent
+     logins live entirely on their own dedicated page (Student/Parent
+     Logins) so the two lists don't get mixed together — this page can
+     grow to hundreds of student/parent rows otherwise and burying staff
+     accounts in the middle of that makes them hard to find. --- */
   function renderUsersTab(body){
     if(currentUser.role !== 'Admin'){
       body.innerHTML = `<div class="empty-state"><b>Admin only</b>Only the Admin role can manage user accounts.</div>`;
       return;
     }
-    const rows = users.map(u => {
-      const linked = u.linkedStudentId ? students.find(s => s.id === u.linkedStudentId) : null;
+    const staffUsers = users.filter(u => u.role !== 'Student' && u.role !== 'Parent');
+    const studentParentCount = users.length - staffUsers.length;
+    const rows = staffUsers.map(u => {
       return `
         <tr>
           <td class="name-cell">${u.name}</td>
           <td class="id-cell">${u.username}</td>
           <td><span class="role-pill">${u.role}</span></td>
-          <td>${linked ? (linked.firstName+' '+linked.lastName) : '—'}</td>
           <td>
             <button class="btn-edit-text" onclick="editUser('${u.id}')">Edit</button>
             ${u.id !== 'u_admin' ? `&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteUser('${u.id}')">Delete</button>` : ''}
@@ -12439,23 +12498,26 @@
     }).join('');
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">
-        Create a login for each staff member, student, or parent. Roles control which sections of the ERP they can see:
+        Create a login for each staff member. Roles control which sections of the ERP they can see:
         <b>Admin</b> &amp; <b>Principal</b> see everything; <b>Accountant</b> sees Dashboard + Manage Student;
-        <b>Office Assistant</b>, <b>Teacher</b>, and <b>Staff</b> see Manage Student only; <b>Student</b> and <b>Parent</b>
-        see a read-only profile for one linked student.
+        <b>Office Assistant</b>, <b>Teacher</b>, and <b>Staff</b> see Manage Student only.
+        Looking for a student or parent login? Head to <a onclick="switchView('studentparentlogins')" style="cursor:pointer; color:var(--magenta); font-weight:600;">Student/Parent Logins</a>${studentParentCount ? ` — ${studentParentCount} of them there right now` : ''}.
       </p>
-      <button class="btn btn-primary" style="margin-bottom:16px;" onclick="openUserModal()">+ Add User</button>
+      <button class="btn btn-primary" style="margin-bottom:16px;" onclick="openUserModal(undefined, undefined, undefined, 'staff')">+ Add User</button>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Linked Student</th><th></th></tr></thead>
-          <tbody>${rows}</tbody>
+          <thead><tr><th>Name</th><th>Username</th><th>Role</th><th></th></tr></thead>
+          <tbody>${rows.length ? rows : `<tr><td colspan="4"><div class="empty-state"><b>No staff logins yet</b></div></td></tr>`}</tbody>
         </table>
       </div>
     `;
   }
 
-  function populateUserRoleSelect(){
-    document.getElementById('uRole').innerHTML = allRoleNames().map(r => `<option>${r}</option>`).join('');
+  function populateUserRoleSelect(mode){
+    let names = allRoleNames();
+    if(mode === 'staff') names = names.filter(r => r !== 'Student' && r !== 'Parent');
+    else if(mode === 'studentparent') names = names.filter(r => r === 'Student' || r === 'Parent');
+    document.getElementById('uRole').innerHTML = names.map(r => `<option>${r}</option>`).join('');
   }
   // Auto-generate helpers: a fresh "Add User" form starts with a ready-made
   // username (derived from the name as it's typed) and password so the admin
@@ -12496,16 +12558,17 @@
   function autoGeneratePassword(){
     document.getElementById('uPassword').value = generateLoginPassword();
   }
-  function openUserModal(presetName, presetRole, presetStudentId){
-    document.getElementById('userModalTitle').textContent = 'Add User';
+  function openUserModal(presetName, presetRole, presetStudentId, mode){
+    document.getElementById('userModalTitle').textContent = mode === 'studentparent' ? 'Add Student/Parent Login' : (mode === 'staff' ? 'Add Staff User' : 'Add User');
     document.getElementById('userForm').reset();
     document.getElementById('editUserId').value = '';
     document.getElementById('uRecoveryCode').value = generateRecoveryCode();
     userModalUsernameTouched = false;
     document.getElementById('uPassword').value = generateLoginPassword();
     if(presetName) document.getElementById('uName').value = presetName;
-    populateUserRoleSelect();
+    populateUserRoleSelect(mode);
     if(presetRole) document.getElementById('uRole').value = presetRole;
+    else if(mode === 'studentparent') document.getElementById('uRole').value = 'Student';
     populateUserStudentPicker();
     if(presetStudentId) document.getElementById('uLinkedStudent').value = presetStudentId;
     toggleUserStudentField();
