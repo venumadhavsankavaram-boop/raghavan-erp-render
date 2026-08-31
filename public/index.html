@@ -1947,14 +1947,15 @@
   let casteFilterClass = '';
   let casteFilterGender = '';
   const STORAGE_KEY = "admissions-students";
+  // `window.storage` was only ever present in the early prototyping environment
+  // this app was first built in — it has never existed in the real deployed
+  // browser, so this is always false here, which is expected and fine: every
+  // module now saves through storageGet/storageSet's real /api/* routes (see
+  // API_BACKED_KEYS / OBJECT_BACKED_KEYS above), backed by the actual Postgres
+  // database, not this browser's local storage. Kept only because a few legacy
+  // fallback branches still check it if the server is briefly unreachable.
   const storageAvailable = (typeof window.storage !== 'undefined' && window.storage !== null);
   let students = [];
-
-  const banner = document.getElementById('storageBanner');
-  if(!storageAvailable){
-    banner.style.display = 'block';
-    banner.textContent = '⚠ Running outside the Claude.ai storage environment — using this browser\'s local storage instead. Records will stay on this device/browser only, not sync across devices, until this module is connected to a real ERP database.';
-  }
 
   function showToast(msg){
     const t = document.getElementById('toast');
@@ -2689,6 +2690,13 @@
     [FEE_STRUCTURE_KEY]: '/api/fee-structure',
     'school-info': '/api/school-info',
   };
+  // Third category: every other module's data used to fall straight through to
+  // this browser's own localStorage with no server call at all — it worked fine
+  // until someone opened the ERP on a second browser or device and found the
+  // records missing. Each of these keys now rides the same generic key/value
+  // endpoint (one shared Postgres table, keyed by the string on the left) so
+  // every module is actually saved to the real database, not just this tab.
+  [SETTINGS_KEY, ACADEMIC_YEARS_KEY, CURRENT_AY_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
   let _apiLastSynced = {};
   async function syncArrayToApi(key, newArray){
     const apiPath = API_BACKED_KEYS[key];
@@ -3338,6 +3346,7 @@
   // as separate assignments avoids a "used before declaration" crash.
   API_BACKED_KEYS[STUDENT_DISCOUNTS_KEY] = '/api/discounts';
   API_BACKED_KEYS[STUDENT_EXTRA_FEES_KEY] = '/api/extra-fees';
+  [FEE_TYPES_KEY, DISCOUNT_TYPES_KEY, EXTRA_FEE_DEFS_KEY, LATE_FEE_SETTINGS_KEY, RECEIPT_SETTINGS_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
 
   let feeTypes = [];
   let discountTypes = [];
@@ -5030,6 +5039,7 @@
   const EXAM_TYPES_KEY = "exam-types";
   const EXAM_GROUPS_KEY = "exam-groups";
   const CONSOLIDATION_SCALE_KEY = "consolidation-scale";
+  [GRADING_SCALE_KEY, EXAM_TYPES_KEY, EXAM_GROUPS_KEY, CONSOLIDATION_SCALE_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
 
   let examDefs = [], examResults = [], gradingScale = [], examTypes = [], examGroups = [], consolidationScale = [];
 
@@ -5259,6 +5269,7 @@
 
   /* --- Exam Holidays --- */
   const EXAM_HOLIDAYS_KEY = "exam-holidays";
+  OBJECT_BACKED_KEYS[EXAM_HOLIDAYS_KEY] = '/api/kv/' + EXAM_HOLIDAYS_KEY;
   const HOLIDAY_TYPES = {
     'Public Holiday': { bg:'rgba(24,143,134,0.15)', fg:'#0f6a63' },
     'National Holiday': { bg:'rgba(209,16,115,0.13)', fg:'var(--magenta)' },
@@ -6119,6 +6130,7 @@
   /* --- Tab: Grading Scale --- */
   /* --- Report Templates (multiple, editable) --- */
   const REPORT_TEMPLATES_KEY = "report-templates";
+  OBJECT_BACKED_KEYS[REPORT_TEMPLATES_KEY] = '/api/kv/' + REPORT_TEMPLATES_KEY;
   let reportTemplates = [];
   let templatesView = 'list';
   let editingTemplateId = '';
@@ -8776,6 +8788,7 @@
   const STAFF_DEPTS_KEY = "staff-departments";
   const STAFF_DESIGNATIONS_KEY = "staff-designations";
   const STAFF_JOB_TYPES_KEY = "staff-job-types";
+  [STAFF_DEPTS_KEY, STAFF_DESIGNATIONS_KEY, STAFF_JOB_TYPES_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
   const STAFF_PAYROLL_KEY = "staff-payroll";
   API_BACKED_KEYS[STAFF_PAYROLL_KEY] = '/api/staff-payroll';
 
@@ -10364,6 +10377,7 @@
   /* ===== INVENTORY MODULE ===== */
   const INVENTORY_ITEMS_KEY = "inventory-items";
   const INVENTORY_SALES_KEY = "inventory-sales";
+  [INVENTORY_ITEMS_KEY, INVENTORY_SALES_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
   let inventoryItems = [], inventorySales = [];
   async function loadInventory(){
     inventoryItems = await storageGet(INVENTORY_ITEMS_KEY, []);
@@ -10382,6 +10396,7 @@
   const TIMETABLE_KEY = "timetable-entries";
   const TIMETABLE_PERIODS_KEY = "timetable-periods";
   const TIMETABLE_DAYS_KEY = "timetable-days";
+  [TIMETABLE_KEY, TIMETABLE_PERIODS_KEY, TIMETABLE_DAYS_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
   let timetableEntries = [], timetablePeriods = [], timetableActiveDays = [];
   const ALL_WEEK_DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
   function activeTimetableDays(){ return timetableActiveDays.length ? timetableActiveDays : ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']; }
@@ -10405,6 +10420,7 @@
   let ttClass = '', ttSection = '', ttTeacherId = '';
   /* ===== TRANSPORT MODULE ===== */
   const TRANSPORT_ROUTES_KEY = "transport-routes";
+  OBJECT_BACKED_KEYS[TRANSPORT_ROUTES_KEY] = '/api/kv/' + TRANSPORT_ROUTES_KEY;
   let transportRoutes = [];
   async function loadTransport(){
     transportRoutes = await storageGet(TRANSPORT_ROUTES_KEY, []);
@@ -10417,6 +10433,7 @@
   const LIBRARY_BOOKS_KEY = "library-books";
   const LIBRARY_ISSUES_KEY = "library-issues";
   const LIBRARY_SETTINGS_KEY = "library-settings";
+  [LIBRARY_BOOKS_KEY, LIBRARY_ISSUES_KEY, LIBRARY_SETTINGS_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
   let libraryBooks = [], libraryIssues = [], librarySettings = {};
   async function loadLibrary(){
     libraryBooks = await storageGet(LIBRARY_BOOKS_KEY, []);
@@ -10434,6 +10451,7 @@
   let libCatalogSearch = '';
   /* ===== HOSTEL MODULE ===== */
   const HOSTEL_ROOMS_KEY = "hostel-rooms";
+  OBJECT_BACKED_KEYS[HOSTEL_ROOMS_KEY] = '/api/kv/' + HOSTEL_ROOMS_KEY;
   let hostelRooms = [];
   async function loadHostel(){
     hostelRooms = await storageGet(HOSTEL_ROOMS_KEY, []);
@@ -10446,6 +10464,7 @@
   const ACCT_INCOME_KEY = "acct-income";
   const ACCT_EXPENSE_CATS_KEY = "acct-expense-categories";
   const ACCT_INCOME_CATS_KEY = "acct-income-categories";
+  [ACCT_EXPENSES_KEY, ACCT_INCOME_KEY, ACCT_EXPENSE_CATS_KEY, ACCT_INCOME_CATS_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
   let acctExpenses = [], acctIncome = [], acctExpenseCategories = [], acctIncomeCategories = [];
   async function loadAccounting(){
     acctExpenses = await storageGet(ACCT_EXPENSES_KEY, []);
@@ -10474,10 +10493,12 @@
   const ADMISSION_INQUIRIES_KEY = "admission-inquiries";
   const WEBSITE_GALLERY_KEY = "website-gallery";
   const WEBSITE_SYNC_TEST_KEY = "erp-website-sync-test";
+  OBJECT_BACKED_KEYS[WEBSITE_SYNC_TEST_KEY] = '/api/kv/' + WEBSITE_SYNC_TEST_KEY;
   let commsMessages = [];
   let admissionInquiries = [];
   let websiteGallery = [];
   const NOTICE_TYPES_KEY = "notice-types";
+  OBJECT_BACKED_KEYS[NOTICE_TYPES_KEY] = '/api/kv/' + NOTICE_TYPES_KEY;
   let noticeTypes = [];
   async function loadComms(){
     commsMessages = await storageGet(COMMS_MESSAGES_KEY, []);
@@ -13282,6 +13303,7 @@
 
   /* --- Admin Tools (strictly Admin-only) --- */
   const DOWNLOADS_KEY = "admin-downloads";
+  OBJECT_BACKED_KEYS[DOWNLOADS_KEY] = '/api/kv/' + DOWNLOADS_KEY;
   let adminDownloads = [];
   async function loadAdminDownloads(){
     adminDownloads = await storageGet(DOWNLOADS_KEY, []);
@@ -13700,6 +13722,7 @@
   const CLASS_LEVELS_KEY = "class-levels";
   const SECTIONS_KEY = "section-levels";
   const CLASS_SECTIONS_KEY = "class-section-overrides";
+  [CLASS_LEVELS_KEY, SECTIONS_KEY, CLASS_SECTIONS_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
   async function loadClassSectionOverrides(){
     classSectionOverrides = await storageGet(CLASS_SECTIONS_KEY, {});
   }
@@ -14081,6 +14104,7 @@
   /* --- Promotions --- */
   /* ===== PROMOTION & TRANSFER (individual student-level, incl. double promotion) ===== */
   const PENDING_APPROVALS_KEY = "pending-approvals";
+  OBJECT_BACKED_KEYS[PENDING_APPROVALS_KEY] = '/api/kv/' + PENDING_APPROVALS_KEY;
   let pendingApprovals = [];
   async function loadPendingApprovals(){
     pendingApprovals = await storageGet(PENDING_APPROVALS_KEY, []);
