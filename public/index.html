@@ -6207,6 +6207,7 @@
   /* --- Tab: Admit Cards --- */
   let admitCardsView = 'grid';
   let admitCardsExamId = '', admitCardsClass = '', admitCardsSection = '';
+  let admitCardsPerPage = 4; // 3 or 4 — how many hall-ticket strips are stacked on each printed A4 sheet
 
   function renderAdmitCardsGrid(body){
     if(examDefs.length === 0){
@@ -6256,7 +6257,16 @@
       <div class="breadcrumb"><a onclick="backToAdmitCardsGrid()">All Classes</a> &nbsp;/&nbsp; ${admitCardsClass} — Section ${admitCardsSection} &nbsp;/&nbsp; ${exam.name}</div>
       ${subjects.length===0 ? `<div class="empty-state" style="margin-bottom:16px;"><b>No subjects configured yet</b>Hall tickets need at least one dated subject — configure subjects for this class &amp; section under the "Exams" tab first.</div>` : ``}
       ${subjects.length>0 && missingDates.length>0 ? `<div class="empty-state" style="margin-bottom:16px; border-color:var(--gold);"><b>⚠ ${missingDates.length} subject${missingDates.length===1?'':'s'} still need${missingDates.length===1?'s':''} an exam date</b>${missingDates.map(s=>s.name).join(', ')} — set a date for each under "Exams" → Configure Subjects before printing hall tickets.</div>` : ``}
-      <button class="btn btn-primary" style="margin-bottom:16px;" onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', null)" ${(list.length===0 || subjects.length===0 || missingDates.length>0)?'disabled':''}>Print All Admit Cards</button>
+      <div style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:16px;">
+        <button class="btn btn-primary" onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', null)" ${(list.length===0 || subjects.length===0 || missingDates.length>0)?'disabled':''}>Print All Admit Cards</button>
+        <div class="f-field" style="max-width:230px; margin-bottom:0;">
+          <label>Cards per A4 Sheet</label>
+          <select id="admitCardsPerPageSelect" onchange="admitCardsPerPage=parseInt(this.value);">
+            <option value="4" ${admitCardsPerPage===4?'selected':''}>4 per sheet — compact</option>
+            <option value="3" ${admitCardsPerPage===3?'selected':''}>3 per sheet — more room to sign</option>
+          </select>
+        </div>
+      </div>
       <div class="table-wrap">
         <table><thead><tr><th>Student</th><th>Admission No</th><th></th></tr></thead>
         <tbody>
@@ -6283,52 +6293,101 @@
     if(list.length === 0) return;
     const logoSrc = document.querySelector('.sb-brand img').src;
     const examPeriod = exam.startDate ? exam.startDate + (exam.endDate && exam.endDate!==exam.startDate ? ' – '+exam.endDate : '') : 'To be announced';
+    const perPage = (admitCardsPerPage===3) ? 3 : 4;
 
-    const cardHtml = (s) => `
-      <div class="ac-card">
-        <div class="ac-head"><img src="${logoSrc}"><div><div class="ac-school">${schoolInfo.name}</div><div class="ac-addr">${schoolInfo.address}</div></div></div>
-        <div class="ac-title">ADMIT CARD — ${exam.name.toUpperCase()}</div>
-        <table class="ac-info">
-          <tr><td>Student Name</td><td><b>${s.firstName} ${s.lastName}</b></td></tr>
-          <tr><td>Admission No</td><td>${s.admissionNo}</td></tr>
-          <tr><td>Class &amp; Section</td><td>${s.className} — ${s.section}</td></tr>
-          <tr><td>Exam Period</td><td>${examPeriod}</td></tr>
-        </table>
-        <div class="ac-subjects-title">Subject-wise Schedule</div>
-        <table class="ac-subj-table">
-          <thead><tr><th>Subject</th><th>Date</th></tr></thead>
-          <tbody>
-          ${subjects.length ? subjects.map(sub => `<tr><td>${sub.name}</td><td>${sub.date||'TBA'}</td></tr>`).join('') : '<tr><td colspan="2">No subjects configured</td></tr>'}
-          </tbody>
-        </table>
-        <div class="ac-sign">Principal / Correspondent</div>
+    // Each admit card is a full-width horizontal strip; 3 or 4 are stacked down a
+    // portrait A4 sheet (chosen via the "Cards per A4 Sheet" selector). Every
+    // subject row carries its own blank cell so a different invigilator can sign
+    // in person on that exam's day, instead of one signature covering the whole
+    // exam period.
+    const stripHtml = (s, isLastInPage) => `
+      <div class="ac-strip">
+        <div class="ac-col-brand">
+          <img class="ac-logo" src="${logoSrc}">
+          <div class="ac-school">${schoolInfo.name}</div>
+          <div class="ac-addr">${schoolInfo.address||''}</div>
+          <div class="ac-examname">Admit Card<br>${exam.name}<br>${examPeriod}</div>
+        </div>
+        <div class="ac-col-student">
+          <div class="ac-photo-slot">${s.photo ? `<img src="${s.photo}">` : initials(s)}</div>
+          <div class="ac-title">STUDENT DETAILS</div>
+          <table class="ac-info">
+            <tr><td>Name</td><td>${s.firstName} ${s.lastName}</td></tr>
+            <tr><td>Admission No.</td><td>${s.admissionNo}</td></tr>
+            <tr><td>Class &amp; Section</td><td>${s.className} — ${s.section}</td></tr>
+            <tr><td>Roll No.</td><td>${s.rollNo||'—'}</td></tr>
+          </table>
+        </div>
+        <div class="ac-col-subjects">
+          <div class="ac-subj-title">SUBJECT-WISE SCHEDULE — sign daily before the exam begins</div>
+          <table class="ac-subj-table">
+            <thead><tr><th>Subject</th><th class="date-col">Date</th><th class="sign-col">Invigilator's Signature</th></tr></thead>
+            <tbody>
+            ${subjects.map(sub => `<tr><td>${sub.name}</td><td class="date-cell">${sub.date||'TBA'}</td><td class="sign-cell">&nbsp;</td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="ac-col-sign">
+          <div class="ac-sign-line">Student's<br>Signature</div>
+          <div style="height:3mm;"></div>
+          <div class="ac-sign-line">Principal /<br>Correspondent</div>
+        </div>
+        ${!isLastInPage ? `<span class="scissor">✂</span>` : ''}
       </div>
     `;
+
+    const pages = [];
+    for(let i=0;i<list.length;i+=perPage) pages.push(list.slice(i, i+perPage));
+    const pagesHtml = pages.map((pageStudents, pIdx) => `
+      <div class="ac-page${pIdx < pages.length-1 ? ' ac-pagebreak' : ''}">
+        <div class="ac-stack">
+          ${pageStudents.map((s,i) => stripHtml(s, i===pageStudents.length-1)).join('')}
+        </div>
+      </div>
+    `).join('');
 
     const w = window.open('', '_blank');
     w.document.write(`
       <html><head><title>Admit Cards</title>
       <style>
+        *{ box-sizing:border-box; }
         @page{ size:A4; margin:8mm; }
-        body{ font-family:Arial,Helvetica,sans-serif; color:#111; }
-        .ac-wrap{ display:flex; flex-wrap:wrap; gap:6mm; }
-        .ac-card{ width:88mm; border:1px solid #333; border-radius:4px; padding:5mm; box-sizing:border-box; page-break-inside:avoid; }
-        .ac-head{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }
-        .ac-head img{ width:32px; height:32px; border-radius:50%; }
-        .ac-school{ font-weight:700; font-size:12px; }
-        .ac-addr{ font-size:8px; color:#555; }
-        .ac-title{ text-align:center; font-weight:700; font-size:10px; border-top:1px solid #333; border-bottom:1px solid #333; padding:4px 0; margin-bottom:8px; }
-        .ac-info{ width:100%; font-size:10px; border-collapse:collapse; margin-bottom:8px; }
-        .ac-info td{ padding:2px 0; }
-        .ac-info td:first-child{ color:#555; width:42%; }
-        .ac-subjects-title{ font-size:9px; font-weight:700; margin-bottom:4px; }
-        .ac-subj-table{ width:100%; font-size:9px; border-collapse:collapse; margin-bottom:14px; }
-        .ac-subj-table th{ text-align:left; background:#f0f0f0; padding:3px 5px; }
-        .ac-subj-table td{ padding:3px 5px; border-bottom:1px solid #eee; }
-        .ac-sign{ font-size:9px; text-align:right; margin-top:10px; }
+        body{ font-family:Arial,Helvetica,sans-serif; color:#111; margin:0; }
+        .ac-page{ width:100%; }
+        .ac-pagebreak{ page-break-after:always; }
+        .ac-stack{ display:flex; flex-direction:column; height:281mm; gap:4mm; }
+        .ac-strip{ flex:1; border:1.4px solid #333; border-radius:3px; display:flex; overflow:hidden; position:relative; page-break-inside:avoid; }
+        .ac-strip:not(:last-child)::after{ content:''; position:absolute; left:-8mm; right:-8mm; bottom:-2.7mm; border-bottom:1px dashed #aaa; }
+        .ac-strip .scissor{ position:absolute; left:-6mm; bottom:-4.6mm; font-size:9px; color:#999; background:#fff; padding:0 2px; }
+
+        .ac-col-brand{ width:30mm; background:#faf6ec; border-right:1px solid #333; padding:2mm; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; flex-shrink:0; }
+        .ac-logo{ width:11mm; height:11mm; border-radius:50%; object-fit:cover; margin-bottom:1.5mm; }
+        .ac-school{ font-weight:700; font-size:7.6px; line-height:1.15; color:#1b2a52; }
+        .ac-addr{ font-size:5.6px; color:#666; line-height:1.25; margin-top:1mm; }
+        .ac-examname{ margin-top:1.5mm; font-size:6px; font-weight:700; color:#d11073; line-height:1.3; }
+
+        .ac-col-student{ width:47mm; border-right:1px solid #333; padding:2mm 2.5mm; flex-shrink:0; display:flex; flex-direction:column; justify-content:center; position:relative; }
+        .ac-title{ font-size:7.2px; font-weight:700; letter-spacing:.03em; color:#666; margin-bottom:1.4mm; }
+        .ac-info{ width:76%; font-size:7.4px; border-collapse:collapse; }
+        .ac-info td{ padding:0.9px 0; }
+        .ac-info td:first-child{ color:#666; width:44%; }
+        .ac-info td:last-child{ font-weight:700; }
+        .ac-photo-slot{ position:absolute; top:2mm; right:2mm; width:11mm; height:13mm; border:1px solid #999; font-size:8px; font-weight:700; color:#999; display:flex; align-items:center; justify-content:center; text-align:center; background:#f7f7f7; overflow:hidden; }
+        .ac-photo-slot img{ width:100%; height:100%; object-fit:cover; }
+
+        .ac-col-subjects{ flex:1; padding:2mm 2.5mm; display:flex; flex-direction:column; justify-content:center; min-width:0; }
+        .ac-subj-title{ font-size:6.6px; font-weight:700; color:#666; margin-bottom:1mm; }
+        .ac-subj-table{ width:100%; border-collapse:collapse; font-size:6.8px; table-layout:fixed; }
+        .ac-subj-table th{ text-align:left; background:#eef0f4; padding:1.2px 3px; font-size:6.4px; border:1px solid #ddd; }
+        .ac-subj-table td{ padding:2mm 3px; border:1px solid #ddd; line-height:1; }
+        .ac-subj-table th.sign-col, .ac-subj-table td.sign-cell{ width:26mm; }
+        .ac-subj-table th.date-col, .ac-subj-table td.date-cell{ width:18mm; }
+
+        .ac-col-sign{ width:20mm; border-left:1px solid #333; padding:2mm 1.6mm; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; }
+        .ac-sign-line{ width:100%; border-top:1px solid #555; text-align:center; font-size:5.6px; color:#666; padding-top:1mm; }
       </style></head>
       <body onload="window.print()">
-        <div class="ac-wrap">${list.map(cardHtml).join('')}</div>
+        ${pagesHtml}
       </body></html>
     `);
     w.document.close();
