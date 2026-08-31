@@ -161,6 +161,22 @@ const HYBRID_RESOURCES = {
     table: 'comms_messages',
     core: [{ app: 'id', col: 'id' }],
   },
+  // Exam room master list (name/capacity) and per-student hall ticket numbers —
+  // both are small, free-form records, so only "id" is a real column.
+  rooms: {
+    table: 'rooms',
+    core: [{ app: 'id', col: 'id' }],
+  },
+  'exam-hall-tickets': {
+    table: 'exam_hall_tickets',
+    core: [{ app: 'id', col: 'id' }],
+  },
+  // Per-exam Room Allotment settings (which classes are in scope, print
+  // orientation/page size) — one small record per exam, keyed by examId.
+  'exam-room-config': {
+    table: 'exam_room_config',
+    core: [{ app: 'id', col: 'id' }],
+  },
 };
 
 // ---------- Generic helpers for "simple" resources ----------
