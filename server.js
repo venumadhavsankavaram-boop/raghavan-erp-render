@@ -46,6 +46,59 @@ app.use((req, res, next) => {
 
 const sql = neon(process.env.DATABASE_URL);
 
+// A generic key/value table backs every module that doesn't need its own
+// dedicated table with real columns — Inventory, Timetable, Library, Transport,
+// Hostel, Accounting, Fee/Exam sub-settings, Report Template signatures, Class
+// & Section setup, Pending Approvals, and a few others. Each of those modules
+// used to call the frontend's storageGet/storageSet with no matching /api/*
+// route at all, which silently fell back to that one browser's own
+// localStorage — working fine until someone opened the ERP on a second
+// browser or device and the records simply weren't there. Rather than hand-
+// building ~35 more one-off tables and column mappings, they all now round-
+// trip their whole current value as JSON through this one shared table,
+// keyed by the same string each module already uses as its storage key.
+// created lazily on first request so a fresh deploy never needs a manual
+// migration step.
+let _kvTableReady = null;
+function ensureKvTable() {
+  if (!_kvTableReady) {
+    _kvTableReady = sql`
+      CREATE TABLE IF NOT EXISTS kv_store (
+        key TEXT PRIMARY KEY,
+        value JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `.catch(err => { _kvTableReady = null; throw err; });
+  }
+  return _kvTableReady;
+}
+async function handleKv(req, res, key) {
+  if (!key) return res.status(400).json({ error: 'Missing key.' });
+  await ensureKvTable();
+  if (req.method === 'GET') {
+    const rows = await sql`SELECT value FROM kv_store WHERE key = ${key}`;
+    return res.status(200).json(rows.length ? rows[0].value : {});
+  }
+  if (req.method === 'PUT') {
+    const value = req.body;
+    const json = JSON.stringify(value === undefined ? {} : value);
+    await sql`
+      INSERT INTO kv_store (key, value, updated_at) VALUES (${key}, ${json}::jsonb, now())
+      ON CONFLICT (key) DO UPDATE SET value = ${json}::jsonb, updated_at = now()
+    `;
+    return res.status(200).json({ ok: true });
+  }
+  return res.status(405).json({ error: 'Method not allowed.' });
+}
+app.all('/api/kv/:key', async (req, res) => {
+  try {
+    return await handleKv(req, res, req.params.key);
+  } catch (err) {
+    console.error(`kv API error (${req.params.key}):`, err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
 // ---------- Resource configuration (unchanged from the tested version) ----------
 const SIMPLE_RESOURCES = {
   users: {
