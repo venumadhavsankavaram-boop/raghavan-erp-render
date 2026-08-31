@@ -898,6 +898,7 @@
 
       <div class="mf-tabs">
         <button type="button" class="mf-tab active" id="restab-admitcards" onclick="switchResultTab('admitcards')">Admit Cards</button>
+        <button type="button" class="mf-tab" id="restab-roomallotment" onclick="switchResultTab('roomallotment')">Room Allotment</button>
         <button type="button" class="mf-tab" id="restab-progress" onclick="switchResultTab('progress')">Progress Reports</button>
         <button type="button" class="mf-tab" id="restab-consolidated" onclick="switchResultTab('consolidated')">Consolidated Report</button>
         <button type="button" class="mf-tab" id="restab-examtemplates" onclick="switchResultTab('examtemplates')">Exam Templates</button>
@@ -1586,6 +1587,14 @@
               <span id="staffPhotoPlaceholder">+ Photo</span>
             </div>
             <input type="file" accept="image/*" id="stfPhoto" onchange="previewStaffPhoto(event)">
+            <div style="display:flex; flex-direction:column; align-items:center; gap:6px; margin-left:20px;">
+              <div style="width:90px; height:44px; border:1.5px dashed var(--border); border-radius:6px; display:flex; align-items:center; justify-content:center; background:#fafafa; overflow:hidden;" id="staffSigPreviewWrap">
+                <img id="staffSigPreview" style="display:none; max-width:100%; max-height:100%;">
+                <span id="staffSigPlaceholder" style="font-size:0.68rem; color:var(--ink-soft);">+ Signature</span>
+              </div>
+              <input type="file" accept="image/*" id="stfSignature" onchange="previewStaffSignature(event)" style="max-width:110px; font-size:0.68rem;">
+              <span style="font-size:0.6rem; color:var(--ink-soft); text-align:center; max-width:110px;">Auto-applied to progress reports where this staff member is Class Teacher</span>
+            </div>
           </div>
           <div class="form-grid">
             <div class="f-field"><label>First Name *</label><input type="text" id="stfFirstName" required placeholder="e.g. Lakshmi"></div>
@@ -4849,6 +4858,26 @@
     ]);
   }
 
+  /* ===== ROOM ALLOTMENT MODULE (exam room master list + hall ticket numbers) ===== */
+  const ROOMS_KEY = "exam-rooms";
+  const EXAM_HALL_TICKETS_KEY = "exam-hall-tickets";
+  const EXAM_ROOM_CONFIG_KEY = "exam-room-config";
+  API_BACKED_KEYS[ROOMS_KEY] = '/api/rooms';
+  API_BACKED_KEYS[EXAM_HALL_TICKETS_KEY] = '/api/exam-hall-tickets';
+  API_BACKED_KEYS[EXAM_ROOM_CONFIG_KEY] = '/api/exam-room-config';
+  let rooms = [];
+  let examHallTickets = [];
+  let examRoomConfigs = []; // one record per exam: { id: examId, selectedClasses, orientation, pageSize }
+  async function loadRooms(){
+    rooms = await storageGet(ROOMS_KEY, []);
+  }
+  async function loadExamHallTickets(){
+    examHallTickets = await storageGet(EXAM_HALL_TICKETS_KEY, []);
+  }
+  async function loadExamRoomConfigs(){
+    examRoomConfigs = await storageGet(EXAM_ROOM_CONFIG_KEY, []);
+  }
+
   function classSecKey(className, section){
     return className + '||' + section;
   }
@@ -4856,6 +4885,22 @@
     if(!exam) return [];
     exam.classSubjects = exam.classSubjects || {};
     return exam.classSubjects[classSecKey(className, section)] || exam.subjects || [];
+  }
+
+  // A report template can carry its own explicit signature image (uploaded once,
+  // used for every student it prints) — but when it doesn't, fall back to the
+  // real Class Teacher's own uploaded signature (via classTeacherClass/Section on
+  // their Staff Profile) and the school's Principal/Correspondent signature, so
+  // reports don't need to be signed by hand at all.
+  function classTeacherSignatureFor(className, section){
+    const teacher = staffList.find(st => st.classTeacherClass===className && st.classTeacherSection===section && isActive(st));
+    return teacher ? (teacher.signature||'') : '';
+  }
+  function resolveReportSignature1(t, s){
+    return (t && t.sigImage1) ? t.sigImage1 : classTeacherSignatureFor(s.className, s.section);
+  }
+  function resolveReportSignature2(t){
+    return (t && t.sigImage2) ? t.sigImage2 : (schoolInfo.principalSignature || '');
   }
 
   let examTab = 'exams';
@@ -4967,7 +5012,7 @@
   }
   function switchResultTab(tab){
     resultTab = tab;
-    ['admitcards','progress','consolidated','examtemplates','consolscale','grading','templates'].forEach(t => {
+    ['admitcards','roomallotment','progress','consolidated','examtemplates','consolscale','grading','templates'].forEach(t => {
       document.getElementById('restab-'+t).classList.toggle('active', t===tab);
     });
     if(tab === 'admitcards') admitCardsView = 'grid';
@@ -4980,6 +5025,7 @@
       if(admitCardsView === 'grid') return renderAdmitCardsGrid(body);
       if(admitCardsView === 'roster') return renderAdmitCardsRoster(body);
     }
+    if(resultTab === 'roomallotment') return renderRoomAllotmentTab(body);
     if(resultTab === 'progress') return renderReportCardsTab(body);
     if(resultTab === 'consolidated') return renderConsolidatedTab(body);
     if(resultTab === 'examtemplates') return renderExamTemplatesTab(body);
@@ -5721,8 +5767,8 @@
       </div>
       ${t.footerNote ? `<p class="rc-foot">${t.footerNote}</p>` : ''}
       <div class="rc-sign">
-        <div>${t.sigImage1 ? `<img src="${t.sigImage1}">` : ''}${t.signatureLabel1 || 'Class Teacher'}</div>
-        <div>${t.sigImage2 ? `<img src="${t.sigImage2}" style="margin-left:auto;">` : ''}${t.signatureLabel2 || 'Principal / Correspondent'}</div>
+        <div>${resolveReportSignature1(t,s) ? `<img src="${resolveReportSignature1(t,s)}">` : ''}${t.signatureLabel1 || 'Class Teacher'}</div>
+        <div>${resolveReportSignature2(t) ? `<img src="${resolveReportSignature2(t)}" style="margin-left:auto;">` : ''}${t.signatureLabel2 || 'Principal / Correspondent'}</div>
       </div>
       </div>
     `;
@@ -6204,6 +6250,534 @@
     showToast('Grading scale saved.');
   }
 
+  /* ===== ROOM ALLOTMENT MODULE (Hall Ticket Numbers, Class Selection, Rooms & Matrix, Final Printout, Notice Board) ===== */
+  const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
+  let roomAllotSubTab = 'hallTickets';
+  let roomAllotExamId = '';
+  let roomAllotHTClass = '';
+  let roomAllotHTPrefix = 'HT';
+  let roomAllotHTStart = 1;
+  let roomAllotNoticeSort = 'ht';
+  let roomAllotNoticeClassFilter = '';
+  let roomAllotNoticeCols = 3;
+
+  function roomAllotConfigFor(examId){
+    if(!examId) return { selectedClasses: [], orientation: 'landscape', pageSize: 'A4' };
+    let cfg = examRoomConfigs.find(c => c.id === examId);
+    if(!cfg){
+      cfg = { id: examId, selectedClasses: [], orientation: 'landscape', pageSize: 'A4' };
+      examRoomConfigs.push(cfg);
+    }
+    cfg.selectedClasses = cfg.selectedClasses || [];
+    cfg.orientation = cfg.orientation || 'landscape';
+    cfg.pageSize = cfg.pageSize || 'A4';
+    return cfg;
+  }
+  function roomAllotConfig(){ return roomAllotConfigFor(roomAllotExamId); }
+  function roomAllotCurrentExam(){ return examDefs.find(e => e.id === roomAllotExamId) || null; }
+  async function saveRoomAllotConfig(){ await storageSet(EXAM_ROOM_CONFIG_KEY, examRoomConfigs); }
+
+  function renderRoomAllotmentTab(body){
+    if(examDefs.length === 0){
+      body.innerHTML = `<div class="empty-state"><b>No exams yet</b>Create an exam under the "Exams" tab first.</div>`;
+      return;
+    }
+    if(!roomAllotExamId || !examDefs.find(e => e.id === roomAllotExamId)) roomAllotExamId = examDefs[0].id;
+    const examOptions = examDefs.map(ex => `<option value="${ex.id}" ${roomAllotExamId===ex.id?'selected':''}>${ex.name}</option>`).join('');
+    body.innerHTML = `
+      <div class="f-field" style="max-width:320px; margin-bottom:16px;">
+        <label>Exam</label>
+        <select id="raExamSelect" onchange="roomAllotExamId=this.value; roomAllotHTClass=''; renderResultBody();">${examOptions}</select>
+      </div>
+      <div class="mf-tabs" style="margin-bottom:16px;">
+        <button type="button" class="mf-tab ${roomAllotSubTab==='hallTickets'?'active':''}" onclick="switchRoomAllotSubTab('hallTickets')">Hall Ticket Numbers</button>
+        <button type="button" class="mf-tab ${roomAllotSubTab==='classes'?'active':''}" onclick="switchRoomAllotSubTab('classes')">Select Classes</button>
+        <button type="button" class="mf-tab ${roomAllotSubTab==='rooms'?'active':''}" onclick="switchRoomAllotSubTab('rooms')">Rooms &amp; Matrix</button>
+        <button type="button" class="mf-tab ${roomAllotSubTab==='printout'?'active':''}" onclick="switchRoomAllotSubTab('printout')">Final Printout</button>
+        <button type="button" class="mf-tab ${roomAllotSubTab==='notice'?'active':''}" onclick="switchRoomAllotSubTab('notice')">Notice Board</button>
+      </div>
+      <div id="raSubBody"></div>
+    `;
+    renderRoomAllotSubBody();
+  }
+  function switchRoomAllotSubTab(tab){
+    roomAllotSubTab = tab;
+    renderRoomAllotmentTab(document.getElementById('resultBody'));
+  }
+  function renderRoomAllotSubBody(){
+    const el = document.getElementById('raSubBody');
+    if(!el) return;
+    if(roomAllotSubTab==='hallTickets') return renderHallTicketsSubTab(el);
+    if(roomAllotSubTab==='classes') return renderClassSelectionSubTab(el);
+    if(roomAllotSubTab==='rooms') return renderRoomsMatrixSubTab(el);
+    if(roomAllotSubTab==='printout') return renderFinalPrintoutSubTab(el);
+    if(roomAllotSubTab==='notice') return renderNoticeBoardSubTab(el);
+  }
+
+  /* --- Hall Ticket Numbers --- */
+  function roomAllotStudentsForClass(className){
+    return students.filter(s => s.className === className && isActive(s)).slice().sort((a,b) => {
+      const ga = a.gender==='Female' ? 0 : 1, gb = b.gender==='Female' ? 0 : 1;
+      if(ga !== gb) return ga - gb;
+      return (a.firstName||'').localeCompare(b.firstName||'');
+    });
+  }
+  function getHallTicket(examId, studentId){
+    return examHallTickets.find(h => h.examId===examId && h.studentId===studentId);
+  }
+  function renderHallTicketsSubTab(el){
+    const cfg = roomAllotConfig();
+    const classList = (cfg.selectedClasses && cfg.selectedClasses.length) ? cfg.selectedClasses : CLASS_LEVELS;
+    el.innerHTML = `
+      <div class="profile-card" style="margin-bottom:16px;">
+        <h4>Generate Hall Ticket Numbers</h4>
+        <div class="form-grid" style="margin-top:10px;">
+          <div class="f-field"><label>Class</label>
+            <select id="raHTClass" onchange="roomAllotHTClass=this.value; renderRoomAllotSubBody();">
+              <option value="">Select Class...</option>
+              ${classList.map(c=>`<option value="${c}" ${c===roomAllotHTClass?'selected':''}>${c}</option>`).join('')}
+            </select>
+          </div>
+          <div class="f-field"><label>Prefix</label><input type="text" id="raHTPrefix" value="${roomAllotHTPrefix}"></div>
+          <div class="f-field"><label>Start Number</label><input type="number" id="raHTStart" min="1" value="${roomAllotHTStart}"></div>
+          <div class="f-field" style="align-self:flex-end;"><button class="btn btn-primary btn-sm" ${roomAllotHTClass?'':'disabled'} onclick="regenHallTicketsForClass()">Auto-Generate</button></div>
+        </div>
+        <span style="font-size:0.72rem; color:var(--ink-soft);">Students are numbered girls-first, then boys, in the order shown below. Auto-Generate fills every student in this class — you can still edit individual numbers afterward.</span>
+      </div>
+      ${!roomAllotHTClass ? '' : renderHallTicketsTable()}
+    `;
+  }
+  function renderHallTicketsTable(){
+    const studs = roomAllotStudentsForClass(roomAllotHTClass);
+    if(!studs.length) return `<div class="empty-state"><b>No active students in this class</b></div>`;
+    const rows = studs.map(s => {
+      const ht = getHallTicket(roomAllotExamId, s.id);
+      return `<tr>
+        <td class="name-cell">${s.firstName||''} ${s.lastName||''}</td>
+        <td class="id-cell">${s.admissionNo||''}</td>
+        <td>${s.section||''}</td>
+        <td>${s.gender||''}</td>
+        <td><input type="text" style="width:150px;" value="${ht?ht.htNumber:''}" onchange="saveHallTicketNumber('${s.id}', this.value)"></td>
+      </tr>`;
+    }).join('');
+    return `<div class="table-wrap"><table><thead><tr><th>Student</th><th>Admission No</th><th>Section</th><th>Gender</th><th>Hall Ticket No.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  async function regenHallTicketsForClass(){
+    const prefix = document.getElementById('raHTPrefix').value.trim();
+    const start = Number(document.getElementById('raHTStart').value) || 1;
+    roomAllotHTPrefix = prefix; roomAllotHTStart = start;
+    const studs = roomAllotStudentsForClass(roomAllotHTClass);
+    let n = start;
+    studs.forEach(s => {
+      const num = prefix + String(n).padStart(4,'0');
+      n++;
+      const existing = getHallTicket(roomAllotExamId, s.id);
+      if(existing) existing.htNumber = num;
+      else examHallTickets.push({ id: 'ht_'+roomAllotExamId+'_'+s.id, examId: roomAllotExamId, studentId: s.id, htNumber: num });
+    });
+    await storageSet(EXAM_HALL_TICKETS_KEY, examHallTickets);
+    showToast('Hall ticket numbers generated for ' + studs.length + ' students.');
+    renderRoomAllotSubBody();
+  }
+  async function saveHallTicketNumber(studentId, value){
+    const val = value.trim();
+    const existing = getHallTicket(roomAllotExamId, studentId);
+    if(existing) existing.htNumber = val;
+    else examHallTickets.push({ id: 'ht_'+roomAllotExamId+'_'+studentId, examId: roomAllotExamId, studentId, htNumber: val });
+    await storageSet(EXAM_HALL_TICKETS_KEY, examHallTickets);
+  }
+
+  /* --- Select Classes --- */
+  function renderClassSelectionSubTab(el){
+    const cfg = roomAllotConfig();
+    cfg.selectedClasses = cfg.selectedClasses || [];
+    const rows = CLASS_LEVELS.map(cls => {
+      const checked = cfg.selectedClasses.includes(cls) ? 'checked' : '';
+      const count = students.filter(s => s.className===cls && isActive(s)).length;
+      return `<label style="display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--border); border-radius:8px;">
+        <input type="checkbox" ${checked} onchange="toggleRoomAllotClass('${cls}', this.checked)">
+        <span style="font-weight:600;">${cls}</span>
+        <span style="margin-left:auto; font-size:0.75rem; color:var(--ink-soft);">${count} students</span>
+      </label>`;
+    }).join('');
+    el.innerHTML = `
+      <div class="profile-card">
+        <h4>Select Classes for This Exam</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:4px 0 12px;">Chosen classes scope Hall Ticket generation, the Room Allotment Matrix, the Final Printout, and which class tiles appear on the Admit Cards page for this exam. Leave nothing selected to include every class.</p>
+        <div style="display:flex; gap:10px; margin-bottom:12px;">
+          <button class="btn btn-ghost btn-sm" onclick="setAllRoomAllotClasses(true)">Select All</button>
+          <button class="btn btn-ghost btn-sm" onclick="setAllRoomAllotClasses(false)">Clear All</button>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:10px;">
+          ${rows}
+        </div>
+      </div>
+    `;
+  }
+  async function toggleRoomAllotClass(cls, checked){
+    const cfg = roomAllotConfig();
+    cfg.selectedClasses = cfg.selectedClasses || [];
+    if(checked){ if(!cfg.selectedClasses.includes(cls)) cfg.selectedClasses.push(cls); }
+    else cfg.selectedClasses = cfg.selectedClasses.filter(c => c!==cls);
+    await saveRoomAllotConfig();
+  }
+  async function setAllRoomAllotClasses(all){
+    const cfg = roomAllotConfig();
+    cfg.selectedClasses = all ? CLASS_LEVELS.slice() : [];
+    await saveRoomAllotConfig();
+    renderRoomAllotSubBody();
+  }
+
+  /* --- Rooms & Matrix --- */
+  function renderRoomsMatrixSubTab(el){
+    const cfg = roomAllotConfig();
+    const classList = (cfg.selectedClasses && cfg.selectedClasses.length) ? cfg.selectedClasses : CLASS_LEVELS;
+    const roomRows = rooms.map(r => `<tr>
+      <td>${r.name}</td><td>${r.capacity}</td>
+      <td><button class="btn-edit-text" onclick="editExamRoom('${r.id}')">Edit</button> &nbsp; <button class="btn-edit-text" onclick="deleteExamRoom('${r.id}')">Delete</button></td>
+    </tr>`).join('');
+    const totalCap = rooms.reduce((s,r) => s+(Number(r.capacity)||0), 0);
+    let matrixRows = '', grandBoys=0, grandGirls=0, grandTotal=0;
+    classList.forEach(cls => {
+      sectionsForClass(cls).forEach(sec => {
+        const studs = students.filter(s => s.className===cls && s.section===sec && isActive(s));
+        const boys = studs.filter(s => s.gender==='Male').length;
+        const girls = studs.filter(s => s.gender==='Female').length;
+        const total = boys+girls;
+        grandBoys += boys; grandGirls += girls; grandTotal += total;
+        if(total===0) return;
+        matrixRows += `<tr><td>${cls}</td><td>${sec}</td><td style="color:#1d4ed8;">${boys}</td><td style="color:#be185d;">${girls}</td><td style="font-weight:700;">${total}</td></tr>`;
+      });
+    });
+    el.innerHTML = `
+      <div class="profile-card" style="margin-bottom:16px;">
+        <h4>Rooms</h4>
+        <div class="table-wrap" style="margin:10px 0;"><table><thead><tr><th>Room Name</th><th>Capacity</th><th></th></tr></thead><tbody>${roomRows || '<tr><td colspan="3" style="color:var(--ink-soft);">No rooms added yet.</td></tr>'}</tbody></table></div>
+        <div style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:10px;">Total capacity: ${totalCap} seats</div>
+        <button class="btn btn-primary btn-sm" onclick="openExamRoomModal()">+ Add Room</button>
+      </div>
+      <div class="profile-card">
+        <h4>Class × Section Matrix — Selected Classes</h4>
+        <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Class</th><th>Section</th><th>Boys</th><th>Girls</th><th>Total</th></tr></thead><tbody>
+          ${matrixRows || '<tr><td colspan="5" style="color:var(--ink-soft);">No students found for the selected classes.</td></tr>'}
+          <tr style="font-weight:700;"><td colspan="2">Grand Total</td><td style="color:#1d4ed8;">${grandBoys}</td><td style="color:#be185d;">${grandGirls}</td><td>${grandTotal}</td></tr>
+        </tbody></table></div>
+      </div>
+      <div id="roomModalWrap"></div>
+    `;
+  }
+  function openExamRoomModal(id){
+    const r = id ? rooms.find(x => x.id===id) : null;
+    const el = document.getElementById('roomModalWrap');
+    el.innerHTML = `<div style="position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:999;">
+      <div class="profile-card" style="width:320px;">
+        <h4>${id?'Edit Room':'Add Room'}</h4>
+        <input type="hidden" id="raRoomId" value="${id||''}">
+        <div class="f-field" style="margin-top:10px;"><label>Room Name</label><input type="text" id="raRoomName" value="${r?r.name:''}"></div>
+        <div class="f-field"><label>Capacity</label><input type="number" min="1" id="raRoomCapacity" value="${r?r.capacity:''}"></div>
+        <div style="display:flex; gap:8px; margin-top:14px;">
+          <button class="btn btn-primary btn-sm" onclick="saveExamRoom()">Save</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('roomModalWrap').innerHTML=''">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function editExamRoom(id){ openExamRoomModal(id); }
+  async function saveExamRoom(){
+    const id = document.getElementById('raRoomId').value;
+    const name = document.getElementById('raRoomName').value.trim();
+    const capacity = Number(document.getElementById('raRoomCapacity').value) || 0;
+    if(!name || capacity<=0){ showToast('Enter a room name and capacity.'); return; }
+    if(id){
+      const r = rooms.find(x => x.id===id);
+      if(r){ r.name = name; r.capacity = capacity; }
+    } else {
+      rooms.push({ id: 'examroom_'+Date.now(), name, capacity });
+    }
+    await storageSet(ROOMS_KEY, rooms);
+    document.getElementById('roomModalWrap').innerHTML = '';
+    renderRoomAllotSubBody();
+  }
+  async function deleteExamRoom(id){
+    if(!confirm('Delete this room?')) return;
+    rooms = rooms.filter(r => r.id!==id);
+    await storageSet(ROOMS_KEY, rooms);
+    renderRoomAllotSubBody();
+  }
+
+  /* --- Auto-allot algorithm (largest-remainder proportional split, remaining-capacity-weighted) --- */
+  function proportionalSplit(count, weights){
+    if(count<=0) return weights.map(()=>0);
+    const totalWeight = weights.reduce((a,b)=>a+b,0);
+    if(totalWeight<=0) return weights.map(()=>0);
+    const raw = weights.map(w => count * w / totalWeight);
+    const floors = raw.map(Math.floor);
+    let remainder = count - floors.reduce((a,b)=>a+b,0);
+    const fracIdx = raw.map((v,i) => ({ i, frac: v-Math.floor(v) })).sort((a,b) => b.frac-a.frac);
+    const result = floors.slice();
+    for(let k=0; k<remainder && fracIdx.length>0; k++){ result[fracIdx[k % fracIdx.length].i]++; }
+    return result;
+  }
+  function distributeTotalsWithCorridor(classTotals, roomCaps){
+    const roomsOut = roomCaps.map(r => ({ id:r.id, name:r.name, capacity:r.capacity, remaining:r.capacity, classes:{} }));
+    const corridor = { name:'CORRIDOR', classes:{}, total:0 };
+    classTotals.forEach(cls => {
+      let need = cls.total;
+      if(need<=0) return;
+      const totalRemaining = roomsOut.reduce((s,r)=>s+r.remaining,0);
+      const toRooms = Math.min(need, totalRemaining);
+      if(toRooms>0){
+        const weights = roomsOut.map(r => r.remaining);
+        const split = proportionalSplit(toRooms, weights);
+        split.forEach((n,i) => {
+          if(n<=0) return;
+          roomsOut[i].classes[cls.className] = (roomsOut[i].classes[cls.className]||0)+n;
+          roomsOut[i].remaining -= n;
+        });
+      }
+      const overflow = need - toRooms;
+      if(overflow>0){
+        corridor.classes[cls.className] = (corridor.classes[cls.className]||0) + overflow;
+        corridor.total += overflow;
+      }
+    });
+    return { rooms: roomsOut, corridor };
+  }
+  function roomAllotClassHtNumbersSorted(examId, className){
+    const studs = students.filter(s => s.className===className && isActive(s));
+    const nums = studs.map(s => { const ht = getHallTicket(examId, s.id); return ht ? ht.htNumber : ''; }).filter(Boolean);
+    nums.sort((a,b) => a.localeCompare(b, undefined, {numeric:true}));
+    return nums;
+  }
+  function buildFinalPrintoutDataFor(examId){
+    const cfg = roomAllotConfigFor(examId);
+    const classList = (cfg.selectedClasses && cfg.selectedClasses.length) ? cfg.selectedClasses : CLASS_LEVELS;
+    const classTotals = classList.map(cls => ({ className: cls, total: students.filter(s => s.className===cls && isActive(s)).length })).filter(c => c.total>0);
+    const roomCaps = rooms.map(r => ({ id:r.id, name:r.name, capacity: Number(r.capacity)||0 }));
+    const { rooms: allocRooms, corridor } = distributeTotalsWithCorridor(classTotals, roomCaps);
+    const cursor = {};
+    const htLists = {};
+    classList.forEach(c => { cursor[c] = 0; htLists[c] = roomAllotClassHtNumbersSorted(examId, c); });
+    function takeRange(className, count){
+      const list = htLists[className] || [];
+      const start = cursor[className] || 0;
+      const slice = list.slice(start, start+count);
+      cursor[className] = start + count;
+      return slice;
+    }
+    const roomBlocks = allocRooms.filter(r => Object.keys(r.classes).length>0).map(r => {
+      const classEntries = Object.keys(r.classes).sort().map(cls => {
+        const count = r.classes[cls];
+        const htRange = takeRange(cls, count);
+        return { className: cls, count, from: htRange[0]||'', to: htRange[htRange.length-1]||'', htNumbers: htRange };
+      });
+      const total = classEntries.reduce((s,c) => s+c.count, 0);
+      return { name: r.name, capacity: r.capacity, classEntries, total };
+    });
+    let corridorBlock = null;
+    if(corridor.total>0){
+      const classEntries = Object.keys(corridor.classes).sort().map(cls => {
+        const count = corridor.classes[cls];
+        const htRange = takeRange(cls, count);
+        return { className: cls, count, from: htRange[0]||'', to: htRange[htRange.length-1]||'', htNumbers: htRange };
+      });
+      corridorBlock = { name: 'CORRIDOR', classEntries, total: corridor.total };
+    }
+    return { roomBlocks, corridorBlock };
+  }
+  function buildFinalPrintoutData(){ return buildFinalPrintoutDataFor(roomAllotExamId); }
+  function buildNoticeBoardDataFor(examId){
+    const { roomBlocks, corridorBlock } = buildFinalPrintoutDataFor(examId);
+    const studentByHt = {};
+    students.forEach(s => { const ht = getHallTicket(examId, s.id); if(ht && ht.htNumber) studentByHt[ht.htNumber] = s; });
+    const allBlocks = corridorBlock ? [...roomBlocks, corridorBlock] : roomBlocks;
+    const list = [];
+    allBlocks.forEach(block => {
+      block.classEntries.forEach(ce => {
+        (ce.htNumbers||[]).forEach(htNum => {
+          const s = studentByHt[htNum];
+          if(s) list.push({ studentId: s.id, ht: htNum, name: (s.firstName||'')+' '+(s.lastName||''), className: s.className, section: s.section, room: block.name });
+        });
+      });
+    });
+    return list;
+  }
+  function buildNoticeBoardData(){ return buildNoticeBoardDataFor(roomAllotExamId); }
+  function computeExamHallTicketRoomMap(examId){
+    const map = {};
+    buildNoticeBoardDataFor(examId).forEach(d => { map[d.studentId] = { ht: d.ht, room: d.room }; });
+    return map;
+  }
+
+  /* --- Final Printout --- */
+  function renderFinalPrintoutTable(roomBlocks, corridorBlock){
+    const allBlocks = corridorBlock ? [...roomBlocks, corridorBlock] : roomBlocks;
+    if(!allBlocks.length) return `<tr><td colspan="10" style="color:var(--ink-soft);">No rooms or classes configured yet — add rooms under "Rooms &amp; Matrix" and select classes under "Select Classes".</td></tr>`;
+    let rowsHtml = '';
+    allBlocks.forEach(block => {
+      const n = block.classEntries.length || 1;
+      if(block.classEntries.length===0){
+        rowsHtml += `<tr><td>${block.name}</td><td></td><td colspan="4" style="color:var(--ink-soft);">No candidates</td><td>0</td><td></td><td></td><td></td></tr>`;
+        return;
+      }
+      block.classEntries.forEach((ce, idx) => {
+        rowsHtml += '<tr>';
+        if(idx===0) rowsHtml += `<td rowspan="${n}">${block.name}</td><td rowspan="${n}"></td>`;
+        rowsHtml += `<td>${ce.className}</td><td>${ce.from}</td><td>${ce.to}</td><td>${ce.count}</td>`;
+        if(idx===0) rowsHtml += `<td rowspan="${n}">${block.total}</td><td rowspan="${n}"></td><td rowspan="${n}"></td><td rowspan="${n}"></td>`;
+        rowsHtml += '</tr>';
+      });
+    });
+    return rowsHtml;
+  }
+  function renderFinalPrintoutSubTab(el){
+    const cfg = roomAllotConfig();
+    const exam = roomAllotCurrentExam();
+    const { roomBlocks, corridorBlock } = buildFinalPrintoutData();
+    const totalAllotted = roomBlocks.reduce((s,b) => s+b.total, 0) + (corridorBlock ? corridorBlock.total : 0);
+    el.innerHTML = `
+      <div class="profile-card" style="margin-bottom:16px; max-width:420px;">
+        <h4>Page Setup</h4>
+        <div class="form-grid" style="margin-top:10px;">
+          <div class="f-field"><label>Orientation</label>
+            <select id="raOrientation" onchange="updateRoomAllotPageSetup()">
+              <option value="landscape" ${cfg.orientation==='landscape'?'selected':''}>Landscape</option>
+              <option value="portrait" ${cfg.orientation==='portrait'?'selected':''}>Portrait</option>
+            </select>
+          </div>
+          <div class="f-field"><label>Page Size</label>
+            <select id="raPageSize" onchange="updateRoomAllotPageSetup()">
+              <option value="A4" ${cfg.pageSize==='A4'?'selected':''}>A4</option>
+              <option value="Legal" ${cfg.pageSize==='Legal'?'selected':''}>Legal</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="profile-card">
+        <h4>Final Room Allotment — ${exam?exam.name:''}</h4>
+        <p style="font-size:0.8rem; color:var(--ink-soft);">${totalAllotted} candidate${totalAllotted===1?'':'s'} allotted across ${roomBlocks.length} room${roomBlocks.length===1?'':'s'}${corridorBlock?' + CORRIDOR (overflow, room capacity exceeded)':''}.</p>
+        <div class="table-wrap" style="margin:12px 0;">
+          <table><thead><tr><th>Room No.</th><th>Invigilator</th><th>Class</th><th>From</th><th>To</th><th>Total</th><th>Total in Room</th><th>Absentees</th><th>Present</th><th>Signature</th></tr></thead>
+          <tbody>${renderFinalPrintoutTable(roomBlocks, corridorBlock)}</tbody></table>
+        </div>
+        <button class="btn btn-primary" onclick="printFinalRoomAllotment()">Print Final Room Allotment</button>
+      </div>
+    `;
+  }
+  async function updateRoomAllotPageSetup(){
+    const cfg = roomAllotConfig();
+    cfg.orientation = document.getElementById('raOrientation').value;
+    cfg.pageSize = document.getElementById('raPageSize').value;
+    await saveRoomAllotConfig();
+  }
+  function printFinalRoomAllotment(){
+    const cfg = roomAllotConfig();
+    const exam = roomAllotCurrentExam();
+    const { roomBlocks, corridorBlock } = buildFinalPrintoutData();
+    const [wmm, hmm] = PAGE_SIZES_MM[cfg.pageSize] || PAGE_SIZES_MM.A4;
+    const pageSizeCss = cfg.orientation === 'landscape' ? `${hmm}mm ${wmm}mm` : `${wmm}mm ${hmm}mm`;
+    const rowsHtml = renderFinalPrintoutTable(roomBlocks, corridorBlock);
+    const w = window.open('', '_blank');
+    w.document.write(`
+      <html><head><title>Final Room Allotment - ${exam?exam.name:''}</title>
+      <style>
+        @page{ size:${pageSizeCss}; margin:10mm; }
+        body{ font-family:Arial,Helvetica,sans-serif; color:#111; font-size:11px; }
+        .frp-head{ text-align:center; margin-bottom:6px; }
+        .frp-school{ font-weight:700; font-size:18px; }
+        .frp-addr{ font-size:11px; color:#333; }
+        .frp-exam{ font-weight:700; font-size:13px; margin-top:4px; }
+        .frp-fields{ display:flex; gap:30px; margin:14px 0; font-size:12px; }
+        .frp-fields span{ border-bottom:1px solid #333; padding-bottom:2px; min-width:140px; display:inline-block; }
+        table{ width:100%; border-collapse:collapse; font-size:10.5px; }
+        th,td{ border:1px solid #333; padding:5px 6px; text-align:center; }
+        th{ background:#211A4E; color:#fff; }
+      </style></head>
+      <body onload="window.print()">
+        <div class="frp-head">
+          <div class="frp-school">${schoolInfo.name}</div>
+          <div class="frp-addr">${schoolInfo.address}</div>
+          <div class="frp-exam">${exam?exam.name.toUpperCase():''} — FINAL ROOM ALLOTMENT</div>
+        </div>
+        <div class="frp-fields">
+          <div>DATE: <span>&nbsp;</span></div>
+          <div>SUBJECT: <span>&nbsp;</span></div>
+          <div>GENERAL DUTY: <span>&nbsp;</span></div>
+        </div>
+        <table>
+          <thead><tr><th>Room No.</th><th>Name of the Invigilator</th><th>Class</th><th>From</th><th>To</th><th>Total</th><th>Total Candidates in the Room</th><th>Absentees</th><th>Present</th><th>Signature</th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </body></html>
+    `);
+    w.document.close();
+  }
+
+  /* --- Notice Board --- */
+  function renderNoticeBoardSubTab(el){
+    const data = buildNoticeBoardData();
+    const classesPresent = Array.from(new Set(data.map(d => d.className))).sort();
+    let filtered = roomAllotNoticeClassFilter ? data.filter(d => d.className===roomAllotNoticeClassFilter) : data.slice();
+    filtered.sort((a,b) => roomAllotNoticeSort==='name' ? a.name.localeCompare(b.name) : a.ht.localeCompare(b.ht, undefined, {numeric:true}));
+    el.innerHTML = `
+      <div class="profile-card">
+        <h4>Notice Board Display</h4>
+        <p style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:10px;">A printable list so students can check the notice board to find their Hall Ticket Number and allotted Room.</p>
+        <div class="form-grid" style="margin-bottom:12px;">
+          <div class="f-field"><label>Sort By</label>
+            <select id="raNoticeSort" onchange="roomAllotNoticeSort=this.value; renderRoomAllotSubBody();">
+              <option value="ht" ${roomAllotNoticeSort==='ht'?'selected':''}>Hall Ticket No.</option>
+              <option value="name" ${roomAllotNoticeSort==='name'?'selected':''}>Name</option>
+            </select>
+          </div>
+          <div class="f-field"><label>Class Filter</label>
+            <select id="raNoticeClass" onchange="roomAllotNoticeClassFilter=this.value; renderRoomAllotSubBody();">
+              <option value="">All Classes</option>
+              ${classesPresent.map(c => `<option value="${c}" ${roomAllotNoticeClassFilter===c?'selected':''}>${c}</option>`).join('')}
+            </select>
+          </div>
+          <div class="f-field"><label>Print Columns</label>
+            <select id="raNoticeCols" onchange="roomAllotNoticeCols=Number(this.value); renderRoomAllotSubBody();">
+              <option value="2" ${roomAllotNoticeCols===2?'selected':''}>2</option>
+              <option value="3" ${roomAllotNoticeCols===3?'selected':''}>3</option>
+              <option value="4" ${roomAllotNoticeCols===4?'selected':''}>4</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap" style="margin-bottom:12px; max-height:420px; overflow:auto;">
+          <table><thead><tr><th>Hall Ticket No.</th><th>Name</th><th>Class</th><th>Room</th></tr></thead>
+          <tbody>${filtered.map(d => `<tr><td>${d.ht}</td><td>${d.name}</td><td>${d.className} - ${d.section}</td><td>${d.room}</td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--ink-soft);">No hall ticket numbers generated yet.</td></tr>'}</tbody></table>
+        </div>
+        <button class="btn btn-primary" onclick="printNoticeBoard()">Print Notice Board Sheet</button>
+      </div>
+    `;
+  }
+  function printNoticeBoard(){
+    const data = buildNoticeBoardData();
+    let filtered = roomAllotNoticeClassFilter ? data.filter(d => d.className===roomAllotNoticeClassFilter) : data.slice();
+    filtered.sort((a,b) => roomAllotNoticeSort==='name' ? a.name.localeCompare(b.name) : a.ht.localeCompare(b.ht, undefined, {numeric:true}));
+    const exam = roomAllotCurrentExam();
+    const itemsHtml = filtered.map(d => `<div class="nb-item"><b>${d.ht}</b> — ${d.name} (${d.className}-${d.section}) — Room: ${d.room}</div>`).join('');
+    const w = window.open('', '_blank');
+    w.document.write(`
+      <html><head><title>Notice Board - ${exam?exam.name:''}</title>
+      <style>
+        @page{ size:A4; margin:12mm; }
+        body{ font-family:Arial,Helvetica,sans-serif; color:#111; font-size:11px; }
+        h2{ text-align:center; margin-bottom:4px; }
+        .nb-sub{ text-align:center; color:#555; margin-bottom:14px; font-size:12px; }
+        .nb-cols{ column-count:${roomAllotNoticeCols}; column-gap:18px; }
+        .nb-item{ break-inside:avoid; padding:4px 0; border-bottom:1px dotted #ccc; font-size:11px; }
+      </style></head>
+      <body onload="window.print()">
+        <h2>${schoolInfo.name}</h2>
+        <div class="nb-sub">${exam?exam.name.toUpperCase():''} — HALL TICKET NUMBER &amp; ROOM ALLOTMENT</div>
+        <div class="nb-cols">${itemsHtml}</div>
+      </body></html>
+    `);
+    w.document.close();
+  }
+
   /* --- Tab: Admit Cards --- */
   let admitCardsView = 'grid';
   let admitCardsExamId = '', admitCardsClass = '', admitCardsSection = '';
@@ -6216,7 +6790,9 @@
     }
     if(!admitCardsExamId || !examDefs.find(e => e.id === admitCardsExamId)) admitCardsExamId = examDefs[0].id;
     const examOptions = examDefs.map(ex => `<option value="${ex.id}" ${admitCardsExamId===ex.id?'selected':''}>${ex.name}</option>`).join('');
-    const rows = CLASS_LEVELS.map(cls => {
+    const raCfg = roomAllotConfigFor(admitCardsExamId);
+    const visibleClasses = (raCfg.selectedClasses && raCfg.selectedClasses.length) ? raCfg.selectedClasses : CLASS_LEVELS;
+    const rows = visibleClasses.map(cls => {
       const tiles = SECTIONS.map(sec => {
         const count = students.filter(s => s.className===cls && s.section===sec && isActive(s)).length;
         return `<div class="class-tile" onclick="openAdmitCardsRoster('${cls}','${sec}')"><h4>${cls} — ${sec}</h4><div class="ct-count">${count}</div><div class="ct-label">student${count===1?'':'s'}</div></div>`;
@@ -6230,8 +6806,9 @@
     body.innerHTML = `
       <div class="f-field" style="max-width:320px; margin-bottom:20px;">
         <label>Exam</label>
-        <select id="admitExamSelect" onchange="admitCardsExamId=this.value;">${examOptions}</select>
+        <select id="admitExamSelect" onchange="admitCardsExamId=this.value; renderResultBody();">${examOptions}</select>
       </div>
+      ${(raCfg.selectedClasses && raCfg.selectedClasses.length) ? `<p style="font-size:0.78rem; color:var(--ink-soft); margin:-10px 0 16px;">Showing only the classes selected for this exam under <a onclick="switchResultTab('roomallotment')" style="color:var(--magenta); cursor:pointer; font-weight:600;">Room Allotment → Select Classes</a>.</p>` : ''}
       ${rows}
     `;
   }
@@ -6294,13 +6871,18 @@
     const logoSrc = document.querySelector('.sb-brand img').src;
     const examPeriod = exam.startDate ? exam.startDate + (exam.endDate && exam.endDate!==exam.startDate ? ' – '+exam.endDate : '') : 'To be announced';
     const perPage = (admitCardsPerPage===3) ? 3 : 4;
+    const roomMap = computeExamHallTicketRoomMap(admitCardsExamId);
+    const principalSig = schoolInfo.principalSignature || '';
 
     // Each admit card is a full-width horizontal strip; 3 or 4 are stacked down a
     // portrait A4 sheet (chosen via the "Cards per A4 Sheet" selector). Every
     // subject row carries its own blank cell so a different invigilator can sign
     // in person on that exam's day, instead of one signature covering the whole
     // exam period.
-    const stripHtml = (s, isLastInPage) => `
+    const stripHtml = (s, isLastInPage) => {
+      const ht = getHallTicket(admitCardsExamId, s.id);
+      const roomInfo = roomMap[s.id];
+      return `
       <div class="ac-strip">
         <div class="ac-col-brand">
           <img class="ac-logo" src="${logoSrc}">
@@ -6317,6 +6899,7 @@
             <tr><td>Class &amp; Section</td><td>${s.className} — ${s.section}</td></tr>
             <tr><td>Roll No.</td><td>${s.rollNo||'—'}</td></tr>
           </table>
+          ${(ht && ht.htNumber) || roomInfo ? `<div class="ac-ht-room-box">Hall Ticket No.: <b>${ht&&ht.htNumber?ht.htNumber:'—'}</b> &nbsp;|&nbsp; Room: <b>${roomInfo?roomInfo.room:'—'}</b></div>` : ''}
         </div>
         <div class="ac-col-subjects">
           <div class="ac-subj-title">SUBJECT-WISE SCHEDULE — sign daily before the exam begins</div>
@@ -6330,11 +6913,12 @@
         <div class="ac-col-sign">
           <div class="ac-sign-line">Student's<br>Signature</div>
           <div style="height:3mm;"></div>
-          <div class="ac-sign-line">Principal /<br>Correspondent</div>
+          <div class="ac-sign-line ac-sign-auto">${principalSig ? `<img src="${principalSig}">` : ''}Principal /<br>Correspondent</div>
         </div>
         ${!isLastInPage ? `<span class="scissor">✂</span>` : ''}
       </div>
     `;
+    };
 
     const pages = [];
     for(let i=0;i<list.length;i+=perPage) pages.push(list.slice(i, i+perPage));
@@ -6374,6 +6958,7 @@
         .ac-info td:last-child{ font-weight:700; }
         .ac-photo-slot{ position:absolute; top:2mm; right:2mm; width:11mm; height:13mm; border:1px solid #999; font-size:8px; font-weight:700; color:#999; display:flex; align-items:center; justify-content:center; text-align:center; background:#f7f7f7; overflow:hidden; }
         .ac-photo-slot img{ width:100%; height:100%; object-fit:cover; }
+        .ac-ht-room-box{ margin-top:1.5mm; font-size:6.2px; font-weight:700; color:#0a5c36; background:#e9f9ef; border:1px solid #8fd6ab; border-radius:2px; padding:1mm 1.4mm; text-align:center; }
 
         .ac-col-subjects{ flex:1; padding:2mm 2.5mm; display:flex; flex-direction:column; justify-content:center; min-width:0; }
         .ac-subj-title{ font-size:6.6px; font-weight:700; color:#666; margin-bottom:1mm; }
@@ -6385,6 +6970,7 @@
 
         .ac-col-sign{ width:20mm; border-left:1px solid #333; padding:2mm 1.6mm; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; }
         .ac-sign-line{ width:100%; border-top:1px solid #555; text-align:center; font-size:5.6px; color:#666; padding-top:1mm; }
+        .ac-sign-auto img{ display:block; max-width:100%; max-height:6mm; margin:0 auto 0.5mm; }
       </style></head>
       <body onload="window.print()">
         ${pagesHtml}
@@ -6587,8 +7173,8 @@
           <div>Overall Grade: <b>${overallGrade}</b></div>
         </div>
         <div class="rc-sign">
-          <div>${t.sigImage1 ? `<img src="${t.sigImage1}">` : ''}${t.signatureLabel1 || 'Class Teacher'}</div>
-          <div>${t.sigImage2 ? `<img src="${t.sigImage2}" style="margin-left:auto;">` : ''}${t.signatureLabel2 || 'Principal / Correspondent'}</div>
+          <div>${resolveReportSignature1(t,s) ? `<img src="${resolveReportSignature1(t,s)}">` : ''}${t.signatureLabel1 || 'Class Teacher'}</div>
+          <div>${resolveReportSignature2(t) ? `<img src="${resolveReportSignature2(t)}" style="margin-left:auto;">` : ''}${t.signatureLabel2 || 'Principal / Correspondent'}</div>
         </div>
       </body></html>
     `);
@@ -7855,6 +8441,7 @@
   let staffDesignations = [];
   let staffJobTypes = [];
   let staffPhotoData = '';
+  let staffSignatureData = '';
   let staffPayrollRecords = [];
 
   async function loadStaffPayroll(){
@@ -8520,6 +9107,19 @@
     reader.readAsDataURL(file);
   }
 
+  function previewStaffSignature(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = evt => {
+      staffSignatureData = evt.target.result;
+      document.getElementById('staffSigPreview').src = staffSignatureData;
+      document.getElementById('staffSigPreview').style.display = 'block';
+      document.getElementById('staffSigPlaceholder').style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+  }
+
   function populateStaffDropdowns(){
     const deptSel = document.getElementById('stfDept');
     const desigSel = document.getElementById('stfDesignation');
@@ -8613,6 +9213,9 @@
     staffPhotoData = '';
     document.getElementById('staffPhotoPreview').style.display = 'none';
     document.getElementById('staffPhotoPlaceholder').style.display = 'block';
+    staffSignatureData = '';
+    document.getElementById('staffSigPreview').style.display = 'none';
+    document.getElementById('staffSigPlaceholder').style.display = 'block';
     document.getElementById('staffLoginFieldsWrap').style.display = 'none';
     populateStaffDropdowns();
     let existingJobTypes = [];
@@ -8656,6 +9259,12 @@
           document.getElementById('staffPhotoPreview').src = st.photo;
           document.getElementById('staffPhotoPreview').style.display = 'block';
           document.getElementById('staffPhotoPlaceholder').style.display = 'none';
+        }
+        if(st.signature){
+          staffSignatureData = st.signature;
+          document.getElementById('staffSigPreview').src = st.signature;
+          document.getElementById('staffSigPreview').style.display = 'block';
+          document.getElementById('staffSigPlaceholder').style.display = 'none';
         }
         if(st.linkedUserId){
           const u = users.find(x => x.id === st.linkedUserId);
@@ -8725,7 +9334,7 @@
       classTeacherClass: ctClass, classTeacherSection: ctSection,
       phone: g('stfPhone').trim(), email: g('stfEmail').trim(), address: g('stfAddress').trim(),
       emergencyName: g('stfEmergencyName').trim(), emergencyPhone: g('stfEmergencyPhone').trim(),
-      photo: staffPhotoData, jobTypes,
+      photo: staffPhotoData, signature: staffSignatureData, jobTypes,
     };
     let staffRecord;
     if(editId){
@@ -12310,6 +12919,7 @@
   const SCHOOL_INFO_KEY = "school-info";
   let schoolInfo = {};
   let schoolLogoData = '';
+  let schoolPrincipalSignatureData = '';
 
   async function loadSchoolInfo(){
     schoolInfo = await storageGet(SCHOOL_INFO_KEY, {
@@ -12319,6 +12929,7 @@
       state: 'Andhra Pradesh', district: 'Annamayya', pin: '517370',
       address: 'D-11-496 A-4564, RSM Road, B. Kotha Kota, Annamayya District, Andhra Pradesh',
       workingDays: 220, logo: '',
+      principalName: '', principalSignature: '',
     });
     if(schoolInfo.logo) document.getElementById('sbLogoImg').src = schoolInfo.logo;
     const nameSpan = document.getElementById('sbBrandName');
@@ -12381,8 +12992,37 @@
         </div>
       </div>
 
+      <div class="profile-card" style="margin-bottom:20px; max-width:420px;">
+        <h4>Document Signatures</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:4px 0 12px;">This signature is auto-applied to Admit Cards and Progress Reports wherever a Principal / Correspondent signature is required, so documents don't need to be signed individually. Class Teacher signatures are uploaded on each teacher's own Staff Profile.</p>
+        <div class="f-field">
+          <label>Principal / Correspondent Name</label>
+          <input type="text" id="siPrincipalName" value="${schoolInfo.principalName||''}">
+        </div>
+        <div style="display:flex; align-items:center; gap:16px; margin-top:10px;">
+          <div style="width:150px; height:60px; border:1.5px dashed var(--border); border-radius:6px; display:flex; align-items:center; justify-content:center; background:#fafafa; overflow:hidden;" id="schoolSigPreviewWrap">
+            <img id="schoolSigPreview" src="${schoolInfo.principalSignature||''}" style="max-width:100%; max-height:100%; ${schoolInfo.principalSignature?'':'display:none;'}">
+            <span id="schoolSigPlaceholder" style="font-size:0.72rem; color:var(--ink-soft); ${schoolInfo.principalSignature?'display:none;':''}">No signature</span>
+          </div>
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer;">Upload Signature<input type="file" accept="image/*" id="schoolSigInput" style="display:none;" onchange="previewPrincipalSignature(event)"></label>
+        </div>
+        <span style="font-size:0.72rem; color:var(--ink-soft); display:block; margin-top:6px;">Use a scanned signature on a plain/white background, PNG preferred · Max 2MB</span>
+      </div>
+
       <button class="btn btn-primary" onclick="saveSchoolProfile()">Save Changes</button>
     `;
+  }
+  function previewPrincipalSignature(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = evt => {
+      schoolPrincipalSignatureData = evt.target.result;
+      document.getElementById('schoolSigPreview').src = schoolPrincipalSignatureData;
+      document.getElementById('schoolSigPreview').style.display = 'block';
+      document.getElementById('schoolSigPlaceholder').style.display = 'none';
+    };
+    reader.readAsDataURL(file);
   }
   function previewSchoolLogo(e){
     const file = e.target.files[0];
@@ -12410,6 +13050,8 @@
       address: document.getElementById('siAddress').value.trim(),
       workingDays: Number(document.getElementById('siWorkingDays').value) || 220,
       logo: schoolLogoData || schoolInfo.logo || '',
+      principalName: document.getElementById('siPrincipalName').value.trim(),
+      principalSignature: schoolPrincipalSignatureData || schoolInfo.principalSignature || '',
     };
     await storageSet(SCHOOL_INFO_KEY, schoolInfo);
     if(schoolInfo.logo) document.getElementById('sbLogoImg').src = schoolInfo.logo;
@@ -14343,7 +14985,7 @@
     return false;
   }
 
-  loadClassLevels().then(() => loadSectionLevels()).then(() => loadClassSectionOverrides()).then(() => loadSchoolInfo()).then(() => loadFinance()).then(() => loadFeeExtras()).then(() => loadAttendance()).then(() => loadStaffAttendance()).then(() => loadExams()).then(() => loadExamHolidays()).then(() => loadReportTemplates()).then(() => loadAdminDownloads()).then(() => loadPendingApprovals()).then(() => loadInventory()).then(() => loadTimetable()).then(() => loadTransport()).then(() => loadLibrary()).then(() => loadHostel()).then(() => loadAccounting()).then(() => loadComms()).then(() => loadStaff()).then(() => loadStaffPayroll()).then(() => loadSubjects()).then(() => loadCustomRoles()).then(() => loadStudents()).then(() => loadUsers()).then(() => initAuth()).then(() => applyTheme(document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'));
+  loadClassLevels().then(() => loadSectionLevels()).then(() => loadClassSectionOverrides()).then(() => loadSchoolInfo()).then(() => loadFinance()).then(() => loadFeeExtras()).then(() => loadAttendance()).then(() => loadStaffAttendance()).then(() => loadExams()).then(() => loadRooms()).then(() => loadExamHallTickets()).then(() => loadExamRoomConfigs()).then(() => loadExamHolidays()).then(() => loadReportTemplates()).then(() => loadAdminDownloads()).then(() => loadPendingApprovals()).then(() => loadInventory()).then(() => loadTimetable()).then(() => loadTransport()).then(() => loadLibrary()).then(() => loadHostel()).then(() => loadAccounting()).then(() => loadComms()).then(() => loadStaff()).then(() => loadStaffPayroll()).then(() => loadSubjects()).then(() => loadCustomRoles()).then(() => loadStudents()).then(() => loadUsers()).then(() => initAuth()).then(() => applyTheme(document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'));
 </script>
 
 </body>
