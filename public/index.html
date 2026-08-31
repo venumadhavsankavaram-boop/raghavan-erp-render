@@ -135,7 +135,7 @@
   .btn-edit-text{color:var(--teal); background:none; border:none; font-size:0.78rem; font-weight:600;}
 
   /* ===== TABLE ===== */
-  .table-wrap{background:var(--white); border-radius:18px; box-shadow:var(--shadow); overflow:hidden;}
+  .table-wrap{background:var(--white); border-radius:18px; box-shadow:var(--shadow); overflow-x:auto; overflow-y:hidden;}
   table{width:100%; border-collapse:collapse;}
   thead{background:var(--cream);}
   th{
@@ -626,7 +626,7 @@
   .split-box span{font-size:0.74rem; color:var(--ink-soft);}
 
   .pay-toolbar{display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;}
-  .pay-table-wrap{background:var(--white); border-radius:16px; box-shadow:var(--shadow); overflow:hidden;}
+  .pay-table-wrap{background:var(--white); border-radius:16px; box-shadow:var(--shadow); overflow-x:auto; overflow-y:hidden;}
   .settings-link{background:none; border:none; color:var(--teal); font-size:0.82rem; font-weight:600; cursor:pointer;}
 </style>
 </head>
@@ -6693,8 +6693,8 @@
   function openExamRoomModal(id){
     const r = id ? rooms.find(x => x.id===id) : null;
     const el = document.getElementById('roomModalWrap');
-    el.innerHTML = `<div style="position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:999;">
-      <div class="profile-card" style="width:320px;">
+    el.innerHTML = `<div style="position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:999; padding:20px;">
+      <div class="profile-card" style="width:100%; max-width:320px;">
         <h4>${id?'Edit Room':'Add Room'}</h4>
         <input type="hidden" id="raRoomId" value="${id||''}">
         <div class="f-field" style="margin-top:10px;"><label>Room Name</label><input type="text" id="raRoomName" value="${r?r.name:''}"></div>
