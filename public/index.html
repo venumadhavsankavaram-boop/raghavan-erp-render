@@ -92,6 +92,12 @@
   .sb-link:not(.active):not(.disabled):hover{background:rgba(255,255,255,0.06); color:#fff;}
   .sb-link.disabled{opacity:0.35; cursor:default;}
   .sb-link .dot{width:6px; height:6px; border-radius:50%; background:currentColor; flex-shrink:0;}
+  .nb-badge{
+    margin-left:auto; background:var(--magenta); color:#fff; font-size:0.65rem; font-weight:700;
+    min-width:18px; height:18px; border-radius:999px; align-items:center; justify-content:center;
+    padding:0 5px; flex-shrink:0; line-height:1;
+  }
+  .mf-tab .nb-badge{ margin-left:6px; display:inline-flex; vertical-align:middle; }
 
   .main{flex:1; padding:32px 40px; overflow-x:hidden; overflow-y:auto; height:100vh;}
   .topbar{display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; flex-wrap:wrap; gap:14px;}
@@ -700,7 +706,7 @@
       <button class="sb-link" id="navResult" onclick="switchView('result')"><span class="dot"></span> Result</button>
       <button class="sb-link" id="navTimetable" onclick="switchView('timetable')"><span class="dot"></span> Timetable</button>
       <button class="sb-link" id="navPromoTransfer" onclick="switchView('promotransfer')"><span class="dot"></span> Promotion &amp; Transfer</button>
-      <button class="sb-link" id="navMyProfile" onclick="switchView('myprofile')" style="display:none;"><span class="dot"></span> My Profile</button>
+      <button class="sb-link" id="navMyProfile" onclick="switchView('myprofile')" style="display:none;"><span class="dot"></span> My Profile<span class="nb-badge" id="navMyProfileBadge" style="display:none;"></span></button>
     </div>
     <button type="button" class="sb-section-toggle" id="sbToggle-communication" onclick="toggleSbSection('communication')">Communication <span class="sb-chevron" id="sbChevron-communication">▾</span></button>
     <div class="sb-section-group" id="sbGroup-communication">
@@ -1156,7 +1162,8 @@
       </div>
 
       <div class="mf-tabs">
-        <button type="button" class="mf-tab active" id="mptab-profile" onclick="switchMyProfileTab('profile')">👤 Profile</button>
+        <button type="button" class="mf-tab active" id="mptab-notifications" onclick="switchMyProfileTab('notifications')">🔔 Notifications<span class="nb-badge" id="mpNotifTabBadge" style="display:none;"></span></button>
+        <button type="button" class="mf-tab" id="mptab-profile" onclick="switchMyProfileTab('profile')">👤 Profile</button>
         <button type="button" class="mf-tab" id="mptab-fees" onclick="switchMyProfileTab('fees')">💳 Fees &amp; Payments</button>
         <button type="button" class="mf-tab" id="mptab-marks" onclick="switchMyProfileTab('marks')">📝 Marks</button>
         <button type="button" class="mf-tab" id="mptab-notices" onclick="switchMyProfileTab('notices')">📌 Notices</button>
@@ -2398,6 +2405,7 @@
       hideLoginScreen();
       applyRolePermissions();
       initSbSectionsCollapseState();
+      updateMyProfileBadge();
       const allowed = getRoleViews(currentUser.role).length ? getRoleViews(currentUser.role) : ['dashboard'];
       switchView(allowed[0]);
     }else{
@@ -2429,6 +2437,7 @@
     hideLoginScreen();
     applyRolePermissions();
     initSbSectionsCollapseState();
+    updateMyProfileBadge();
     const allowed = getRoleViews(currentUser.role).length ? getRoleViews(currentUser.role) : ['dashboard'];
     switchView(allowed[0]);
     return false;
@@ -14358,10 +14367,10 @@
      already-loaded data (students/payments/examResults/commsMessages arrays —
      no separate fetch needed, this is all same-origin, same app) and renders a
      read-only view of it, plus a "Pay Online" action on the Fees tab. */
-  let myProfileTab = 'profile';
+  let myProfileTab = 'notifications';
   function switchMyProfileTab(tab){
     myProfileTab = tab;
-    ['profile','fees','marks','notices'].forEach(t => {
+    ['notifications','profile','fees','marks','notices'].forEach(t => {
       const el = document.getElementById('mptab-'+t);
       if(el) el.classList.toggle('active', t===tab);
     });
@@ -14378,10 +14387,109 @@
       body.innerHTML = `<div class="empty-state"><b>No student linked to this login yet</b>Ask the Admin to link this account to a student under Initial Setup → Users &amp; Roles.</div>`;
       return;
     }
+    if(myProfileTab === 'notifications') return renderMyNotificationsTab(body, s);
     if(myProfileTab === 'profile') return renderMyProfileProfileTab(body, s);
     if(myProfileTab === 'fees') return renderMyFeesTab(body, s);
     if(myProfileTab === 'marks') return renderMyMarksTab(body, s);
     if(myProfileTab === 'notices') return renderMyNoticesTab(body);
+  }
+
+  /* --- Notifications tab: a merged, read-only activity feed built from data
+     that already exists elsewhere (fee payments, attendance, exam schedules
+     & results, holidays, notices) — nothing new is stored per-notification.
+     "New" is tracked with a single lastNotificationSeenAt timestamp on the
+     user record, updated whenever this tab is opened. --- */
+  function computeMyNotifications(s){
+    const items = [];
+    payments.filter(p => p.studentId === s.id).forEach(p => {
+      items.push({
+        icon:'💳', tag:'Fee Payment', date: p.date || '',
+        title: `Payment received — ${fmtMoney(p.amount)}`,
+        detail: `${feeLabelFor(p)} · ${p.mode || 'Office'}${p.receiptNo ? ' · Receipt '+p.receiptNo : ''}`,
+      });
+    });
+    const attCutoff = new Date(); attCutoff.setDate(attCutoff.getDate() - 30);
+    const attCutoffStr = attCutoff.toISOString().slice(0,10);
+    attendanceRecords.filter(r => r.studentId === s.id && r.date >= attCutoffStr).forEach(r => {
+      const isAbsent = r.status === 'Absent';
+      items.push({
+        icon: isAbsent ? '🚫' : r.status==='Late' ? '⏰' : r.status==='Leave' ? '🌿' : '✅',
+        tag:'Attendance', date: r.date,
+        title: `Marked ${r.status} on ${r.date}`,
+        detail: isAbsent ? 'Contact the school office if this is unexpected.' : '',
+        highlight: isAbsent,
+      });
+    });
+    examDefs.forEach(ex => {
+      const subjects = getExamSubjects(ex, s.className, s.section).filter(sub => sub.date);
+      if(subjects.length){
+        const dates = subjects.map(d => d.date).sort();
+        items.push({
+          icon:'📅', tag:'Exam Schedule', date: dates[0],
+          title: `Exam schedule: ${ex.name}`,
+          detail: dates.length>1 ? `${dates[0]} – ${dates[dates.length-1]}` : dates[0],
+        });
+      }
+      if(examResults.some(r => r.examId===ex.id && r.studentId===s.id)){
+        items.push({
+          icon:'📝', tag:'Results', date: ex.endDate || ex.startDate || (subjects[0]&&subjects[0].date) || '',
+          title: `Results published: ${ex.name}`,
+          detail: 'View in the Marks tab.',
+        });
+      }
+    });
+    const holFrom = new Date(); holFrom.setDate(holFrom.getDate() - 14);
+    const holFromStr = holFrom.toISOString().slice(0,10);
+    holidays.filter(h => h.date >= holFromStr).forEach(h => {
+      items.push({ icon:'🏖️', tag:'Holiday', date: h.date, title: `Holiday: ${h.name}`, detail: h.date });
+    });
+    commsMessages.filter(m => m.channels.includes('In-App') && !m.boardRemoved).forEach(n => {
+      items.push({
+        icon: noticeTypeByName(n.type) ? noticeTypeByName(n.type).icon : '📣',
+        tag:'Notice', date: n.sentDate || '', title: n.title, detail: n.body,
+      });
+    });
+    items.sort((a,b) => (b.date||'').localeCompare(a.date||''));
+    return items;
+  }
+  function renderMyNotificationsTab(body, s){
+    const items = computeMyNotifications(s);
+    const lastSeen = currentUser.lastNotificationSeenAt || '';
+    body.innerHTML = items.length ? items.map(it => `
+      <div class="profile-card" style="margin-bottom:12px; ${it.highlight?'border-left:4px solid var(--magenta);':''}">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+          <div style="display:flex; gap:10px; align-items:flex-start;">
+            <span style="font-size:1.2rem; line-height:1;">${it.icon}</span>
+            <div>
+              <span class="pill" style="font-size:0.62rem;">${it.tag}</span>
+              <h4 style="margin:6px 0 2px;">${it.title}</h4>
+              ${it.detail ? `<p style="font-size:0.8rem; color:var(--ink-soft); margin:2px 0 0; white-space:pre-wrap;">${it.detail}</p>` : ''}
+            </div>
+          </div>
+          ${it.date > lastSeen ? `<span class="perm-new-pill">New</span>` : ''}
+        </div>
+      </div>
+    `).join('') : `<div class="empty-state"><b>Nothing here yet</b>Fee payments, exam schedules, attendance, holidays, and notices will show up here as they happen.</div>`;
+    currentUser.lastNotificationSeenAt = new Date().toISOString();
+    storageSet(USERS_KEY, users);
+    updateMyProfileBadge();
+  }
+  function updateMyProfileBadge(){
+    const navBadge = document.getElementById('navMyProfileBadge');
+    const tabBadge = document.getElementById('mpNotifTabBadge');
+    if(!currentUser || (currentUser.role !== 'Student' && currentUser.role !== 'Parent')){
+      if(navBadge) navBadge.style.display = 'none';
+      if(tabBadge) tabBadge.style.display = 'none';
+      return;
+    }
+    const s = myProfileStudent();
+    const count = s ? computeMyNotifications(s).filter(it => it.date > (currentUser.lastNotificationSeenAt || '')).length : 0;
+    const label = count > 9 ? '9+' : String(count);
+    [navBadge, tabBadge].forEach(el => {
+      if(!el) return;
+      if(count > 0){ el.textContent = label; el.style.display = 'inline-flex'; }
+      else el.style.display = 'none';
+    });
   }
   function renderMyProfileProfileTab(body, s){
     body.innerHTML = `
