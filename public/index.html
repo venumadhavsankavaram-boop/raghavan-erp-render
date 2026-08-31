@@ -6524,6 +6524,7 @@
         <button type="button" class="mf-tab ${roomAllotSubTab==='rooms'?'active':''}" onclick="switchRoomAllotSubTab('rooms')">Rooms &amp; Matrix</button>
         <button type="button" class="mf-tab ${roomAllotSubTab==='printout'?'active':''}" onclick="switchRoomAllotSubTab('printout')">Final Printout</button>
         <button type="button" class="mf-tab ${roomAllotSubTab==='notice'?'active':''}" onclick="switchRoomAllotSubTab('notice')">Notice Board</button>
+        <button type="button" class="mf-tab ${roomAllotSubTab==='signatures'?'active':''}" onclick="switchRoomAllotSubTab('signatures')">Document Signatures</button>
       </div>
       <div id="raSubBody"></div>
     `;
@@ -6541,6 +6542,7 @@
     if(roomAllotSubTab==='rooms') return renderRoomsMatrixSubTab(el);
     if(roomAllotSubTab==='printout') return renderFinalPrintoutSubTab(el);
     if(roomAllotSubTab==='notice') return renderNoticeBoardSubTab(el);
+    if(roomAllotSubTab==='signatures') return renderDocumentSignaturesSubTab(el);
   }
 
   /* --- Hall Ticket Numbers --- */
@@ -6670,7 +6672,9 @@
       <td>${canEditRooms ? `<button class="btn-edit-text" onclick="editExamRoom('${r.id}')">Edit</button>` : ''} &nbsp; ${canDeleteRooms ? `<button class="btn-edit-text" onclick="deleteExamRoom('${r.id}')">Delete</button>` : ''}</td>
     </tr>`).join('');
     const totalCap = rooms.reduce((s,r) => s+(Number(r.capacity)||0), 0);
-    let matrixRows = '', grandBoys=0, grandGirls=0, grandTotal=0;
+    const exam = roomAllotCurrentExam();
+    const cells = [];
+    let grandBoys=0, grandGirls=0, grandTotal=0;
     classList.forEach(cls => {
       sectionsForClass(cls).forEach(sec => {
         const studs = students.filter(s => s.className===cls && s.section===sec && isActive(s));
@@ -6679,9 +6683,28 @@
         const total = boys+girls;
         grandBoys += boys; grandGirls += girls; grandTotal += total;
         if(total===0) return;
-        matrixRows += `<tr><td>${cls}</td><td>${sec}</td><td style="color:#1d4ed8;">${boys}</td><td style="color:#be185d;">${girls}</td><td style="font-weight:700;">${total}</td></tr>`;
+        const subjects = exam ? getExamSubjects(exam, cls, sec) : [];
+        const warn = exam && subjects.length>0 && subjects.some(s => !s.date);
+        cells.push({ cls, sec, boys, girls, total, warn });
       });
     });
+    const maxTotal = cells.reduce((m,c) => Math.max(m,c.total), 0) || 1;
+    const heatBg = t => {
+      const from=[234,246,243], to=[31,138,122];
+      const mix=(a,b,x)=>Math.round(a+(b-a)*x);
+      const rgb = from.map((c,i)=>mix(c,to[i], t));
+      return { bg:`rgb(${rgb.join(',')})`, dark: t>0.55 };
+    };
+    let matrixRows = cells.map(c => {
+      const heat = heatBg(c.total/maxTotal);
+      const ink = heat.dark ? '#fff' : 'inherit';
+      const boysColor = heat.dark ? '#bcdcff' : '#1d4ed8';
+      const girlsColor = heat.dark ? '#ffc7e6' : '#be185d';
+      return `<tr style="background:${heat.bg}; color:${ink};">
+        <td>${c.cls}${c.warn ? ` <span title="At least one subject for this class & section is still missing an exam date" style="color:#d97706;">⚠</span>` : ''}</td>
+        <td>${c.sec}</td><td style="color:${boysColor};">${c.boys}</td><td style="color:${girlsColor};">${c.girls}</td><td style="font-weight:700;">${c.total}</td>
+      </tr>`;
+    }).join('');
     el.innerHTML = `
       <div class="profile-card" style="margin-bottom:16px;">
         <h4>Rooms</h4>
@@ -6691,6 +6714,7 @@
       </div>
       <div class="profile-card">
         <h4>Class × Section Matrix — Selected Classes</h4>
+        <p style="font-size:0.76rem; color:var(--ink-soft); margin:4px 0 10px;">Darker cells hold more candidates. <span style="color:#d97706;">⚠</span> marks a class & section with a subject still missing its exam date for ${exam?exam.name:'the selected exam'} — set it under "Exams" before generating hall tickets.</p>
         <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Class</th><th>Section</th><th>Boys</th><th>Girls</th><th>Total</th></tr></thead><tbody>
           ${matrixRows || '<tr><td colspan="5" style="color:var(--ink-soft);">No students found for the selected classes.</td></tr>'}
           <tr style="font-weight:700;"><td colspan="2">Grand Total</td><td style="color:#1d4ed8;">${grandBoys}</td><td style="color:#be185d;">${grandGirls}</td><td>${grandTotal}</td></tr>
@@ -7009,6 +7033,90 @@
       </body></html>
     `);
     w.document.close();
+  }
+
+  /* --- Document Signatures --- */
+  function renderDocumentSignaturesSubTab(el){
+    const canEdit = getResultTabAccess(currentUser.role, 'result_roomallotment', 'edit');
+    const principalSig = schoolInfo.principalSignature || '';
+    const classTeachers = staffList.filter(st => st.classTeacherClass && isActive(st))
+      .sort((a,b) => (a.classTeacherClass+a.classTeacherSection).localeCompare(b.classTeacherClass+b.classTeacherSection));
+    const sampleTeacher = classTeachers.find(t => t.signature) || null;
+    el.innerHTML = `
+      <p style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">Upload each signing authority's signature once, and it's applied automatically wherever that signature is needed — Admit Cards, Progress Reports, and Certificates — instead of every document needing to be signed by hand afterward. A student's own signature is the one exception; that always stays blank on the admit card for them to sign in person.</p>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px,1fr)); gap:16px; margin-bottom:16px;">
+        <div class="profile-card">
+          <h4>Principal / Correspondent Signature</h4>
+          <p style="font-size:0.76rem; color:var(--ink-soft); margin:4px 0 12px;">One signature, set once here (also visible under School Profile). Applied school-wide to every Admit Card and Progress Report.</p>
+          <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+            <div style="width:150px; height:60px; border:1.5px dashed var(--border); border-radius:6px; display:flex; align-items:center; justify-content:center; background:#fafafa; overflow:hidden; flex-shrink:0;" id="examSigPrincipalPreviewWrap">
+              <img id="examSigPrincipalPreview" src="${principalSig}" style="max-width:100%; max-height:100%; ${principalSig?'':'display:none;'}">
+              <span id="examSigPrincipalPlaceholder" style="font-size:0.72rem; color:var(--ink-soft); ${principalSig?'display:none;':''}">No signature</span>
+            </div>
+            ${canEdit ? `
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <label class="btn btn-ghost btn-sm" style="cursor:pointer;">⟳ ${principalSig?'Replace':'Upload'} Signature<input type="file" accept="image/*" id="examSigPrincipalInput" style="display:none;" onchange="previewExamPrincipalSignature(event)"></label>
+              ${principalSig ? `<button type="button" class="btn-danger-text" onclick="removeExamPrincipalSignature()">Remove</button>` : ''}
+            </div>` : ''}
+          </div>
+          <span style="font-size:0.7rem; color:var(--ink-soft); display:block; margin-top:8px;">Scanned signature on a plain/white background, PNG preferred · Max 2MB</span>
+        </div>
+        <div class="profile-card">
+          <h4>Class Teacher Signatures</h4>
+          <p style="font-size:0.76rem; color:var(--ink-soft); margin:4px 0 12px;">Uploaded once per teacher on their own Staff Profile — right next to their photo — then applied wherever that teacher is the Class Teacher on a report.</p>
+          <div class="table-wrap" style="max-height:220px; overflow:auto;">
+            <table><thead><tr><th>Class Teacher</th><th>Class</th><th>Signature</th><th></th></tr></thead>
+            <tbody>${classTeachers.length ? classTeachers.map(t => `
+              <tr>
+                <td>${t.firstName} ${t.lastName}</td>
+                <td>${t.classTeacherClass} — ${t.classTeacherSection}</td>
+                <td>${t.signature ? `<img src="${t.signature}" style="height:22px;">` : '<span style="color:var(--ink-soft); font-size:0.76rem;">Not uploaded</span>'}</td>
+                <td><button type="button" class="btn-edit-text" onclick="openStaffWizard('${t.id}')">Manage →</button></td>
+              </tr>`).join('') : '<tr><td colspan="4" style="color:var(--ink-soft);">No staff assigned as Class Teacher yet — set this under Staff → Edit Staff → Professional tab.</td></tr>'}
+            </tbody></table>
+          </div>
+        </div>
+      </div>
+      <div class="profile-card">
+        <h4>How it looks on documents</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:4px 0 14px;">Both signatures are applied the moment a document is generated — nobody has to remember to sign anything afterward.</p>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px,1fr)); gap:14px;">
+          <div style="border:1px solid var(--border); border-radius:8px; padding:12px;">
+            <div style="font-size:0.74rem; font-weight:700; color:var(--ink-soft); margin-bottom:10px;">ADMIT CARD — SIGNATURE STRIP</div>
+            <div style="display:flex; justify-content:space-between; gap:10px;">
+              <div style="text-align:center; flex:1;"><div style="height:26px;"></div><div style="border-top:1px solid var(--border); padding-top:4px; font-size:0.72rem;">Student's Signature<br><i style="color:var(--ink-soft);">(signs in person)</i></div></div>
+              <div style="text-align:center; flex:1;">${principalSig?`<img src="${principalSig}" style="height:26px; max-width:100%;">`:`<div style="height:26px;"></div>`}<div style="border-top:1px solid var(--border); padding-top:4px; font-size:0.72rem;">Principal / Correspondent<br><i style="color:var(--ink-soft);">(auto-applied)</i></div></div>
+            </div>
+          </div>
+          <div style="border:1px solid var(--border); border-radius:8px; padding:12px;">
+            <div style="font-size:0.74rem; font-weight:700; color:var(--ink-soft); margin-bottom:10px;">PROGRESS REPORT — SIGNATURE STRIP</div>
+            <div style="display:flex; justify-content:space-between; gap:10px;">
+              <div style="text-align:center; flex:1;">${sampleTeacher?`<img src="${sampleTeacher.signature}" style="height:26px; max-width:100%;">`:`<div style="height:26px;"></div>`}<div style="border-top:1px solid var(--border); padding-top:4px; font-size:0.72rem;">Class Teacher<br><i style="color:var(--ink-soft);">(auto-applied)</i></div></div>
+              <div style="text-align:center; flex:1;">${principalSig?`<img src="${principalSig}" style="height:26px; max-width:100%;">`:`<div style="height:26px;"></div>`}<div style="border-top:1px solid var(--border); padding-top:4px; font-size:0.72rem;">Principal / Correspondent<br><i style="color:var(--ink-soft);">(auto-applied)</i></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  function previewExamPrincipalSignature(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = async evt => {
+      schoolInfo.principalSignature = evt.target.result;
+      await storageSet(SCHOOL_INFO_KEY, schoolInfo);
+      showToast('Principal / Correspondent signature saved.');
+      renderRoomAllotSubBody();
+    };
+    reader.readAsDataURL(file);
+  }
+  async function removeExamPrincipalSignature(){
+    if(!confirm('Remove the Principal / Correspondent signature? It will need to be re-uploaded before it appears on Admit Cards or Progress Reports again.')) return;
+    schoolInfo.principalSignature = '';
+    await storageSet(SCHOOL_INFO_KEY, schoolInfo);
+    showToast('Signature removed.');
+    renderRoomAllotSubBody();
   }
 
   /* --- Tab: Admit Cards --- */
