@@ -268,6 +268,19 @@
   .perm-table td{text-align:center; padding:8px 6px; border-top:1px solid var(--border);}
   .perm-table td:first-child{text-align:left; font-weight:600; color:var(--navy); white-space:nowrap;}
   .perm-table input[type="checkbox"]{width:16px; height:16px; accent-color:var(--magenta); cursor:pointer;}
+  .perm-table tr.perm-row-sub td:first-child{padding-left:28px; font-weight:500; white-space:normal;}
+  .perm-table tr.perm-row-sub td:first-child::before{content:"└"; color:var(--border); margin-right:6px; font-weight:400;}
+  .perm-table tr.perm-row-sub{background:rgba(33,26,78,0.02);}
+  .perm-new-pill{background:rgba(31,122,77,0.15); color:#1f7a4d; font-size:0.56rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; padding:2px 6px; border-radius:999px; margin-left:5px; vertical-align:middle;}
+  .perm-legend{background:var(--white); border:1px solid var(--border); border-radius:12px; padding:12px 16px; margin-bottom:16px; display:flex; gap:18px; flex-wrap:wrap;}
+  .perm-legend-item{display:flex; align-items:center; gap:6px; font-size:0.72rem; color:var(--ink-soft);}
+  .perm-legend-item b{color:var(--ink);}
+  .perm-locked-section{background:rgba(203,154,46,0.08); border:1.5px dashed rgba(203,154,46,0.5); border-radius:12px; padding:14px 18px; margin-top:18px;}
+  .perm-locked-section h4{margin:0 0 4px; font-size:0.85rem; display:flex; align-items:center; gap:8px; color:var(--ink);}
+  .perm-locked-section p{margin:0 0 10px; font-size:0.74rem; color:var(--ink-soft); max-width:700px; line-height:1.5;}
+  .perm-locked-row{display:flex; align-items:center; gap:10px; padding:6px 0; border-top:1px solid rgba(203,154,46,0.25); font-size:0.8rem; color:var(--ink-soft);}
+  .perm-locked-row:first-of-type{border-top:none;}
+  .perm-locked-row .perm-locked-always{margin-left:auto; font-size:0.62rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:#8a6a17; background:rgba(203,154,46,0.22); padding:3px 9px; border-radius:999px;}
   #admissionFeeNote{
     background:rgba(203,154,46,0.13); border-radius:10px; padding:10px 14px; margin-bottom:16px;
     font-size:0.8rem; color:#8a6a1f; font-weight:600;
@@ -780,15 +793,15 @@
             <button type="button" onclick="downloadIdCards()">Download ID Cards</button>
             <button type="button" onclick="showGroupsClubs()">Groups &amp; Clubs</button>
             <button type="button" onclick="downloadImportTemplate()">Download Import Template (Excel)</button>
-            <button type="button" onclick="document.getElementById('importFileInput').click()">Import Students (Excel)</button>
-            <button type="button" onclick="exportExcel()">Export Students (Excel)</button>
-            <button type="button" onclick="exportStudentsPDF()">Export Students (PDF)</button>
+            <button type="button" id="btnImportStudents" onclick="document.getElementById('importFileInput').click()">Import Students (Excel)</button>
+            <button type="button" id="btnExportStudentsExcel" onclick="exportExcel()">Export Students (Excel)</button>
+            <button type="button" id="btnExportStudentsPDF" onclick="exportStudentsPDF()">Export Students (PDF)</button>
             <button type="button" onclick="openTransferCertPicker()">Transfer Certificates</button>
             <button type="button" onclick="openDuplicatesModal()">Find Duplicate Students</button>
           </div>
         </div>
         <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" style="display:none;" onchange="importExcel(event)">
-        <button class="btn btn-primary" onclick="openWizard()">+ Add Student</button>
+        <button class="btn btn-primary" id="btnAddStudent" onclick="openWizard()">+ Add Student</button>
       </div>
     </div>
 
@@ -979,7 +992,7 @@
             <option value="Active">Active</option><option value="Inactive">Inactive</option><option value="all">All</option>
           </select>
         </div>
-        <button class="btn btn-primary" onclick="openStaffWizard()">+ Add Staff</button>
+        <button class="btn btn-primary" id="btnAddStaff" onclick="openStaffWizard()">+ Add Staff</button>
       </div>
 
       <div id="staffBody"></div>
@@ -2025,34 +2038,97 @@
 
   /* ===== ROLES & PERMISSIONS (custom, admin-configurable) ===== */
   const CUSTOM_ROLES_KEY = "custom-roles";
+  // Categories mirror the sidebar's own section headers (Overview/Academics/
+  // Communication/Finance/Staff/Facilities/Reports/Configuration) so the
+  // matrix reads as a direct map of "what shows up in the sidebar", not a
+  // separate taxonomy an admin has to learn. Modules with a `parent` are
+  // rendered nested under that parent row in the matrix; when a role has no
+  // explicit choice saved for a sub-module, access falls back to its parent's
+  // permission (see getResultTabAccess / getAccountingTabAccess / etc. below)
+  // so nothing that used to work silently breaks the moment a sub-module is
+  // introduced. `hidden:true` marks a legacy key kept only as that fallback
+  // target — it no longer gets its own row in the matrix.
   const PERMISSION_MODULES = [
-    { key:'dashboard',   label:'Dashboard',          icon:'📊', category:'Administration' },
-    { key:'staff',       label:'Manage Staff',       icon:'🧑‍💼', category:'Administration' },
-    { key:'staff_attendance', label:'Staff — Attendance', icon:'🧑‍💼', category:'Administration' },
-    { key:'staff_reports',    label:'Staff — Reports',    icon:'🧑‍💼', category:'Administration' },
-    { key:'accounting',  label:'Accounting',         icon:'💼', category:'Finance' },
-    { key:'accounting_overview', label:'Accounting — Overview', icon:'📊', category:'Finance' },
-    { key:'accounting_income', label:'Accounting — Income', icon:'💰', category:'Finance' },
-    { key:'accounting_expenses', label:'Accounting — Expenses', icon:'💸', category:'Finance' },
-    { key:'accounting_categories', label:'Accounting — Categories', icon:'🏷️', category:'Finance' },
-    { key:'reports',     label:'Reports',            icon:'📈', category:'Administration' },
-    { key:'setup',       label:'Initial Setup',      icon:'⚙️', category:'Administration' },
-    { key:'admissions',  label:'Manage Student',     icon:'🎓', category:'Academic' },
-    { key:'attendance',  label:'Manage Attendance',  icon:'📋', category:'Academic' },
-    { key:'exams',       label:'Manage Exams',       icon:'📝', category:'Academic' },
-    { key:'subjects',    label:'Manage Subjects',    icon:'📘', category:'Academic' },
-    { key:'promotransfer', label:'Promotion & Transfer', icon:'🔀', category:'Academic' },
-    { key:'result',      label:'Result',             icon:'🏆', category:'Academic' },
-    { key:'managefee',   label:'Manage Fee',         icon:'💰', category:'Finance' },
-    { key:'timetable',   label:'Timetable',          icon:'🗓️', category:'Facilities' },
-    { key:'library',     label:'Library',            icon:'📚', category:'Facilities' },
-    { key:'transport',   label:'Transport',          icon:'🚌', category:'Facilities' },
-    { key:'inventory',   label:'Inventory',          icon:'📦', category:'Facilities' },
-    { key:'hostel',      label:'Hostel',             icon:'🏠', category:'Facilities' },
+    { key:'dashboard',   label:'Dashboard',          icon:'📊', category:'Overview' },
+
+    { key:'admissions',  label:'Manage Student',     icon:'🎓', category:'Academics' },
+    { key:'attendance',  label:'Manage Attendance',  icon:'📋', category:'Academics' },
+    { key:'subjects',    label:'Manage Subjects',    icon:'📘', category:'Academics' },
+    { key:'exams',       label:'Manage Exams',       icon:'📝', category:'Academics' },
+    { key:'exams_definitions', label:'Exam Types & Definitions', icon:'🗂️', category:'Academics', parent:'exams', isNew:true },
+    { key:'exams_marks',        label:'Marks Entry',          icon:'✍️', category:'Academics', parent:'exams', isNew:true },
+    { key:'exams_entrystatus',  label:'Marks Entry Status',   icon:'📶', category:'Academics', parent:'exams', isNew:true },
+    { key:'exams_results',      label:'Results Summary',      icon:'📊', category:'Academics', parent:'exams', isNew:true },
+    { key:'exams_holidays',     label:'Exam Holidays',        icon:'📅', category:'Academics', parent:'exams', isNew:true },
+    { key:'result',      label:'Result',             icon:'🏆', category:'Academics' },
+    { key:'result_admitcards',   label:'Admit Cards',           icon:'🪪', category:'Academics', parent:'result', isNew:true },
+    { key:'result_roomallotment', label:'Room Allotment',       icon:'🚪', category:'Academics', parent:'result', isNew:true },
+    { key:'result_progress',     label:'Progress Reports',      icon:'📄', category:'Academics', parent:'result', isNew:true },
+    { key:'result_consolidated', label:'Consolidated Report',   icon:'📊', category:'Academics', parent:'result', isNew:true },
+    { key:'result_examtemplates', label:'Exam Templates',       icon:'🧩', category:'Academics', parent:'result', isNew:true },
+    { key:'result_consolscale',  label:'Consolidation Scale',   icon:'📐', category:'Academics', parent:'result', isNew:true },
+    { key:'result_grading',      label:'Grading Scale',         icon:'🎯', category:'Academics', parent:'result', isNew:true },
+    { key:'result_templates',    label:'Report Templates',      icon:'🗂️', category:'Academics', parent:'result', isNew:true },
+    { key:'timetable',   label:'Timetable',          icon:'🗓️', category:'Academics' },
+    { key:'timetable_class',    label:'Class Timetable (edit)', icon:'📅', category:'Academics', parent:'timetable', isNew:true },
+    { key:'timetable_teacher',  label:'Teacher View',           icon:'🧑‍🏫', category:'Academics', parent:'timetable', isNew:true },
+    { key:'timetable_periods',  label:'Periods Setup',          icon:'⏰', category:'Academics', parent:'timetable', isNew:true },
+    { key:'promotransfer', label:'Promotion & Transfer', icon:'🔀', category:'Academics' },
+    { key:'promo_promote',  label:'Promote Students',  icon:'⬆️', category:'Academics', parent:'promotransfer', isNew:true },
+    { key:'promo_transfer', label:'Transfer Students', icon:'🔁', category:'Academics', parent:'promotransfer', isNew:true },
+    { key:'promo_approvals', label:'Approve Requests', icon:'✅', category:'Academics', parent:'promotransfer', isNew:true },
+
     { key:'announcements', label:'Communications',    icon:'📣', category:'Communication' },
+    { key:'comms_compose',  label:'Compose & Send',    icon:'✍️', category:'Communication', parent:'announcements', isNew:true },
+    { key:'comms_log',      label:'Message Log',       icon:'🗂️', category:'Communication', parent:'announcements', isNew:true },
     { key:'noticeboard', label:'Notice Board',         icon:'📌', category:'Communication' },
+    { key:'noticeboard_post',     label:'Post / Edit Notices', icon:'✍️', category:'Communication', parent:'noticeboard', isNew:true },
+    { key:'noticeboard_headings', label:'Manage Headings',     icon:'🏷️', category:'Communication', parent:'noticeboard', isNew:true },
     { key:'websiteinquiries', label:'Website Inquiries', icon:'🌐', category:'Communication' },
     { key:'websitegallery', label:'Website Gallery',   icon:'🖼️', category:'Communication' },
+
+    { key:'managefee',   label:'Manage Fee',         icon:'💰', category:'Finance' },
+    { key:'managefee_collection', label:'Fee Collection & Receipts', icon:'💳', category:'Finance', parent:'managefee', isNew:true },
+    { key:'managefee_structure',  label:'Fee Structure',             icon:'🏗️', category:'Finance', parent:'managefee', isNew:true },
+    { key:'managefee_types',      label:'Fee Types',                 icon:'🏷️', category:'Finance', parent:'managefee', isNew:true },
+    { key:'managefee_discounts',  label:'Discounts',                 icon:'🎟️', category:'Finance', parent:'managefee', isNew:true },
+    { key:'managefee_extra',      label:'Extra Fees',                icon:'➕', category:'Finance', parent:'managefee', isNew:true },
+    { key:'managefee_late',       label:'Late Fees & Receipt Numbering', icon:'⏰', category:'Finance', parent:'managefee', isNew:true },
+    { key:'managefee_defaulters', label:'Fee Defaulters',            icon:'⚠️', category:'Finance', parent:'managefee', isNew:true },
+    { key:'accounting',  label:'Accounting',         icon:'💼', category:'Finance' },
+    { key:'accounting_overview', label:'Overview',   icon:'📊', category:'Finance', parent:'accounting' },
+    { key:'accounting_income', label:'Income',       icon:'💰', category:'Finance', parent:'accounting' },
+    { key:'accounting_expenses', label:'Expenses',   icon:'💸', category:'Finance', parent:'accounting' },
+    { key:'accounting_categories', label:'Categories', icon:'🏷️', category:'Finance', parent:'accounting' },
+
+    { key:'staff',       label:'Staff Directory',    icon:'🧑‍💼', category:'Staff' },
+    { key:'staff_depts', label:'Departments & Designations', icon:'🏢', category:'Staff', isNew:true },
+    { key:'staff_idcards', label:'ID Cards',         icon:'🪪', category:'Staff', isNew:true },
+    { key:'staff_payroll', label:'Payroll',          icon:'💵', category:'Staff', isNew:true },
+    { key:'staff_attendance', label:'Staff Attendance', icon:'🕒', category:'Staff' },
+    { key:'staff_reports',    label:'Staff Reports',    icon:'📈', category:'Staff' },
+
+    { key:'inventory',   label:'Inventory',          icon:'📦', category:'Facilities' },
+    { key:'inventory_items',    label:'Products / Items',   icon:'🏷️', category:'Facilities', parent:'inventory', isNew:true },
+    { key:'inventory_sell',     label:'Sell (POS)',         icon:'🛒', category:'Facilities', parent:'inventory', isNew:true },
+    { key:'inventory_approvals', label:'Approvals',         icon:'✅', category:'Facilities', parent:'inventory', isNew:true },
+    { key:'inventory_saleshistory', label:'Sales History',  icon:'🧾', category:'Facilities', parent:'inventory', isNew:true },
+    { key:'inventory_stockoverview', label:'Stock Overview', icon:'📊', category:'Facilities', parent:'inventory', isNew:true },
+    { key:'transport',   label:'Transport',          icon:'🚌', category:'Facilities' },
+    { key:'transport_routes', label:'Routes',            icon:'🚌', category:'Facilities', parent:'transport', isNew:true },
+    { key:'transport_assign', label:'Assign Students',   icon:'🧾', category:'Facilities', parent:'transport', isNew:true },
+    { key:'transport_roster', label:'Route Roster',      icon:'📋', category:'Facilities', parent:'transport', isNew:true },
+    { key:'library',     label:'Library',            icon:'📚', category:'Facilities' },
+    { key:'library_catalog',     label:'Catalog',           icon:'📚', category:'Facilities', parent:'library', isNew:true },
+    { key:'library_issuereturn', label:'Issue & Return',    icon:'🔄', category:'Facilities', parent:'library', isNew:true },
+    { key:'library_overdue',     label:'Overdue & Fines',   icon:'⚠️', category:'Facilities', parent:'library', isNew:true },
+    { key:'library_settings',    label:'Settings',          icon:'⚙️', category:'Facilities', parent:'library', isNew:true },
+    { key:'hostel',      label:'Hostel',             icon:'🏠', category:'Facilities' },
+    { key:'hostel_rooms', label:'Rooms',              icon:'🛏️', category:'Facilities', parent:'hostel', isNew:true },
+    { key:'hostel_allot', label:'Allot Students',     icon:'🧾', category:'Facilities', parent:'hostel', isNew:true },
+    { key:'hostel_roster', label:'Room Roster',       icon:'📋', category:'Facilities', parent:'hostel', isNew:true },
+
+    { key:'reports',     label:'Reports (menu access)', icon:'📈', category:'Reports' },
     { key:'reports_academic',   label:'Academic Reports',   icon:'🎓', category:'Reports' },
     { key:'reports_attendance', label:'Attendance Reports', icon:'📋', category:'Reports' },
     { key:'reports_marks',      label:'Marks Reports',      icon:'📝', category:'Reports' },
@@ -2060,10 +2136,29 @@
     { key:'reports_employee',   label:'Employee Reports',   icon:'🧑‍💼', category:'Reports' },
     { key:'reports_teacher_performance', label:'Teacher Performance Reports', icon:'🧑‍🏫', category:'Reports' },
     { key:'reports_custom',     label:'Custom Report Builder', icon:'🛠️', category:'Reports' },
+
+    { key:'setup',       label:'Initial Setup (legacy)', icon:'⚙️', category:'Configuration', hidden:true },
+    { key:'setup_schoolprofile', label:'School Profile',  icon:'🏫', category:'Configuration', isNew:true },
+    { key:'setup_classes',       label:'Classes',         icon:'📚', category:'Configuration', isNew:true },
+    { key:'setup_academicyear',  label:'Academic Year',   icon:'📅', category:'Configuration', isNew:true },
+    { key:'setup_feestructure',  label:'Fee Structure',   icon:'💳', category:'Configuration', isNew:true },
+    { key:'setup_promotions',    label:'Promotions Setup', icon:'⬆️', category:'Configuration', isNew:true },
   ];
 
   const PERMISSION_ACTIONS = ['view','create','edit','delete','print','approve'];
-  const PERMISSION_CATEGORY_COLORS = { Administration:'#b8621b', Academic:'#2a4d8f', Finance:'#1f7a4d', Facilities:'#6b4fa0', Communication:'#a02463', Reports:'#188F86' };
+  const PERMISSION_CATEGORY_COLORS = { Overview:'#544C6B', Academics:'#2a4d8f', Communication:'#a02463', Finance:'#1f7a4d', Staff:'#b8621b', Facilities:'#6b4fa0', Reports:'#188F86', Configuration:'#CB9A2E' };
+  // Pages that manage who can log in and what every role can do are never
+  // delegable through this matrix, no matter how a role is customized —
+  // otherwise a role could grant itself (or anyone) more access than it
+  // already has. They're shown in the matrix UI as a locked, informational
+  // list rather than as checkboxes; actual visibility stays hardcoded to
+  // role === 'Admin' in applyRolePermissions(), same as before this feature.
+  const LOCKED_ADMIN_ONLY_PAGES = [
+    { label:'Users & Roles', icon:'👤' },
+    { label:'Roles & Permissions', icon:'🔐' },
+    { label:'Student / Parent Logins', icon:'🔑' },
+    { label:'Admin Tools', icon:'🛠️' },
+  ];
 
   let customRoles = [];
   function emptyPermSet(){
@@ -2106,6 +2201,15 @@
     }
     return ROLE_VIEWS[role] ? ROLE_VIEWS[role].includes(moduleKey) : false; // built-in default: full access to any view they can see
   }
+  // Shorthand for gating a button/action for the CURRENTLY logged-in user
+  // against a simple (non-sub-scoped) module — e.g. canDo('admissions','create').
+  // Sub-scoped modules keep using their own dedicated helper (getAccountingTabAccess,
+  // getResultTabAccess, getStaffSubpageAccess, getSetupTabAccess, getReportCategoryAccess)
+  // since each of those has its own fallback-to-parent behavior.
+  function canDo(moduleKey, action){
+    if(!currentUser) return false;
+    return getRolePermission(currentUser.role, moduleKey, action);
+  }
   function getReportCategoryAccess(role, moduleKey){
     const ov = findRoleOverride(role);
     if(ov && ov.permissions[moduleKey] !== undefined) return !!ov.permissions[moduleKey].view;
@@ -2128,14 +2232,54 @@
     if(ov && ov.permissions['staff_reports'] !== undefined) return !!ov.permissions['staff_reports'][action];
     return getRolePermission(role, 'staff', action) || getReportCategoryAccess(role, 'reports_employee') || getReportCategoryAccess(role, 'reports_teacher_performance');
   }
-  function getAccountingTabAccess(role, moduleKey, action){
+  // Generic fallback-aware sub-module access check: every "module has several
+  // distinct tabs/buttons, each independently permissionable" case in the app
+  // goes through this one function. No explicit choice saved yet for the
+  // sub-module itself → fall back to the parent module's own permission, so
+  // nothing that used to work silently breaks the moment a sub-module is
+  // introduced — an admin only sees a behavior change once they deliberately
+  // narrow a specific sub-module down in Roles & Permissions.
+  function getSubModuleAccess(role, subKey, parentKey, action){
     action = action || 'view';
     const ov = findRoleOverride(role);
-    if(ov && ov.permissions[moduleKey] !== undefined) return !!ov.permissions[moduleKey][action];
-    // No explicit choice made for this specific tab yet — default to whatever
-    // access the role has to Accounting overall, same as before these
-    // per-tab permissions existed. An admin can narrow it down from here.
-    return getRolePermission(role, 'accounting', action);
+    if(ov && ov.permissions[subKey] !== undefined) return !!ov.permissions[subKey][action];
+    return getRolePermission(role, parentKey, action);
+  }
+  // Thin, named wrappers kept for every existing call site + readability —
+  // all delegate to getSubModuleAccess above.
+  function getAccountingTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'accounting', action); }
+  const RESULT_SUBMODULE_KEYS = ['result_admitcards','result_roomallotment','result_progress','result_consolidated','result_examtemplates','result_consolscale','result_grading','result_templates'];
+  function getResultTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'result', action); }
+  const STAFF_SUBPAGE_KEYS = ['staff_depts','staff_idcards','staff_payroll'];
+  function getStaffSubpageAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'staff', action); }
+  const SETUP_SUBMODULE_KEYS = ['setup_schoolprofile','setup_classes','setup_academicyear','setup_feestructure','setup_promotions'];
+  function getSetupTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'setup', action); }
+  // Newly added sub-module groups (each mirrors that module's own tabs/buttons
+  // one-for-one) — same fallback-to-parent behavior throughout.
+  const EXAMS_SUBMODULE_KEYS = ['exams_definitions','exams_marks','exams_entrystatus','exams_results','exams_holidays'];
+  function getExamsTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'exams', action); }
+  const TIMETABLE_SUBMODULE_KEYS = ['timetable_class','timetable_teacher','timetable_periods'];
+  function getTimetableTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'timetable', action); }
+  const PROMOTRANSFER_SUBMODULE_KEYS = ['promo_promote','promo_transfer','promo_approvals'];
+  function getPromoTransferTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'promotransfer', action); }
+  const COMMS_SUBMODULE_KEYS = ['comms_compose','comms_log'];
+  function getCommsTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'announcements', action); }
+  const NOTICEBOARD_SUBMODULE_KEYS = ['noticeboard_post','noticeboard_headings'];
+  function getNoticeBoardTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'noticeboard', action); }
+  const MANAGEFEE_SUBMODULE_KEYS = ['managefee_collection','managefee_structure','managefee_types','managefee_discounts','managefee_extra','managefee_late','managefee_defaulters'];
+  function getManageFeeTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'managefee', action); }
+  const INVENTORY_SUBMODULE_KEYS = ['inventory_items','inventory_sell','inventory_approvals','inventory_saleshistory','inventory_stockoverview'];
+  function getInventoryTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'inventory', action); }
+  const TRANSPORT_SUBMODULE_KEYS = ['transport_routes','transport_assign','transport_roster'];
+  function getTransportTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'transport', action); }
+  const LIBRARY_SUBMODULE_KEYS = ['library_catalog','library_issuereturn','library_overdue','library_settings'];
+  function getLibraryTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'library', action); }
+  const HOSTEL_SUBMODULE_KEYS = ['hostel_rooms','hostel_allot','hostel_roster'];
+  function getHostelTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'hostel', action); }
+  // Current-user shorthand for the generic checker, for terser call sites.
+  function canSub(subKey, parentKey, action){
+    if(!currentUser) return false;
+    return getSubModuleAccess(currentUser.role, subKey, parentKey, action);
   }
   function allRoleNames(){
     return [...ROLES, ...customRoles.map(r => r.name).filter(n => !ROLES.includes(n))];
@@ -2146,16 +2290,34 @@
     defaultViews.forEach(key => {
       if(p[key]) PERMISSION_ACTIONS.forEach(a => { p[key][a] = true; });
     });
-    // Accounting's four tabs aren't separate sidebar views, so they're not in
-    // ROLE_VIEWS — but any role that already gets the Accounting module by
-    // default should still see all its tabs by default too, exactly as
-    // before this feature existed. An admin can then selectively narrow
-    // individual tabs down afterward in Roles & Permissions.
-    if(defaultViews.includes('accounting')){
-      ['accounting_overview','accounting_income','accounting_expenses','accounting_categories'].forEach(key => {
-        if(p[key]) PERMISSION_ACTIONS.forEach(a => { p[key][a] = true; });
-      });
-    }
+    // A handful of modules' sub-pages aren't separate sidebar views, so
+    // they're not in ROLE_VIEWS — but any role that already gets the parent
+    // module by default should still see all its sub-pages by default too,
+    // exactly as before those sub-permissions existed. An admin can then
+    // selectively narrow individual sub-pages down afterward.
+    const SUBMODULE_GROUPS_BY_PARENT = {
+      accounting: ['accounting_overview','accounting_income','accounting_expenses','accounting_categories'],
+      result: RESULT_SUBMODULE_KEYS,
+      setup: SETUP_SUBMODULE_KEYS,
+      staff: STAFF_SUBPAGE_KEYS,
+      exams: EXAMS_SUBMODULE_KEYS,
+      timetable: TIMETABLE_SUBMODULE_KEYS,
+      promotransfer: PROMOTRANSFER_SUBMODULE_KEYS,
+      announcements: COMMS_SUBMODULE_KEYS,
+      noticeboard: NOTICEBOARD_SUBMODULE_KEYS,
+      managefee: MANAGEFEE_SUBMODULE_KEYS,
+      inventory: INVENTORY_SUBMODULE_KEYS,
+      transport: TRANSPORT_SUBMODULE_KEYS,
+      library: LIBRARY_SUBMODULE_KEYS,
+      hostel: HOSTEL_SUBMODULE_KEYS,
+    };
+    Object.keys(SUBMODULE_GROUPS_BY_PARENT).forEach(parentKey => {
+      if(defaultViews.includes(parentKey)){
+        SUBMODULE_GROUPS_BY_PARENT[parentKey].forEach(key => {
+          if(p[key]) PERMISSION_ACTIONS.forEach(a => { p[key][a] = true; });
+        });
+      }
+    });
     return p;
   }
 
@@ -2293,16 +2455,16 @@
     document.getElementById('navReports').style.display = allowed.includes('reports') ? 'flex' : 'none';
     const staffFullAccess = getRolePermission(currentUser.role, 'staff', 'view');
     document.getElementById('navStaffDirectory').style.display = staffFullAccess ? 'flex' : 'none';
-    document.getElementById('navStaffDepts').style.display = staffFullAccess ? 'flex' : 'none';
-    document.getElementById('navStaffIdcards').style.display = staffFullAccess ? 'flex' : 'none';
-    document.getElementById('navStaffPayroll').style.display = staffFullAccess ? 'flex' : 'none';
+    document.getElementById('navStaffDepts').style.display = getStaffSubpageAccess(currentUser.role, 'staff_depts') ? 'flex' : 'none';
+    document.getElementById('navStaffIdcards').style.display = getStaffSubpageAccess(currentUser.role, 'staff_idcards') ? 'flex' : 'none';
+    document.getElementById('navStaffPayroll').style.display = getStaffSubpageAccess(currentUser.role, 'staff_payroll') ? 'flex' : 'none';
     document.getElementById('navStaffAttendance').style.display = getStaffAttendanceAccess(currentUser.role) ? 'flex' : 'none';
     document.getElementById('navStaffReports').style.display = getStaffReportsAccess(currentUser.role) ? 'flex' : 'none';
-    document.getElementById('navSchoolProfile').style.display = allowed.includes('setup') ? 'flex' : 'none';
-    document.getElementById('navClassesSetup').style.display = allowed.includes('setup') ? 'flex' : 'none';
-    document.getElementById('navAcademicYear').style.display = allowed.includes('setup') ? 'flex' : 'none';
-    document.getElementById('navFeeStructureSetup').style.display = allowed.includes('setup') ? 'flex' : 'none';
-    document.getElementById('navPromotions').style.display = allowed.includes('setup') ? 'flex' : 'none';
+    document.getElementById('navSchoolProfile').style.display = getSetupTabAccess(currentUser.role, 'setup_schoolprofile') ? 'flex' : 'none';
+    document.getElementById('navClassesSetup').style.display = getSetupTabAccess(currentUser.role, 'setup_classes') ? 'flex' : 'none';
+    document.getElementById('navAcademicYear').style.display = getSetupTabAccess(currentUser.role, 'setup_academicyear') ? 'flex' : 'none';
+    document.getElementById('navFeeStructureSetup').style.display = getSetupTabAccess(currentUser.role, 'setup_feestructure') ? 'flex' : 'none';
+    document.getElementById('navPromotions').style.display = getSetupTabAccess(currentUser.role, 'setup_promotions') ? 'flex' : 'none';
     document.getElementById('navUsersRoles').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
     document.getElementById('navStudentParentLogins').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
     document.getElementById('navRolesPermissions').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
@@ -2321,6 +2483,21 @@
     document.getElementById('sbUserName').textContent = currentUser.name;
     document.getElementById('sbUserRole').textContent = currentUser.role;
     updateSidebarAvatar();
+    applyButtonLevelPermissions();
+  }
+  // Gates the handful of "+ Add / Import / Export" buttons that live in a
+  // view's static header (so they're not re-rendered per navigation the way
+  // a table's per-row Edit/Delete buttons are) — those get hidden here once,
+  // right alongside the sidebar links, using the exact same permission
+  // checks. Per-row buttons inside dynamically-rendered tables are instead
+  // gated inline, at the point each row's HTML is built.
+  function applyButtonLevelPermissions(){
+    const setBtn = (id, allowed) => { const el = document.getElementById(id); if(el) el.style.display = allowed ? '' : 'none'; };
+    setBtn('btnAddStudent', canDo('admissions','create'));
+    setBtn('btnImportStudents', canDo('admissions','create'));
+    setBtn('btnExportStudentsExcel', canDo('admissions','print'));
+    setBtn('btnExportStudentsPDF', canDo('admissions','print'));
+    setBtn('btnAddStaff', canDo('staff','create'));
   }
   function updateSidebarAvatar(){
     const el = document.getElementById('sbUserAvatar');
@@ -2888,7 +3065,7 @@
                 <td>${p.mode || '—'}</td>
                 <td>${fmtMoney(p.amount)}</td>
                 <td>${fmtMoney(p.discount)}</td>
-                <td><button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print</button></td>
+                <td>${canSub('managefee_collection','managefee','print') ? `<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print</button>` : ''}</td>
               </tr>
             `).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No payments recorded yet</b></div></td></tr>`}
           </tbody>
@@ -3177,6 +3354,7 @@
   let defaulterPage = 1, defaulterPageSize = 10;
   let defaulterFilters = { className:'', section:'', name:'', phone:'' };
 
+  const MF_TAB_PERM_KEYS = { fees:'managefee_collection', structure:'managefee_structure', types:'managefee_types', discounts:'managefee_discounts', extra:'managefee_extra', late:'managefee_late', defaulters:'managefee_defaulters' };
   function initManageFeeView(){
     populateMfAyBadgeAndSelect();
     const classSel = document.getElementById('mfClassFilter');
@@ -3187,6 +3365,12 @@
     if(secSel.options.length <= 1){
       SECTIONS.forEach(s => { const o=document.createElement('option'); o.value=s; o.textContent='Section '+s; secSel.appendChild(o); });
     }
+    const accessibleTabs = Object.keys(MF_TAB_PERM_KEYS).filter(t => getManageFeeTabAccess(currentUser.role, MF_TAB_PERM_KEYS[t]));
+    Object.keys(MF_TAB_PERM_KEYS).forEach(t => {
+      const btn = document.getElementById('mftab-'+t);
+      if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none';
+    });
+    if(!accessibleTabs.includes(feeTab)) feeTab = accessibleTabs[0] || 'fees';
     switchFeeTab(feeTab);
   }
 
@@ -3206,7 +3390,8 @@
   function switchFeeTab(tab){
     feeTab = tab;
     ['fees','structure','types','discounts','extra','late','defaulters'].forEach(t => {
-      document.getElementById('mftab-'+t).classList.toggle('active', t===tab);
+      const btn = document.getElementById('mftab-'+t);
+      if(btn) btn.classList.toggle('active', t===tab);
     });
     document.getElementById('mfSearchRow').style.display = tab==='fees' ? 'flex' : 'none';
     if(tab === 'fees') feeView = 'grid';
@@ -3217,6 +3402,10 @@
   function renderFeeBody(){
     const body = document.getElementById('feeBody');
     if(!body) return;
+    if(!getManageFeeTabAccess(currentUser.role, MF_TAB_PERM_KEYS[feeTab])){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
     if(feeTab === 'fees'){
       if(feeView === 'grid') return renderFeeClassGrid(body);
       if(feeView === 'section') return renderFeeSectionList(body);
@@ -3336,8 +3525,8 @@
         ${s.photo ? `<img class="profile-photo" src="${s.photo}">` : `<div class="profile-photo">${initials(s)}</div>`}
         <div><h2>${s.firstName} ${s.lastName}</h2><div class="p-meta">${s.admissionNo} · ${s.className} — Section ${s.section}${hasSiblings ? ` · <span class="pill">Siblings: ${familyIds.length-1}</span>` : ''}</div></div>
         <div class="profile-actions">
-          <button class="btn btn-ghost" onclick="addAdmissionFeeForStudent('${s.id}')">➕ Add Admission Fee</button>
-          <button class="btn btn-ghost" onclick="openExtraFeeAssignModal('${s.id}')">➕ Assign Extra Fee</button>
+          ${canSub('managefee_collection','managefee','create') ? `<button class="btn btn-ghost" onclick="addAdmissionFeeForStudent('${s.id}')">➕ Add Admission Fee</button>` : ''}
+          ${canSub('managefee_collection','managefee','create') ? `<button class="btn btn-ghost" onclick="openExtraFeeAssignModal('${s.id}')">➕ Assign Extra Fee</button>` : ''}
         </div>
       </div>
 
@@ -3399,7 +3588,7 @@
           <div class="pay-summary-item after"><span>Total to Pay</span><b id="ledgerTotalToPay">₹0</b></div>
         </div>
       </div>
-      <div style="margin:16px 0 28px;"><button class="btn btn-primary" onclick="submitLedgerPayments('${s.id}')">💰 Record Payment(s)</button></div>
+      ${canSub('managefee_collection','managefee','create') ? `<div style="margin:16px 0 28px;"><button class="btn btn-primary" onclick="submitLedgerPayments('${s.id}')">💰 Record Payment(s)</button></div>` : ''}
       ` : `<div class="empty-state" style="margin-bottom:24px;"><b>No pending fees</b>Everything's fully paid for this student.</div>`}
 
       ${extras.length ? `
@@ -3414,7 +3603,7 @@
       </tbody></table></div>` : ``}
       <div class="dash-section-title"><div><h3>Payment History</h3></div></div>
       <div class="table-wrap"><table><thead><tr><th>Date</th><th>Category</th><th>Mode</th><th>Amount</th><th>Discount</th><th></th></tr></thead><tbody>
-        ${studentPayments.length ? studentPayments.map(p => `<tr><td>${p.date||'—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${p.mode||'—'}</td><td>${fmtMoney(p.amount)}</td><td>${fmtMoney(p.discount)}</td><td><button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button></td></tr>`).join('') : `<tr><td colspan="6"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
+        ${studentPayments.length ? studentPayments.map(p => `<tr><td>${p.date||'—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${p.mode||'—'}</td><td>${fmtMoney(p.amount)}</td><td>${fmtMoney(p.discount)}</td><td>${canSub('managefee_collection','managefee','print') ? `<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="6"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
       </tbody></table></div>
     `;
   }
@@ -3505,18 +3694,20 @@
 
   /* --- Fee Types --- */
   function renderFeeTypesTab(body){
+    const canCreate = canSub('managefee_types','managefee','create');
+    const canDelete = canSub('managefee_types','managefee','delete');
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:600px;">
         These names are available when creating Extra Fees. The four core recurring categories (Fee, Bus Fee, Stock, Hostel) are structural and managed under Fee Structure — this list is for additional labels you use elsewhere.
       </p>
-      <div class="inline-add-form">
+      ${canCreate ? `<div class="inline-add-form">
         <input class="input" id="newFeeTypeName" placeholder="e.g. Exam Fee" style="max-width:260px;">
         <button class="btn btn-primary" onclick="addFeeType()">🏷️ Add Fee Type</button>
-      </div>
+      </div>` : ''}
       ${feeTypes.map((t,i) => `
         <div class="list-manage-row">
           <div class="lm-name">${t}</div>
-          <button class="btn-danger-text" onclick="removeFeeType(${i})">Remove</button>
+          ${canDelete ? `<button class="btn-danger-text" onclick="removeFeeType(${i})">Remove</button>` : ''}
         </div>`).join('') || `<div class="empty-state"><b>No fee types yet</b></div>`}
     `;
   }
@@ -3587,7 +3778,7 @@
         </div>
         <div style="display:flex; gap:10px;">
           <button class="btn btn-ghost" onclick="toggleDiscApprovalsFilter()">${discListFilter==='pending' ? '✓ Showing Approvals' : 'Approvals'}${pendingCount ? ' ('+pendingCount+')' : ''}</button>
-          <button class="btn btn-primary" onclick="openDiscCreateForm()">+ Create Student Discount</button>
+          ${canSub('managefee_discounts','managefee','create') ? `<button class="btn btn-primary" onclick="openDiscCreateForm()">+ Create Student Discount</button>` : ''}
         </div>
       </div>
       <div class="table-wrap">
@@ -3613,7 +3804,7 @@
             <td>${statusPill(r.status)}</td>
             <td>
               ${currentUser.role==='Admin' && r.status==='Pending' ? `<button class="btn-edit-text" onclick="approveDiscountGroup('${r.batchId}','${r.studentId}')">Approve</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="rejectDiscountGroup('${r.batchId}','${r.studentId}')">Reject</button>&nbsp;·&nbsp;` : ``}
-              <button class="btn-danger-text" onclick="deleteDiscountGroup('${r.batchId}','${r.studentId}')">Delete</button>
+              ${canSub('managefee_discounts','managefee','delete') ? `<button class="btn-danger-text" onclick="deleteDiscountGroup('${r.batchId}','${r.studentId}')">Delete</button>` : ''}
             </td>
           </tr>`;
         }).join('') : `<tr><td colspan="${5+Object.keys(CATS).length}"><div class="empty-state"><b>No discounts found</b></div></td></tr>`}
@@ -3623,15 +3814,15 @@
       <div class="profile-card" style="margin-top:24px; max-width:640px;">
         <h4>Discount Catalog (quick reference)</h4>
         <p style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:12px;">A separate, informal list staff can glance at when recording a one-off payment discount manually — not tied to approval.</p>
-        <div class="inline-add-form">
+        ${canSub('managefee_discounts','managefee','create') ? `<div class="inline-add-form">
           <input class="input" id="newDiscName" placeholder="e.g. Merit Scholarship" style="max-width:220px;">
           <input class="input" id="newDiscAmount" type="number" min="0" placeholder="Amount (₹)" style="max-width:160px;">
           <button class="btn btn-ghost btn-sm" onclick="addDiscountType()">+ Add</button>
-        </div>
+        </div>` : ''}
         ${discountTypes.map((d,i) => `
           <div class="list-manage-row">
             <div><div class="lm-name">${d.name}</div><div class="lm-meta">${fmtMoney(d.amount)}</div></div>
-            <button class="btn-danger-text" onclick="removeDiscountType(${i})">Remove</button>
+            ${canSub('managefee_discounts','managefee','delete') ? `<button class="btn-danger-text" onclick="removeDiscountType(${i})">Remove</button>` : ''}
           </div>`).join('') || `<div style="font-size:0.8rem; color:var(--ink-soft);">No entries yet</div>`}
       </div>
     `;
@@ -3948,16 +4139,16 @@
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:600px;">
         Define one-off extra fees here (e.g. Annual Day, Field Trip). Assign them to individual students from that student's fee page in <b>Student Fees</b>.
       </p>
-      <div class="inline-add-form">
+      ${canSub('managefee_extra','managefee','create') ? `<div class="inline-add-form">
         <input class="input" id="newExtraName" list="feeTypesDatalist" placeholder="e.g. Annual Day Fee" style="max-width:220px;">
         <datalist id="feeTypesDatalist">${feeTypes.map(t => `<option value="${t}">`).join('')}</datalist>
         <input class="input" id="newExtraAmount" type="number" min="0" placeholder="Amount (₹)" style="max-width:160px;">
         <button class="btn btn-primary" onclick="addExtraFeeDef()">+ Add Extra Fee</button>
-      </div>
+      </div>` : ''}
       ${extraFeeDefs.map((e,i) => `
         <div class="list-manage-row">
           <div><div class="lm-name">${e.name}</div><div class="lm-meta">${fmtMoney(e.amount)}</div></div>
-          <button class="btn-danger-text" onclick="removeExtraFeeDef(${i})">Remove</button>
+          ${canSub('managefee_extra','managefee','delete') ? `<button class="btn-danger-text" onclick="removeExtraFeeDef(${i})">Remove</button>` : ''}
         </div>`).join('') || `<div class="empty-state"><b>No extra fees defined yet</b></div>`}
     `;
   }
@@ -4072,13 +4263,13 @@
         <div class="f-field" style="margin-bottom:12px;"><label>Fee Due Date</label><input type="date" class="input" id="lfDueDate" value="${lateFeeSettings.dueDate||''}" style="width:100%;"></div>
         <div class="f-field" style="margin-bottom:12px;"><label>Grace Period (days)</label><input type="number" min="0" class="input" id="lfGrace" value="${lateFeeSettings.graceDays||0}" style="width:100%;"></div>
         <div class="f-field" style="margin-bottom:16px;"><label>Late Fee Amount (₹)</label><input type="number" min="0" class="input" id="lfAmount" value="${lateFeeSettings.amount||0}" style="width:100%;"></div>
-        <button class="btn btn-primary" onclick="saveLateFeeSettings()">⏰ Save Late Fee Rule</button>
+        ${canSub('managefee_late','managefee','edit') ? `<button class="btn btn-primary" onclick="saveLateFeeSettings()">⏰ Save Late Fee Rule</button>` : ''}
       </div>
       <div class="profile-card" style="max-width:420px;">
         <h4>Receipt Numbering</h4>
         <p style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:16px;">Set this if you're switching over from a previous system and want receipt numbers to continue from where you left off (e.g. if your last printed receipt was 001666, set this to 1667).</p>
         <div class="f-field" style="margin-bottom:16px;"><label>Next Receipt Starts At</label><input type="number" min="1" class="input" id="rsStart" value="${receiptSettings.startNumber||1}" style="width:100%;"></div>
-        <button class="btn btn-primary" onclick="saveReceiptSettings()">Save Receipt Numbering</button>
+        ${canSub('managefee_late','managefee','edit') ? `<button class="btn btn-primary" onclick="saveReceiptSettings()">Save Receipt Numbering</button>` : ''}
       </div>
     `;
   }
@@ -4148,6 +4339,8 @@
   function downloadDefaultersPDF(){ exportRowsToPDF('Fee Defaulters', '', defaultersReportRows()); }
 
   function renderDefaultersTab(body){
+    const canNotify = canSub('managefee_defaulters','managefee','create');
+    const canPrintDefaulters = canSub('managefee_defaulters','managefee','print');
     let list = computeDefaulters();
     if(defaulterFilters.className) list = list.filter(d => d.student.className===defaulterFilters.className);
     if(defaulterFilters.section) list = list.filter(d => d.student.section===defaulterFilters.section);
@@ -4173,10 +4366,10 @@
         </div>
       </div>
       <div class="notify-scope-bar">
-        <button class="btn btn-ghost btn-sm" onclick="openNotifyModal('all')">Notify All Defaulters</button>
-        ${defaulterFilters.className ? `<button class="btn btn-ghost btn-sm" onclick="openNotifyModal('filtered')">Notify ${defaulterFilters.className}${defaulterFilters.section?' - '+defaulterFilters.section:''}</button>` : ``}
-        <button class="btn btn-ghost btn-sm" onclick="downloadDefaultersExcel()">📥 Excel</button>
-        <button class="btn btn-ghost btn-sm" onclick="downloadDefaultersPDF()">📄 PDF</button>
+        ${canNotify ? `<button class="btn btn-ghost btn-sm" onclick="openNotifyModal('all')">Notify All Defaulters</button>` : ''}
+        ${(canNotify && defaulterFilters.className) ? `<button class="btn btn-ghost btn-sm" onclick="openNotifyModal('filtered')">Notify ${defaulterFilters.className}${defaulterFilters.section?' - '+defaulterFilters.section:''}</button>` : ``}
+        ${canPrintDefaulters ? `<button class="btn btn-ghost btn-sm" onclick="downloadDefaultersExcel()">📥 Excel</button>` : ''}
+        ${canPrintDefaulters ? `<button class="btn btn-ghost btn-sm" onclick="downloadDefaultersPDF()">📄 PDF</button>` : ''}
       </div>
       <div class="table-wrap">
         <table>
@@ -4189,7 +4382,7 @@
               <td>${d.parentPhone || '—'}</td>
               <td>${lateFeeSettings.dueDate || '—'}</td>
               <td class="balance-tag due">${fmtMoney(d.total)}</td>
-              <td><button class="btn-edit-text" onclick="openNotifyModal('single','${d.student.id}')">Notify</button></td>
+              <td>${canNotify ? `<button class="btn-edit-text" onclick="openNotifyModal('single','${d.student.id}')">Notify</button>` : ''}</td>
             </tr>`).join('')}
           </tbody>
         </table>
@@ -4909,8 +5102,12 @@
   let examSubjView = 'list';
   let resultsFilters = { examId:'', className:'', section:'' };
 
+  const EXAMS_TAB_PERM_KEYS = { exams:'exams_definitions', marks:'exams_marks', entrystatus:'exams_entrystatus', results:'exams_results', holidays:'exams_holidays' };
   function initExamsView(){
     document.getElementById('exAyBadge').textContent = 'AY ' + currentAcademicYearValue;
+    const accessibleTabs = Object.keys(EXAMS_TAB_PERM_KEYS).filter(t => getExamsTabAccess(currentUser.role, EXAMS_TAB_PERM_KEYS[t]));
+    Object.keys(EXAMS_TAB_PERM_KEYS).forEach(t => { const btn = document.getElementById('extab-'+t); if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none'; });
+    if(!accessibleTabs.includes(examTab)) examTab = accessibleTabs[0] || 'exams';
     switchExamTab(examTab);
   }
 
@@ -4928,6 +5125,10 @@
   function renderExamBody(){
     const body = document.getElementById('examBody');
     if(!body) return;
+    if(!getExamsTabAccess(currentUser.role, EXAMS_TAB_PERM_KEYS[examTab])){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
     if(examTab === 'exams'){
       if(examSubjView === 'list') return renderExamsListTab(body);
       if(examSubjView === 'grid') return renderSubjConfigGrid(body);
@@ -5006,14 +5207,23 @@
 
   /* --- Result module (Admit Cards, Progress Reports, Consolidated, Grading Scale, Templates) --- */
   let resultTab = 'admitcards';
+  const RESULT_TAB_PERM_KEYS = { admitcards:'result_admitcards', roomallotment:'result_roomallotment', progress:'result_progress', consolidated:'result_consolidated', examtemplates:'result_examtemplates', consolscale:'result_consolscale', grading:'result_grading', templates:'result_templates' };
+  const RESULT_TABS = ['admitcards','roomallotment','progress','consolidated','examtemplates','consolscale','grading','templates'];
   function initResultView(){
     document.getElementById('resAyBadge').textContent = 'AY ' + currentAcademicYearValue;
+    const accessibleTabs = RESULT_TABS.filter(t => getResultTabAccess(currentUser.role, RESULT_TAB_PERM_KEYS[t]));
+    RESULT_TABS.forEach(t => {
+      const btn = document.getElementById('restab-'+t);
+      if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none';
+    });
+    if(!accessibleTabs.includes(resultTab)) resultTab = accessibleTabs[0] || 'admitcards';
     switchResultTab(resultTab);
   }
   function switchResultTab(tab){
     resultTab = tab;
-    ['admitcards','roomallotment','progress','consolidated','examtemplates','consolscale','grading','templates'].forEach(t => {
-      document.getElementById('restab-'+t).classList.toggle('active', t===tab);
+    RESULT_TABS.forEach(t => {
+      const btn = document.getElementById('restab-'+t);
+      if(btn) btn.classList.toggle('active', t===tab);
     });
     if(tab === 'admitcards') admitCardsView = 'grid';
     renderResultBody();
@@ -5021,6 +5231,10 @@
   function renderResultBody(){
     const body = document.getElementById('resultBody');
     if(!body) return;
+    if(!getResultTabAccess(currentUser.role, RESULT_TAB_PERM_KEYS[resultTab])){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
     if(resultTab === 'admitcards'){
       if(admitCardsView === 'grid') return renderAdmitCardsGrid(body);
       if(admitCardsView === 'roster') return renderAdmitCardsRoster(body);
@@ -5056,11 +5270,13 @@
     const counts = {};
     Object.keys(HOLIDAY_TYPES).forEach(t => counts[t] = 0);
     examHolidays.forEach(h => { const t = h.type||'Custom'; counts[t] = (counts[t]||0)+1; });
+    const canCreateHol = canSub('exams_holidays','exams','create');
+    const canDeleteHol = canSub('exams_holidays','exams','delete');
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:600px;">
         Mark holidays that fall during exam season — helpful when scheduling subject dates so you don't accidentally book a paper on a day off.
       </p>
-      <div class="form-grid" style="max-width:640px; margin-bottom:12px;">
+      ${canCreateHol ? `<div class="form-grid" style="max-width:640px; margin-bottom:12px;">
         <div class="f-field"><label>Date</label><input type="date" id="newHolidayDate"></div>
         <div class="f-field"><label>Name</label><input type="text" id="newHolidayName" placeholder="e.g. Independence Day"></div>
         <div class="f-field"><label>Type</label>
@@ -5068,7 +5284,7 @@
         </div>
         <div class="f-field full"><label>Note</label><input type="text" id="newHolidayNote" placeholder="Optional"></div>
       </div>
-      <button class="btn btn-primary btn-sm" style="margin-bottom:20px;" onclick="addExamHoliday()">+ Add Holiday</button>
+      <button class="btn btn-primary btn-sm" style="margin-bottom:20px;" onclick="addExamHoliday()">+ Add Holiday</button>` : ''}
       <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; font-size:0.85rem;">
         <b>Total: ${examHolidays.length} holiday${examHolidays.length===1?'':'s'}</b>
         ${Object.keys(HOLIDAY_TYPES).map(t => `${holidayBadge(t)} <span style="color:var(--ink-soft); margin-right:8px;">${counts[t]}</span>`).join('')}
@@ -5076,7 +5292,7 @@
       <div class="table-wrap" style="max-width:760px;">
         <table><thead><tr><th>Holiday</th><th>Date</th><th>Type</th><th>Note</th><th></th></tr></thead>
         <tbody>
-        ${sorted.length ? sorted.map(h => `<tr><td class="name-cell">${h.name}</td><td>${h.date}</td><td>${holidayBadge(h.type||'Custom')}</td><td>${h.note||'—'}</td><td><button class="btn-danger-text" onclick="removeExamHoliday('${h.date}','${h.name.replace(/'/g,"\\'")}')">Remove</button></td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No holidays added yet</b></div></td></tr>`}
+        ${sorted.length ? sorted.map(h => `<tr><td class="name-cell">${h.name}</td><td>${h.date}</td><td>${holidayBadge(h.type||'Custom')}</td><td>${h.note||'—'}</td><td>${canDeleteHol ? `<button class="btn-danger-text" onclick="removeExamHoliday('${h.date}','${h.name.replace(/'/g,"\\'")}')">Remove</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No holidays added yet</b></div></td></tr>`}
         </tbody></table>
       </div>
     `;
@@ -5108,26 +5324,29 @@
 
   /* --- Tab: Exams list + Exam Types + Subject configuration --- */
   function renderExamsListTab(body){
+    const canCreate = canSub('exams_definitions','exams','create');
+    const canEdit = canSub('exams_definitions','exams','edit');
+    const canDelete = canSub('exams_definitions','exams','delete');
     body.innerHTML = `
       <div class="profile-card" style="margin-bottom:20px;">
         <h4>Exam Types</h4>
-        <div class="inline-add-form" style="margin-bottom:10px;">
+        ${canCreate ? `<div class="inline-add-form" style="margin-bottom:10px;">
           <input class="input" id="newExamTypeName" placeholder="e.g. Unit Test 3" style="max-width:220px;">
           <button class="btn btn-ghost btn-sm" onclick="addExamType()">+ Add Type</button>
-        </div>
+        </div>` : ''}
         <div style="display:flex; flex-wrap:wrap; gap:8px;">
-          ${examTypes.map((t,i) => `<span class="pill" style="display:flex; align-items:center; gap:6px;">${t} <button onclick="removeExamType(${i})" style="background:none; border:none; color:var(--magenta); font-weight:700; cursor:pointer;">&times;</button></span>`).join('') || '<span style="font-size:0.82rem; color:var(--ink-soft);">No exam types yet</span>'}
+          ${examTypes.map((t,i) => `<span class="pill" style="display:flex; align-items:center; gap:6px;">${t} ${canDelete ? `<button onclick="removeExamType(${i})" style="background:none; border:none; color:var(--magenta); font-weight:700; cursor:pointer;">&times;</button>` : ''}</span>`).join('') || '<span style="font-size:0.82rem; color:var(--ink-soft);">No exam types yet</span>'}
         </div>
       </div>
 
-      <button class="btn btn-primary" style="margin-bottom:16px;" onclick="openExamModal()">+ Add Exam</button>
+      ${canCreate ? `<button class="btn btn-primary" style="margin-bottom:16px;" onclick="openExamModal()">+ Add Exam</button>` : ''}
       ${examDefs.length ? examDefs.map(ex => `
         <div class="list-manage-row">
           <div><div class="lm-name">${ex.name}</div><div class="lm-meta">${ex.examType||'—'} · ${ex.startDate ? (ex.startDate + (ex.endDate && ex.endDate!==ex.startDate ? ' – ' + ex.endDate : '')) : 'No dates set'}</div></div>
           <div style="display:flex; gap:10px;">
-            <button class="btn-edit-text" onclick="openSubjConfigGrid('${ex.id}')">Configure Subjects</button>
-            <button class="btn-edit-text" onclick="openExamModal('${ex.id}')">Edit</button>
-            <button class="btn-danger-text" onclick="deleteExam('${ex.id}')">Delete</button>
+            ${canEdit ? `<button class="btn-edit-text" onclick="openSubjConfigGrid('${ex.id}')">Configure Subjects</button>` : ''}
+            ${canEdit ? `<button class="btn-edit-text" onclick="openExamModal('${ex.id}')">Edit</button>` : ''}
+            ${canDelete ? `<button class="btn-danger-text" onclick="deleteExam('${ex.id}')">Delete</button>` : ''}
           </div>
         </div>
       `).join('') : `<div class="empty-state"><b>No exams yet</b>Click "+ Add Exam" to create your first one.</div>`}
@@ -5201,7 +5420,7 @@
     const summary = getClassSubjectSummary(exam, examCurrentClass);
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToExamsList()">All Exams</a> &nbsp;/&nbsp; <a onclick="backToSubjConfigGrid()">${exam.name}</a> &nbsp;/&nbsp; ${examCurrentClass}</div>
-      <button class="btn btn-primary" style="margin-bottom:16px;" onclick="openSubjectModal()">+ Add Subject</button>
+      ${canSub('exams_definitions','exams','edit') ? `<button class="btn btn-primary" style="margin-bottom:16px;" onclick="openSubjectModal()">+ Add Subject</button>` : ''}
       <div class="table-wrap">
         <table><thead><tr><th>Subject</th><th>Code</th><th>Sections</th><th>Staff</th><th>Max Marks</th><th>Date</th><th>Countable</th><th>Elective</th><th></th></tr></thead>
         <tbody>
@@ -5215,7 +5434,7 @@
             <td>${s.date||'—'}</td>
             <td>${s.countable!==false ? '✓' : '—'}</td>
             <td>${s.elective ? '✓' : '—'}</td>
-            <td><button class="btn-edit-text" onclick="openSubjectModal('${s.name.replace(/'/g,"\\'")}')">Edit</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteSubjectFromClass('${s.name.replace(/'/g,"\\'")}')">Remove</button></td>
+            <td>${canSub('exams_definitions','exams','edit') ? `<button class="btn-edit-text" onclick="openSubjectModal('${s.name.replace(/'/g,"\\'")}')">Edit</button>` : ''}${(canSub('exams_definitions','exams','edit') && canSub('exams_definitions','exams','delete')) ? '&nbsp;·&nbsp;' : ''}${canSub('exams_definitions','exams','delete') ? `<button class="btn-danger-text" onclick="deleteSubjectFromClass('${s.name.replace(/'/g,"\\'")}')">Remove</button>` : ''}</td>
           </tr>
         `).join('') : `<tr><td colspan="9"><div class="empty-state"><b>No subjects yet</b>Click "+ Add Subject" to add one.</div></td></tr>`}
         </tbody></table>
@@ -5412,11 +5631,12 @@
     const list = students.filter(s => s.className===examCurrentClass && s.section===examCurrentSection && isActive(s))
       .sort((a,b) => (a.firstName||'').localeCompare(b.firstName||''));
     const getResult = (studentId, subject) => examResults.find(r => r.examId===exam.id && r.studentId===studentId && r.subject===subject);
+    const canEnterMarks = canSub('exams_marks','exams','edit');
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToMarksGrid()">All Classes</a> &nbsp;/&nbsp; ${examCurrentClass} — Section ${examCurrentSection} &nbsp;/&nbsp; ${exam.name}</div>
-      <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+      ${canEnterMarks ? `<div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
         <label class="btn btn-ghost btn-sm" style="cursor:pointer;">📤 Upload via Excel<input type="file" accept=".xlsx,.xls" id="marksExcelInput" style="display:none;" onchange="importMarksExcel(event)"></label>
-      </div>
+      </div>` : ''}
       <div class="table-wrap" style="overflow-x:auto;">
         <table><thead><tr>
           <th>Student</th>
@@ -5432,9 +5652,9 @@
               const markVal = r && !isAbsent ? r.marks : '';
               return `<td>
                 <div style="display:flex; align-items:center; gap:5px;">
-                  <input type="number" class="marks-input" min="0" max="${subj.maxMarks}" data-student="${s.id}" data-subject="${subj.name.replace(/"/g,'&quot;')}" value="${markVal}" ${isAbsent?'disabled':''} style="width:64px;">
+                  <input type="number" class="marks-input" min="0" max="${subj.maxMarks}" data-student="${s.id}" data-subject="${subj.name.replace(/"/g,'&quot;')}" value="${markVal}" ${(isAbsent||!canEnterMarks)?'disabled':''} style="width:64px;">
                   <label style="font-size:0.68rem; color:var(--ink-soft); display:flex; align-items:center; gap:2px; cursor:pointer;" title="Mark absent for this subject">
-                    <input type="checkbox" class="marks-absent-check" data-student="${s.id}" data-subject="${subj.name.replace(/"/g,'&quot;')}" ${isAbsent?'checked':''} onchange="onMarksAbsentToggle(this)"> Abs
+                    <input type="checkbox" class="marks-absent-check" data-student="${s.id}" data-subject="${subj.name.replace(/"/g,'&quot;')}" ${isAbsent?'checked':''} ${!canEnterMarks?'disabled':''} onchange="onMarksAbsentToggle(this)"> Abs
                   </label>
                 </div>
               </td>`;
@@ -5444,7 +5664,7 @@
         </tbody></table>
         ${list.length===0 ? `<div class="empty-state"><b>No students here</b></div>` : ``}
       </div>
-      <div style="margin-top:16px;"><button class="btn btn-primary" onclick="saveMarksSheet()">Save Marks</button></div>
+      ${canEnterMarks ? `<div style="margin-top:16px;"><button class="btn btn-primary" onclick="saveMarksSheet()">Save Marks</button></div>` : ''}
     `;
   }
   function onMarksAbsentToggle(el){
@@ -6327,6 +6547,7 @@
   }
   function renderHallTicketsSubTab(el){
     const cfg = roomAllotConfig();
+    const canEditHT = getResultTabAccess(currentUser.role, 'result_roomallotment', 'edit');
     const classList = (cfg.selectedClasses && cfg.selectedClasses.length) ? cfg.selectedClasses : CLASS_LEVELS;
     el.innerHTML = `
       <div class="profile-card" style="margin-bottom:16px;">
@@ -6340,14 +6561,14 @@
           </div>
           <div class="f-field"><label>Prefix</label><input type="text" id="raHTPrefix" value="${roomAllotHTPrefix}"></div>
           <div class="f-field"><label>Start Number</label><input type="number" id="raHTStart" min="1" value="${roomAllotHTStart}"></div>
-          <div class="f-field" style="align-self:flex-end;"><button class="btn btn-primary btn-sm" ${roomAllotHTClass?'':'disabled'} onclick="regenHallTicketsForClass()">Auto-Generate</button></div>
+          ${canEditHT ? `<div class="f-field" style="align-self:flex-end;"><button class="btn btn-primary btn-sm" ${roomAllotHTClass?'':'disabled'} onclick="regenHallTicketsForClass()">Auto-Generate</button></div>` : ''}
         </div>
         <span style="font-size:0.72rem; color:var(--ink-soft);">Students are numbered girls-first, then boys, in the order shown below. Auto-Generate fills every student in this class — you can still edit individual numbers afterward.</span>
       </div>
-      ${!roomAllotHTClass ? '' : renderHallTicketsTable()}
+      ${!roomAllotHTClass ? '' : renderHallTicketsTable(canEditHT)}
     `;
   }
-  function renderHallTicketsTable(){
+  function renderHallTicketsTable(canEditHT){
     const studs = roomAllotStudentsForClass(roomAllotHTClass);
     if(!studs.length) return `<div class="empty-state"><b>No active students in this class</b></div>`;
     const rows = studs.map(s => {
@@ -6357,7 +6578,7 @@
         <td class="id-cell">${s.admissionNo||''}</td>
         <td>${s.section||''}</td>
         <td>${s.gender||''}</td>
-        <td><input type="text" style="width:150px;" value="${ht?ht.htNumber:''}" onchange="saveHallTicketNumber('${s.id}', this.value)"></td>
+        <td>${canEditHT ? `<input type="text" style="width:150px;" value="${ht?ht.htNumber:''}" onchange="saveHallTicketNumber('${s.id}', this.value)">` : (ht?ht.htNumber:'—')}</td>
       </tr>`;
     }).join('');
     return `<div class="table-wrap"><table><thead><tr><th>Student</th><th>Admission No</th><th>Section</th><th>Gender</th><th>Hall Ticket No.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
@@ -6431,10 +6652,13 @@
   /* --- Rooms & Matrix --- */
   function renderRoomsMatrixSubTab(el){
     const cfg = roomAllotConfig();
+    const canEditRooms = getResultTabAccess(currentUser.role, 'result_roomallotment', 'edit');
+    const canCreateRooms = getResultTabAccess(currentUser.role, 'result_roomallotment', 'create');
+    const canDeleteRooms = getResultTabAccess(currentUser.role, 'result_roomallotment', 'delete');
     const classList = (cfg.selectedClasses && cfg.selectedClasses.length) ? cfg.selectedClasses : CLASS_LEVELS;
     const roomRows = rooms.map(r => `<tr>
       <td>${r.name}</td><td>${r.capacity}</td>
-      <td><button class="btn-edit-text" onclick="editExamRoom('${r.id}')">Edit</button> &nbsp; <button class="btn-edit-text" onclick="deleteExamRoom('${r.id}')">Delete</button></td>
+      <td>${canEditRooms ? `<button class="btn-edit-text" onclick="editExamRoom('${r.id}')">Edit</button>` : ''} &nbsp; ${canDeleteRooms ? `<button class="btn-edit-text" onclick="deleteExamRoom('${r.id}')">Delete</button>` : ''}</td>
     </tr>`).join('');
     const totalCap = rooms.reduce((s,r) => s+(Number(r.capacity)||0), 0);
     let matrixRows = '', grandBoys=0, grandGirls=0, grandTotal=0;
@@ -6454,7 +6678,7 @@
         <h4>Rooms</h4>
         <div class="table-wrap" style="margin:10px 0;"><table><thead><tr><th>Room Name</th><th>Capacity</th><th></th></tr></thead><tbody>${roomRows || '<tr><td colspan="3" style="color:var(--ink-soft);">No rooms added yet.</td></tr>'}</tbody></table></div>
         <div style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:10px;">Total capacity: ${totalCap} seats</div>
-        <button class="btn btn-primary btn-sm" onclick="openExamRoomModal()">+ Add Room</button>
+        ${canCreateRooms ? `<button class="btn btn-primary btn-sm" onclick="openExamRoomModal()">+ Add Room</button>` : ''}
       </div>
       <div class="profile-card">
         <h4>Class × Section Matrix — Selected Classes</h4>
@@ -6660,7 +6884,7 @@
           <table><thead><tr><th>Room No.</th><th>Invigilator</th><th>Class</th><th>From</th><th>To</th><th>Total</th><th>Total in Room</th><th>Absentees</th><th>Present</th><th>Signature</th></tr></thead>
           <tbody>${renderFinalPrintoutTable(roomBlocks, corridorBlock)}</tbody></table>
         </div>
-        <button class="btn btn-primary" onclick="printFinalRoomAllotment()">Print Final Room Allotment</button>
+        ${getResultTabAccess(currentUser.role, 'result_roomallotment', 'print') ? `<button class="btn btn-primary" onclick="printFinalRoomAllotment()">Print Final Room Allotment</button>` : ''}
       </div>
     `;
   }
@@ -6748,7 +6972,7 @@
           <table><thead><tr><th>Hall Ticket No.</th><th>Name</th><th>Class</th><th>Room</th></tr></thead>
           <tbody>${filtered.map(d => `<tr><td>${d.ht}</td><td>${d.name}</td><td>${d.className} - ${d.section}</td><td>${d.room}</td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--ink-soft);">No hall ticket numbers generated yet.</td></tr>'}</tbody></table>
         </div>
-        <button class="btn btn-primary" onclick="printNoticeBoard()">Print Notice Board Sheet</button>
+        ${getResultTabAccess(currentUser.role, 'result_roomallotment', 'print') ? `<button class="btn btn-primary" onclick="printNoticeBoard()">Print Notice Board Sheet</button>` : ''}
       </div>
     `;
   }
@@ -6834,8 +7058,9 @@
       <div class="breadcrumb"><a onclick="backToAdmitCardsGrid()">All Classes</a> &nbsp;/&nbsp; ${admitCardsClass} — Section ${admitCardsSection} &nbsp;/&nbsp; ${exam.name}</div>
       ${subjects.length===0 ? `<div class="empty-state" style="margin-bottom:16px;"><b>No subjects configured yet</b>Hall tickets need at least one dated subject — configure subjects for this class &amp; section under the "Exams" tab first.</div>` : ``}
       ${subjects.length>0 && missingDates.length>0 ? `<div class="empty-state" style="margin-bottom:16px; border-color:var(--gold);"><b>⚠ ${missingDates.length} subject${missingDates.length===1?'':'s'} still need${missingDates.length===1?'s':''} an exam date</b>${missingDates.map(s=>s.name).join(', ')} — set a date for each under "Exams" → Configure Subjects before printing hall tickets.</div>` : ``}
+      ${(() => { const canPrint = getResultTabAccess(currentUser.role, 'result_admitcards', 'print'); return `
       <div style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:16px;">
-        <button class="btn btn-primary" onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', null)" ${(list.length===0 || subjects.length===0 || missingDates.length>0)?'disabled':''}>Print All Admit Cards</button>
+        ${canPrint ? `<button class="btn btn-primary" onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', null)" ${(list.length===0 || subjects.length===0 || missingDates.length>0)?'disabled':''}>Print All Admit Cards</button>` : ''}
         <div class="f-field" style="max-width:230px; margin-bottom:0;">
           <label>Cards per A4 Sheet</label>
           <select id="admitCardsPerPageSelect" onchange="admitCardsPerPage=parseInt(this.value);">
@@ -6850,11 +7075,12 @@
         ${list.map(s => `<tr>
           <td class="name-cell">${s.firstName} ${s.lastName}</td>
           <td class="id-cell">${s.admissionNo}</td>
-          <td><button class="btn-edit-text" ${(subjects.length===0 || missingDates.length>0)?'disabled':''} onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', '${s.id}')">Print Admit Card</button></td>
+          <td>${canPrint ? `<button class="btn-edit-text" ${(subjects.length===0 || missingDates.length>0)?'disabled':''} onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', '${s.id}')">Print Admit Card</button>` : ''}</td>
         </tr>`).join('')}
         </tbody></table>
         ${list.length===0 ? `<div class="empty-state"><b>No students here</b></div>` : ``}
       </div>
+      `; })()}
     `;
   }
 
@@ -8283,7 +8509,7 @@
     const list = subjectsList.filter(s => s.className === subjectsCurrentClass);
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToSubjectsGrid()">All Classes</a> &nbsp;/&nbsp; ${subjectsCurrentClass}</div>
-      <button class="btn btn-primary" style="margin-bottom:16px;" onclick="openMasterSubjectModal()">+ Add Subject</button>
+      ${canDo('subjects','create') ? `<button class="btn btn-primary" style="margin-bottom:16px;" onclick="openMasterSubjectModal()">+ Add Subject</button>` : ''}
       <div class="table-wrap">
         <table><thead><tr><th>Subject</th><th>Code</th><th>Sections</th><th>Staff</th><th>Countable</th><th>Elective</th><th></th></tr></thead>
         <tbody>
@@ -8295,7 +8521,7 @@
             <td>${(s.sections||[]).map(sec => `<div style="margin-bottom:3px;"><span class="pill" style="font-size:0.68rem;">${sec}</span> ${subjectStaffForSection(s,sec).map(id => { const st = staffList.find(x => x.id===id); return st ? st.firstName+' '+st.lastName : ''; }).filter(Boolean).join(', ') || '<span style="color:var(--ink-soft);">Unassigned</span>'}</div>`).join('')}</td>
             <td>${s.countable!==false ? '✓' : '—'}</td>
             <td>${s.elective ? '✓' : '—'}</td>
-            <td><button class="btn-edit-text" onclick="openMasterSubjectModal('${s.id}')">Edit</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteMasterSubject('${s.id}')">Delete</button></td>
+            <td>${canDo('subjects','edit') ? `<button class="btn-edit-text" onclick="openMasterSubjectModal('${s.id}')">Edit</button>` : ''}${(canDo('subjects','edit') && canDo('subjects','delete')) ? '&nbsp;·&nbsp;' : ''}${canDo('subjects','delete') ? `<button class="btn-danger-text" onclick="deleteMasterSubject('${s.id}')">Delete</button>` : ''}</td>
           </tr>
         `).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No subjects yet for ${subjectsCurrentClass}</b>Click "+ Add Subject" to add the first one.</div></td></tr>`}
         </tbody></table>
@@ -8574,10 +8800,10 @@
           <td>${st.doj||'—'}</td>
           <td>
             <div style="display:flex; gap:10px;">
-              <button title="Grant login access" onclick="openLoginForStaff('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">🔑</button>
+              ${canDo('staff','edit') ? `<button title="Grant login access" onclick="openLoginForStaff('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">🔑</button>` : ''}
               <button title="View profile" onclick="openStaffProfile('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">👁</button>
-              <button title="Edit" onclick="openStaffWizard('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--teal); font-size:1rem;">✎</button>
-              <button title="Delete" onclick="deleteStaff('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">🗑</button>
+              ${canDo('staff','edit') ? `<button title="Edit" onclick="openStaffWizard('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--teal); font-size:1rem;">✎</button>` : ''}
+              ${canDo('staff','delete') ? `<button title="Delete" onclick="deleteStaff('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">🗑</button>` : ''}
             </div>
           </td>
         </tr>`).join('')}
@@ -8611,8 +8837,8 @@
           <div class="p-meta">${st.staffId} · ${st.designation||'—'} · ${st.department} · <span class="pill">${st.status||'Active'}</span>${st.classTeacherClass ? ` · <span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">Class Teacher: ${st.classTeacherClass} — ${st.classTeacherSection}</span>` : ''}</div>
         </div>
         <div class="profile-actions">
-          <button class="btn btn-ghost" onclick="openStaffWizard('${st.id}')">Edit</button>
-          <button class="btn btn-danger-text" style="border:1.5px solid var(--border); border-radius:10px; padding:11px 20px;" onclick="deleteStaff('${st.id}')">Delete</button>
+          ${canDo('staff','edit') ? `<button class="btn btn-ghost" onclick="openStaffWizard('${st.id}')">Edit</button>` : ''}
+          ${canDo('staff','delete') ? `<button class="btn btn-danger-text" style="border:1.5px solid var(--border); border-radius:10px; padding:11px 20px;" onclick="deleteStaff('${st.id}')">Delete</button>` : ''}
         </div>
       </div>
       <div class="profile-grid">
@@ -9002,32 +9228,34 @@
 
   /* --- Departments & Designations --- */
   function renderStaffDeptsTab(body){
+    const canCreate = getStaffSubpageAccess(currentUser.role, 'staff_depts', 'create');
+    const canDelete = getStaffSubpageAccess(currentUser.role, 'staff_depts', 'delete');
     body.innerHTML = `
       <div class="profile-card" style="margin-bottom:20px; max-width:500px;">
         <h4>Departments</h4>
-        <div class="inline-add-form" style="margin-bottom:10px;">
+        ${canCreate ? `<div class="inline-add-form" style="margin-bottom:10px;">
           <input class="input" id="newDeptName" placeholder="e.g. Sports" style="max-width:220px;">
           <button class="btn btn-ghost btn-sm" onclick="addStaffDept()">+ Add</button>
-        </div>
-        ${staffDepartments.map((d,i) => `<div class="list-manage-row"><div class="lm-name">${d}</div><button class="btn-danger-text" onclick="removeStaffDept(${i})">Remove</button></div>`).join('') || `<div style="font-size:0.82rem; color:var(--ink-soft);">No departments yet</div>`}
+        </div>` : ''}
+        ${staffDepartments.map((d,i) => `<div class="list-manage-row"><div class="lm-name">${d}</div>${canDelete ? `<button class="btn-danger-text" onclick="removeStaffDept(${i})">Remove</button>` : ''}</div>`).join('') || `<div style="font-size:0.82rem; color:var(--ink-soft);">No departments yet</div>`}
       </div>
       <div class="profile-card" style="margin-bottom:20px; max-width:500px;">
         <h4>Roles / Designations</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin-bottom:10px;">A staff member's single primary title (e.g. Teacher, Driver).</p>
-        <div class="inline-add-form" style="margin-bottom:10px;">
+        ${canCreate ? `<div class="inline-add-form" style="margin-bottom:10px;">
           <input class="input" id="newDesigName" placeholder="e.g. Sports Coach" style="max-width:220px;">
           <button class="btn btn-ghost btn-sm" onclick="addStaffDesignation()">+ Add</button>
-        </div>
-        ${staffDesignations.map((d,i) => `<div class="list-manage-row"><div class="lm-name">${d}</div><button class="btn-danger-text" onclick="removeStaffDesignation(${i})">Remove</button></div>`).join('') || `<div style="font-size:0.82rem; color:var(--ink-soft);">No designations yet</div>`}
+        </div>` : ''}
+        ${staffDesignations.map((d,i) => `<div class="list-manage-row"><div class="lm-name">${d}</div>${canDelete ? `<button class="btn-danger-text" onclick="removeStaffDesignation(${i})">Remove</button>` : ''}</div>`).join('') || `<div style="font-size:0.82rem; color:var(--ink-soft);">No designations yet</div>`}
       </div>
       <div class="profile-card" style="max-width:500px;">
         <h4>Job Types</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin-bottom:10px;">Extra responsibilities a staff member can hold — a person can have several at once (e.g. Class Teacher + Exam Duty).</p>
-        <div class="inline-add-form" style="margin-bottom:10px;">
+        ${canCreate ? `<div class="inline-add-form" style="margin-bottom:10px;">
           <input class="input" id="newJobTypeName" placeholder="e.g. Warden" style="max-width:220px;">
           <button class="btn btn-ghost btn-sm" onclick="addStaffJobType()">+ Add</button>
-        </div>
-        ${staffJobTypes.map((d,i) => `<div class="list-manage-row"><div class="lm-name">${d}</div><button class="btn-danger-text" onclick="removeStaffJobType(${i})">Remove</button></div>`).join('') || `<div style="font-size:0.82rem; color:var(--ink-soft);">No job types yet</div>`}
+        </div>` : ''}
+        ${staffJobTypes.map((d,i) => `<div class="list-manage-row"><div class="lm-name">${d}</div>${canDelete ? `<button class="btn-danger-text" onclick="removeStaffJobType(${i})">Remove</button>` : ''}</div>`).join('') || `<div style="font-size:0.82rem; color:var(--ink-soft);">No job types yet</div>`}
       </div>
     `;
   }
@@ -9531,7 +9759,9 @@
     return opts.join('');
   }
   function renderStaffPayrollTab(body){
-    const canApprove = getRolePermission(currentUser.role, 'staff', 'approve');
+    const canApprove = getStaffSubpageAccess(currentUser.role, 'staff_payroll', 'approve');
+    const canEditPayroll = getStaffSubpageAccess(currentUser.role, 'staff_payroll', 'edit');
+    const canPrintPayroll = getStaffSubpageAccess(currentUser.role, 'staff_payroll', 'print');
     const deptF = document.getElementById('staffDeptFilter') ? document.getElementById('staffDeptFilter').value : '';
     const list = staffList.filter(staffIsActive).filter(st => !deptF || st.department === deptF)
       .sort((a,b) => (a.firstName+a.lastName).localeCompare(b.firstName+b.lastName));
@@ -9592,8 +9822,8 @@
             <td>${rec ? `<span class="pill" style="${locked?'background:rgba(31,122,77,0.13); color:#1f7a4d;':'background:rgba(184,98,27,0.13); color:#b8621b;'}">${rec.status}</span>` : `<span class="pill">Not generated</span>`}</td>
             <td>
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                ${!rec ? `<button class="btn-edit-text" onclick="saveDraftPayroll('${st.id}','${staffPayrollMonth}')">Generate Draft</button>` : ``}
-                ${rec && rec.status==='Draft' ? `<button class="btn-edit-text" onclick="saveDraftPayroll('${st.id}','${staffPayrollMonth}')">Recalculate</button>` : ``}
+                ${!rec && canEditPayroll ? `<button class="btn-edit-text" onclick="saveDraftPayroll('${st.id}','${staffPayrollMonth}')">Generate Draft</button>` : ``}
+                ${rec && rec.status==='Draft' && canEditPayroll ? `<button class="btn-edit-text" onclick="saveDraftPayroll('${st.id}','${staffPayrollMonth}')">Recalculate</button>` : ``}
                 ${rec && rec.status==='Draft' && canApprove ? `<button class="btn-edit-text" style="color:#1f7a4d;" onclick="approvePayroll('${st.id}','${staffPayrollMonth}')">Approve</button>` : ``}
                 ${locked && canApprove ? `<button class="btn-edit-text" style="color:var(--magenta);" onclick="reopenPayroll('${st.id}','${staffPayrollMonth}')">Reopen</button>` : ``}
               </div>
@@ -9617,10 +9847,10 @@
         </table>
         ${list.length===0 ? `<div class="empty-state"><b>No active staff to show</b></div>` : ``}
       </div>
-      <div style="display:flex; gap:10px; margin-top:16px;">
+      ${canPrintPayroll ? `<div style="display:flex; gap:10px; margin-top:16px;">
         <button class="btn btn-ghost btn-sm" onclick="downloadStaffPayrollExcel()">📥 Excel</button>
         <button class="btn btn-ghost btn-sm" onclick="downloadStaffPayrollPDF()">📄 PDF</button>
-      </div>
+      </div>` : ''}
       ${renderSalaryDisbursementCard()}
     `;
   }
@@ -10068,17 +10298,31 @@
   let commsAudienceClass = '', commsAudienceSection = '';
   let commsIndividualId = '';
   let commsPreparedRecipients = [];
+  const COMMS_TAB_PERM_KEYS = { compose:'comms_compose', log:'comms_log' };
   function initCommsView(){
+    const accessibleTabs = Object.keys(COMMS_TAB_PERM_KEYS).filter(t => getCommsTabAccess(currentUser.role, COMMS_TAB_PERM_KEYS[t]));
+    Object.keys(COMMS_TAB_PERM_KEYS).forEach(t => {
+      const btn = document.getElementById('comtab-'+t);
+      if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none';
+    });
+    if(!accessibleTabs.includes(commsTab)) commsTab = accessibleTabs[0] || 'compose';
     switchCommsTab(commsTab);
   }
   function switchCommsTab(tab){
     commsTab = tab;
-    ['compose','log'].forEach(t => document.getElementById('comtab-'+t).classList.toggle('active', t===tab));
+    ['compose','log'].forEach(t => {
+      const btn = document.getElementById('comtab-'+t);
+      if(btn) btn.classList.toggle('active', t===tab);
+    });
     renderCommsBody();
   }
   function renderCommsBody(){
     const body = document.getElementById('commsBody');
     if(!body) return;
+    if(!getCommsTabAccess(currentUser.role, COMMS_TAB_PERM_KEYS[commsTab])){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
     if(commsTab === 'compose') return renderCommsCompose(body);
     if(commsTab === 'log') return renderCommsLog(body);
   }
@@ -10347,7 +10591,7 @@
     preview.innerHTML = `
       <div class="profile-card" style="background:rgba(24,143,134,0.06); border-left:4px solid var(--teal);">
         <p style="font-size:0.85rem; margin-bottom:10px;"><b>${targets.length}</b> recipient${targets.length===1?'':'s'} matched${whatsapp?` · <b>${withPhone.length}</b> have a phone number on file for WhatsApp`:''}.</p>
-        <button class="btn btn-primary" onclick="sendCommsMessage()">Send Now</button>
+        ${canSub('comms_compose','announcements','create') ? `<button class="btn btn-primary" onclick="sendCommsMessage()">Send Now</button>` : ''}
       </div>
     `;
   }
@@ -10402,8 +10646,13 @@
   let nbAudienceScope = 'allstudents', nbAudienceClass = '', nbAudienceSection = '';
   function renderNoticeBoard(body){
     const notices = commsMessages.filter(m => m.channels.includes('In-App') && !m.boardRemoved).slice().sort((a,b) => b.id.localeCompare(a.id));
+    const canCreate = canSub('noticeboard_post','noticeboard','create');
+    const canEditNb = canSub('noticeboard_post','noticeboard','edit');
+    const canDeleteNb = canSub('noticeboard_post','noticeboard','delete');
+    const canCreateHeading = canSub('noticeboard_headings','noticeboard','create');
+    const canDeleteHeading = canSub('noticeboard_headings','noticeboard','delete');
     body.innerHTML = `
-      <div class="profile-card" style="margin-bottom:20px;">
+      ${canCreate ? `<div class="profile-card" style="margin-bottom:20px;">
         <h4>✍️ Post a New Notice</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Posts straight to this board and the public website — no need to go through Communications for a quick notice.</p>
         <div class="form-grid" style="margin-bottom:10px;">
@@ -10423,17 +10672,17 @@
         </div>
         <div id="nbAudienceFields" style="margin-bottom:10px;"></div>
         <button class="btn btn-primary" onclick="postQuickNotice()">Post to Notice Board</button>
-      </div>
+      </div>` : ''}
       <div class="profile-card" style="margin-bottom:20px; max-width:480px;">
         <h4>🏷️ Manage Notice Headings</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 12px;">These are the headings available when posting a notice, here or from Communications.</p>
-        <div style="display:flex; gap:8px; margin-bottom:12px;">
+        ${canCreateHeading ? `<div style="display:flex; gap:8px; margin-bottom:12px;">
           <input class="input" id="newNoticeTypeName" placeholder="e.g. Sports Day Update" style="flex:1;">
           <button class="btn btn-primary btn-sm" onclick="addNoticeTypeDirect()">Add</button>
-        </div>
+        </div>` : ''}
         <div class="table-wrap">
           <table><tbody>
-          ${noticeTypes.map((t,i) => `<tr><td>${t.icon} ${t.name}</td><td style="text-align:right;"><button class="btn-danger-text" onclick="removeNoticeType(${i})">Remove</button></td></tr>`).join('')}
+          ${noticeTypes.map((t,i) => `<tr><td>${t.icon} ${t.name}</td><td style="text-align:right;">${canDeleteHeading ? `<button class="btn-danger-text" onclick="removeNoticeType(${i})">Remove</button>` : ''}</td></tr>`).join('')}
           </tbody></table>
         </div>
       </div>
@@ -10467,8 +10716,8 @@
               <p style="font-size:0.74rem; color:var(--ink-soft); margin-top:8px;">To: ${n.audienceLabel} (${n.recipientCount}) · By ${n.sentBy} on ${n.sentDate}</p>
             </div>
             <div style="white-space:nowrap; flex-shrink:0;">
-              <button class="btn-edit-text" onclick="editNotice('${n.id}')">Edit</button>
-              &nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteNotice('${n.id}')">Take Down</button>
+              ${canEditNb ? `<button class="btn-edit-text" onclick="editNotice('${n.id}')">Edit</button>` : ''}
+              ${(canEditNb && canDeleteNb) ? '&nbsp;·&nbsp;' : ''}${canDeleteNb ? `<button class="btn-danger-text" onclick="deleteNotice('${n.id}')">Take Down</button>` : ''}
             </div>
           </div>
         </div>`;
@@ -10522,6 +10771,7 @@
   /* --- Website Inquiries: admission forms submitted by visitors on the public site --- */
   function renderAdmissionInquiries(body){
     const all = admissionInquiries.slice().sort((a,b) => (b.submittedDate||'').localeCompare(a.submittedDate||''));
+    const canEditInq = canDo('websiteinquiries','edit');
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">
         Admission inquiries submitted through the school website's "Admissions Inquiry Form" appear here automatically —
@@ -10540,11 +10790,11 @@
           <td>${q.parentEmail||'—'}</td>
           <td style="max-width:200px;">${q.notes||'—'}</td>
           <td>
-            <select onchange="setInquiryStatus('${q.id}', this.value)" style="font-size:0.78rem; padding:4px 6px;">
+            ${canEditInq ? `<select onchange="setInquiryStatus('${q.id}', this.value)" style="font-size:0.78rem; padding:4px 6px;">
               ${['New','Contacted','Converted','Declined'].map(s => `<option ${q.status===s?'selected':''}>${s}</option>`).join('')}
-            </select>
+            </select>` : (q.status||'New')}
           </td>
-          <td><button class="btn-edit-text" onclick="convertInquiryToStudent('${q.id}')">Add as Student</button></td>
+          <td>${canEditInq ? `<button class="btn-edit-text" onclick="convertInquiryToStudent('${q.id}')">Add as Student</button>` : ''}</td>
         </tr>`).join('') : `<tr><td colspan="9"><div class="empty-state"><b>No inquiries yet</b>Submissions from the website's Admissions Inquiry Form will show up here.</div></td></tr>`}
         </tbody></table>
       </div>
@@ -10576,8 +10826,10 @@
   const GALLERY_CATEGORIES = { campus:'Campus', event:'Events & Celebrations', trip:'Educational Trips', achieve:'Achievements & Results' };
   let galleryUploadData = '';
   function renderWebsiteGallery(body){
+    const canCreate = canDo('websitegallery','create');
+    const canDelete = canDo('websitegallery','delete');
     body.innerHTML = `
-      <div class="profile-card" style="max-width:520px; margin-bottom:24px;">
+      ${canCreate ? `<div class="profile-card" style="max-width:520px; margin-bottom:24px;">
         <h4>🖼️ Add Photo to Website Gallery</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Uploaded photos appear on the public website's Gallery section immediately, grouped by category.</p>
         <div style="display:flex; align-items:center; gap:16px; margin-bottom:14px;">
@@ -10591,7 +10843,7 @@
           <div class="f-field full"><label>Caption</label><input type="text" id="galleryCaption" placeholder="e.g. Annual Sports Day 2026"></div>
         </div>
         <button class="btn btn-primary" onclick="saveGalleryPhoto()">Add to Gallery</button>
-      </div>
+      </div>` : ''}
 
       <h4 style="margin-bottom:10px;">Gallery Photos (${websiteGallery.length})</h4>
       <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:14px;">
@@ -10601,7 +10853,7 @@
             <div style="padding:8px;">
               <span class="pill" style="font-size:0.6rem;">${GALLERY_CATEGORIES[g.category]||g.category}</span>
               <div style="font-size:0.78rem; margin:6px 0;">${g.caption||''}</div>
-              <button class="btn-danger-text" onclick="deleteGalleryPhoto('${g.id}')">Delete</button>
+              ${canDelete ? `<button class="btn-danger-text" onclick="deleteGalleryPhoto('${g.id}')">Delete</button>` : ''}
             </div>
           </div>
         `).join('') : `<div class="empty-state" style="grid-column:1/-1;"><b>No photos uploaded yet</b>Add one above to have it appear on the website.</div>`}
@@ -10751,7 +11003,9 @@
   function renderAcctIncomeTab(body){
     const q = acctIncomeSearch.toLowerCase();
     const filtered = acctIncome.filter(i => !q || (i.party||'').toLowerCase().includes(q) || i.category.toLowerCase().includes(q) || i.voucherNo.toLowerCase().includes(q)).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_income', 'create');
     body.innerHTML = `
+      ${canCreate ? `
       <div class="profile-card" style="max-width:600px; margin-bottom:24px;">
         <h4>💰 Record Income</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">For anything other than student fees — donations, grants, rental income, interest, and so on.</p>
@@ -10775,6 +11029,7 @@
         </div>
         <button class="btn btn-primary" onclick="saveIncomeVoucher()">Save Income Voucher</button>
       </div>
+      ` : ''}
 
       <h4 style="margin-bottom:10px;">Income Vouchers (${acctIncome.length})</h4>
       <input class="input" style="max-width:280px; margin-bottom:12px;" placeholder="Search vouchers..." value="${acctIncomeSearch}" oninput="acctIncomeSearch=this.value; renderAcctIncomeTab(document.getElementById('accountingBody'));">
@@ -10884,29 +11139,31 @@
 
   /* --- Categories management --- */
   function renderAcctCategoriesTab(body){
+    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_categories', 'create');
+    const canDelete = getAccountingTabAccess(currentUser.role, 'accounting_categories', 'delete');
     body.innerHTML = `
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; max-width:820px;">
         <div class="profile-card">
           <h4>💸 Expense Categories</h4>
-          <div style="display:flex; gap:8px; margin:12px 0;">
+          ${canCreate ? `<div style="display:flex; gap:8px; margin:12px 0;">
             <input class="input" id="acctNewExpCat" placeholder="e.g. Sports Equipment" style="flex:1;">
             <button class="btn btn-primary btn-sm" onclick="addAcctCategory('expense')">Add</button>
-          </div>
+          </div>` : ''}
           <div class="table-wrap">
             <table><tbody>
-            ${acctExpenseCategories.length ? acctExpenseCategories.map((c,i) => `<tr><td>${c}</td><td style="text-align:right;"><button class="btn-danger-text" onclick="removeAcctCategory('expense',${i})">Remove</button></td></tr>`).join('') : `<tr><td><div class="empty-state"><b>No categories yet</b></div></td></tr>`}
+            ${acctExpenseCategories.length ? acctExpenseCategories.map((c,i) => `<tr><td>${c}</td><td style="text-align:right;">${canDelete ? `<button class="btn-danger-text" onclick="removeAcctCategory('expense',${i})">Remove</button>` : ''}</td></tr>`).join('') : `<tr><td><div class="empty-state"><b>No categories yet</b></div></td></tr>`}
             </tbody></table>
           </div>
         </div>
         <div class="profile-card">
           <h4>💰 Income Categories</h4>
-          <div style="display:flex; gap:8px; margin:12px 0;">
+          ${canCreate ? `<div style="display:flex; gap:8px; margin:12px 0;">
             <input class="input" id="acctNewIncCat" placeholder="e.g. Alumni Contribution" style="flex:1;">
             <button class="btn btn-primary btn-sm" onclick="addAcctCategory('income')">Add</button>
-          </div>
+          </div>` : ''}
           <div class="table-wrap">
             <table><tbody>
-            ${acctIncomeCategories.length ? acctIncomeCategories.map((c,i) => `<tr><td>${c}</td><td style="text-align:right;"><button class="btn-danger-text" onclick="removeAcctCategory('income',${i})">Remove</button></td></tr>`).join('') : `<tr><td><div class="empty-state"><b>No categories yet</b></div></td></tr>`}
+            ${acctIncomeCategories.length ? acctIncomeCategories.map((c,i) => `<tr><td>${c}</td><td style="text-align:right;">${canDelete ? `<button class="btn-danger-text" onclick="removeAcctCategory('income',${i})">Remove</button>` : ''}</td></tr>`).join('') : `<tr><td><div class="empty-state"><b>No categories yet</b></div></td></tr>`}
             </tbody></table>
           </div>
         </div>
@@ -10945,18 +11202,32 @@
     renderAcctCategoriesTab(document.getElementById('accountingBody'));
   }
 
+  const HOSTEL_TAB_PERM_KEYS = { rooms:'hostel_rooms', allot:'hostel_allot', roster:'hostel_roster' };
   function initHostelView(){
+    const accessibleTabs = Object.keys(HOSTEL_TAB_PERM_KEYS).filter(t => getHostelTabAccess(currentUser.role, HOSTEL_TAB_PERM_KEYS[t]));
+    Object.keys(HOSTEL_TAB_PERM_KEYS).forEach(t => {
+      const btn = document.getElementById('hstab-'+t);
+      if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none';
+    });
+    if(!accessibleTabs.includes(hostelTab)) hostelTab = accessibleTabs[0] || 'rooms';
     switchHostelTab(hostelTab);
   }
   function switchHostelTab(tab){
     hostelTab = tab;
-    ['rooms','allot','roster'].forEach(t => document.getElementById('hstab-'+t).classList.toggle('active', t===tab));
+    ['rooms','allot','roster'].forEach(t => {
+      const btn = document.getElementById('hstab-'+t);
+      if(btn) btn.classList.toggle('active', t===tab);
+    });
     hsRoomView = 'list';
     renderHostelBody();
   }
   function renderHostelBody(){
     const body = document.getElementById('hostelBody');
     if(!body) return;
+    if(!getHostelTabAccess(currentUser.role, HOSTEL_TAB_PERM_KEYS[hostelTab])){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
     if(hostelTab === 'rooms') return hsRoomView==='edit' ? renderRoomEditor(body) : renderRoomsList(body);
     if(hostelTab === 'allot') return renderHostelAllotTab(body);
     if(hostelTab === 'roster') return renderRoomRosterTab(body);
@@ -10970,9 +11241,12 @@
 
   /* --- Rooms --- */
   function renderRoomsList(body){
+    const canCreate = canSub('hostel_rooms','hostel','create');
+    const canEdit = canSub('hostel_rooms','hostel','edit');
+    const canDelete = canSub('hostel_rooms','hostel','delete');
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:640px;">Each room has its own type, bed capacity, and fee — allot a student and their hostel fee is set to that room's rate immediately.</p>
-      <button class="btn btn-primary btn-sm" style="margin-bottom:16px;" onclick="openRoomEditor()">+ Add Room</button>
+      ${canCreate ? `<button class="btn btn-primary btn-sm" style="margin-bottom:16px;" onclick="openRoomEditor()">+ Add Room</button>` : ''}
       <div class="table-wrap">
         <table><thead><tr><th>Block</th><th>Room No.</th><th>Type</th><th>Capacity</th><th>Occupied</th><th>Fee (₹/yr)</th><th>Warden</th><th></th></tr></thead>
         <tbody>
@@ -10987,7 +11261,7 @@
             <td style="color:${full?'var(--magenta)':'#0f6a63'}; font-weight:700;">${occ} / ${r.capacity}</td>
             <td>${fmtMoney(r.fee)}</td>
             <td>${r.wardenName||'—'}${r.wardenPhone?` <span style="color:var(--ink-soft); font-size:0.78rem;">(${r.wardenPhone})</span>`:''}</td>
-            <td><button class="btn-edit-text" onclick="openRoomEditor('${r.id}')">Edit</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteRoom('${r.id}')">Delete</button></td>
+            <td>${canEdit ? `<button class="btn-edit-text" onclick="openRoomEditor('${r.id}')">Edit</button>` : ''}${(canEdit && canDelete) ? '&nbsp;·&nbsp;' : ''}${canDelete ? `<button class="btn-danger-text" onclick="deleteRoom('${r.id}')">Delete</button>` : ''}</td>
           </tr>`;
         }).join('') : `<tr><td colspan="8"><div class="empty-state"><b>No rooms yet</b>Click "+ Add Room" to set up your first hostel room.</div></td></tr>`}
         </tbody></table>
@@ -11092,7 +11366,7 @@
         </div>
         ${renderHsScopeFields()}
         <div id="hsAllotPreview" style="margin:14px 0; font-size:0.85rem; font-weight:600; color:var(--navy);"></div>
-        <button class="btn btn-primary" onclick="applyHostelAllotment()">Allot Room</button>
+        ${canSub('hostel_allot','hostel','edit') ? `<button class="btn btn-primary" onclick="applyHostelAllotment()">Allot Room</button>` : ''}
       </div>
     `;
     updateHsAllotPreview();
@@ -11196,18 +11470,32 @@
     `;
   }
 
+  const LIB_TAB_PERM_KEYS = { catalog:'library_catalog', issue:'library_issuereturn', overdue:'library_overdue', settings:'library_settings' };
   function initLibraryView(){
+    const accessibleTabs = Object.keys(LIB_TAB_PERM_KEYS).filter(t => getLibraryTabAccess(currentUser.role, LIB_TAB_PERM_KEYS[t]));
+    Object.keys(LIB_TAB_PERM_KEYS).forEach(t => {
+      const btn = document.getElementById('libtab-'+t);
+      if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none';
+    });
+    if(!accessibleTabs.includes(libraryTab)) libraryTab = accessibleTabs[0] || 'catalog';
     switchLibraryTab(libraryTab);
   }
   function switchLibraryTab(tab){
     libraryTab = tab;
-    ['catalog','issue','overdue','settings'].forEach(t => document.getElementById('libtab-'+t).classList.toggle('active', t===tab));
+    ['catalog','issue','overdue','settings'].forEach(t => {
+      const btn = document.getElementById('libtab-'+t);
+      if(btn) btn.classList.toggle('active', t===tab);
+    });
     libCatalogView = 'list';
     renderLibraryBody();
   }
   function renderLibraryBody(){
     const body = document.getElementById('libraryBody');
     if(!body) return;
+    if(!getLibraryTabAccess(currentUser.role, LIB_TAB_PERM_KEYS[libraryTab])){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
     if(libraryTab === 'catalog') return libCatalogView==='edit' ? renderBookEditor(body) : renderCatalogList(body);
     if(libraryTab === 'issue') return renderIssueReturnTab(body);
     if(libraryTab === 'overdue') return renderOverdueTab(body);
@@ -11221,7 +11509,7 @@
     body.innerHTML = `
       <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; align-items:center;">
         <input class="input" style="max-width:280px;" placeholder="Search title, author, ISBN..." value="${libCatalogSearch}" oninput="libCatalogSearch=this.value; renderCatalogList(document.getElementById('libraryBody'));">
-        <button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="openBookEditor()">+ Add Book</button>
+        ${canSub('library_catalog','library','create') ? `<button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="openBookEditor()">+ Add Book</button>` : ''}
       </div>
       <div class="table-wrap">
         <table><thead><tr><th>Title</th><th>Author</th><th>Category</th><th>ISBN</th><th>Total</th><th>Available</th><th>Shelf</th><th>Status</th><th></th></tr></thead>
@@ -11237,7 +11525,7 @@
             <td style="color:${out?'var(--magenta)':'#0f6a63'}; font-weight:700;">${b.availableCopies}</td>
             <td>${b.shelfLocation||'—'}</td>
             <td>${out?`<span class="balance-tag due">All Issued</span>`:`<span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">Available</span>`}</td>
-            <td><button class="btn-edit-text" onclick="openBookEditor('${b.id}')">Edit</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteBook('${b.id}')">Delete</button></td>
+            <td>${canSub('library_catalog','library','edit') ? `<button class="btn-edit-text" onclick="openBookEditor('${b.id}')">Edit</button>` : ''}${(canSub('library_catalog','library','edit') && canSub('library_catalog','library','delete')) ? '&nbsp;·&nbsp;' : ''}${canSub('library_catalog','library','delete') ? `<button class="btn-danger-text" onclick="deleteBook('${b.id}')">Delete</button>` : ''}</td>
           </tr>`;
         }).join('') : `<tr><td colspan="9"><div class="empty-state"><b>No books yet${libCatalogSearch?' match your search':''}</b>${libCatalogSearch?'':'Click "+ Add Book" to add your first title.'}</div></td></tr>`}
         </tbody></table>
@@ -11317,13 +11605,15 @@
     return st ? `${st.firstName} ${st.lastName}` : '';
   }
   function renderIssueReturnTab(body){
+    const canIssue = canSub('library_issuereturn','library','create');
+    const canReturn = canSub('library_issuereturn','library','edit');
     const availableBooks = libraryBooks.filter(b => b.availableCopies > 0);
     const issuedList = libraryIssues.filter(i => i.status==='Issued');
     const q = libIssueSearch.toLowerCase();
     const filteredIssued = issuedList.filter(i => !q || i.bookTitle.toLowerCase().includes(q) || i.borrowerName.toLowerCase().includes(q));
     const today = new Date().toISOString().slice(0,10);
     body.innerHTML = `
-      <div class="profile-card" style="max-width:600px; margin-bottom:24px;">
+      ${canIssue ? `<div class="profile-card" style="max-width:600px; margin-bottom:24px;">
         <h4>📖 Issue a Book</h4>
         <div class="form-grid" style="margin:14px 0;">
           <div class="f-field full">
@@ -11354,7 +11644,7 @@
           </div>
         </div>
         <button class="btn btn-primary" onclick="issueBook()">Issue Book</button>
-      </div>
+      </div>` : ''}
 
       <h4 style="margin-bottom:10px;">📗 Currently Issued (${issuedList.length})</h4>
       <input class="input" style="max-width:280px; margin-bottom:12px;" placeholder="Search issued books or borrower..." value="${libIssueSearch}" oninput="libIssueSearch=this.value; renderIssueReturnTab(document.getElementById('libraryBody'));">
@@ -11369,7 +11659,7 @@
             <td>${i.issueDate}</td>
             <td>${i.dueDate}</td>
             <td>${overdue ? `<span class="balance-tag due">Overdue</span>` : `<span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">On Time</span>`}</td>
-            <td><button class="btn-edit-text" onclick="openReturnBook('${i.id}')">Return</button></td>
+            <td>${canReturn ? `<button class="btn-edit-text" onclick="openReturnBook('${i.id}')">Return</button>` : ''}</td>
           </tr>`;
         }).join('') : `<tr><td colspan="6"><div class="empty-state"><b>Nothing currently issued${libIssueSearch?' match your search':''}</b></div></td></tr>`}
         </tbody></table>
@@ -11459,6 +11749,7 @@
   /* --- Overdue & Fines --- */
   function renderOverdueTab(body){
     const today = new Date().toISOString().slice(0,10);
+    const canReturn = canSub('library_overdue','library','edit');
     const overdue = libraryIssues.filter(i => i.status==='Issued' && i.dueDate < today);
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px;"><b>${overdue.length}</b> item${overdue.length===1?'':'s'} currently overdue.</p>
@@ -11474,7 +11765,7 @@
             <td>${i.dueDate}</td>
             <td style="color:var(--magenta); font-weight:700;">${daysLate}</td>
             <td>${fmtMoney(fine)}</td>
-            <td><button class="btn-edit-text" onclick="openReturnBook('${i.id}')">Return</button></td>
+            <td>${canReturn ? `<button class="btn-edit-text" onclick="openReturnBook('${i.id}')">Return</button>` : ''}</td>
           </tr>`;
         }).join('') : `<tr><td colspan="6"><div class="empty-state"><b>Nothing overdue</b>All issued books are within their due date.</div></td></tr>`}
         </tbody></table>
@@ -11484,15 +11775,17 @@
 
   /* --- Settings --- */
   function renderLibrarySettingsTab(body){
+    const canEditSettings = canSub('library_settings','library','edit');
+    const dis = canEditSettings ? '' : 'disabled';
     body.innerHTML = `
       <div class="profile-card" style="max-width:420px;">
         <h4>⚙️ Library Settings</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">These apply to every new book issued from now on.</p>
         <div class="form-grid" style="margin-bottom:14px;">
-          <div class="f-field"><label>Loan Period (days)</label><input type="number" id="libLoanPeriod" value="${librarySettings.loanPeriodDays||14}" min="1"></div>
-          <div class="f-field"><label>Fine per Day (₹)</label><input type="number" id="libFinePerDay" value="${librarySettings.finePerDay||0}" min="0"></div>
+          <div class="f-field"><label>Loan Period (days)</label><input type="number" id="libLoanPeriod" value="${librarySettings.loanPeriodDays||14}" min="1" ${dis}></div>
+          <div class="f-field"><label>Fine per Day (₹)</label><input type="number" id="libFinePerDay" value="${librarySettings.finePerDay||0}" min="0" ${dis}></div>
         </div>
-        <button class="btn btn-primary" onclick="saveLibrarySettings()">Save Settings</button>
+        ${canEditSettings ? `<button class="btn btn-primary" onclick="saveLibrarySettings()">Save Settings</button>` : ''}
       </div>
     `;
   }
@@ -11502,18 +11795,32 @@
     showToast('Settings saved.');
   }
 
+  const TRANSPORT_TAB_PERM_KEYS = { routes:'transport_routes', assign:'transport_assign', roster:'transport_roster' };
   function initTransportView(){
+    const accessibleTabs = Object.keys(TRANSPORT_TAB_PERM_KEYS).filter(t => getTransportTabAccess(currentUser.role, TRANSPORT_TAB_PERM_KEYS[t]));
+    Object.keys(TRANSPORT_TAB_PERM_KEYS).forEach(t => {
+      const btn = document.getElementById('trtab-'+t);
+      if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none';
+    });
+    if(!accessibleTabs.includes(transportTab)) transportTab = accessibleTabs[0] || 'routes';
     switchTransportTab(transportTab);
   }
   function switchTransportTab(tab){
     transportTab = tab;
-    ['routes','assign','roster'].forEach(t => document.getElementById('trtab-'+t).classList.toggle('active', t===tab));
+    ['routes','assign','roster'].forEach(t => {
+      const btn = document.getElementById('trtab-'+t);
+      if(btn) btn.classList.toggle('active', t===tab);
+    });
     trRouteView = 'list';
     renderTransportBody();
   }
   function renderTransportBody(){
     const body = document.getElementById('transportBody');
     if(!body) return;
+    if(!getTransportTabAccess(currentUser.role, TRANSPORT_TAB_PERM_KEYS[transportTab])){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
     if(transportTab === 'routes') return trRouteView==='edit' ? renderRouteEditor(body) : renderRoutesList(body);
     if(transportTab === 'assign') return renderTransportAssignTab(body);
     if(transportTab === 'roster') return renderRouteRosterTab(body);
@@ -11523,9 +11830,12 @@
     return students.filter(s => isActive(s) && s.needsTransport==='Yes' && s.transportRouteId===routeId);
   }
   function renderRoutesList(body){
+    const canCreate = canSub('transport_routes','transport','create');
+    const canEdit = canSub('transport_routes','transport','edit');
+    const canDelete = canSub('transport_routes','transport','delete');
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:640px;">Each route has its own bus, driver, and list of stops — every stop can carry a different fare based on distance.</p>
-      <button class="btn btn-primary btn-sm" style="margin-bottom:16px;" onclick="openRouteEditor()">+ Add Route</button>
+      ${canCreate ? `<button class="btn btn-primary btn-sm" style="margin-bottom:16px;" onclick="openRouteEditor()">+ Add Route</button>` : ''}
       <div class="table-wrap">
         <table><thead><tr><th>Route</th><th>Bus No.</th><th>Driver</th><th>Stops</th><th>Fare Range</th><th>Students</th><th></th></tr></thead>
         <tbody>
@@ -11540,7 +11850,7 @@
             <td>${r.stops.length}</td>
             <td>${fareRange}</td>
             <td>${count}</td>
-            <td><button class="btn-edit-text" onclick="openRouteEditor('${r.id}')">Edit</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteRoute('${r.id}')">Delete</button></td>
+            <td>${canEdit ? `<button class="btn-edit-text" onclick="openRouteEditor('${r.id}')">Edit</button>` : ''}${(canEdit && canDelete) ? '&nbsp;·&nbsp;' : ''}${canDelete ? `<button class="btn-danger-text" onclick="deleteRoute('${r.id}')">Delete</button>` : ''}</td>
           </tr>`;
         }).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No routes yet</b>Click "+ Add Route" to set up your first bus route.</div></td></tr>`}
         </tbody></table>
@@ -11686,7 +11996,7 @@
         </div>
         ${renderTrScopeFields()}
         <div id="trAssignPreview" style="margin:14px 0; font-size:0.85rem; font-weight:600; color:var(--navy);"></div>
-        <button class="btn btn-primary" onclick="applyTransportAssignment()">Assign Transport</button>
+        ${canSub('transport_assign','transport','edit') ? `<button class="btn btn-primary" onclick="applyTransportAssignment()">Assign Transport</button>` : ''}
       </div>
     `;
     updateTrAssignPreview();
@@ -11802,17 +12112,25 @@
     `;
   }
 
+  const TIMETABLE_TAB_PERM_KEYS = { class:'timetable_class', teacher:'timetable_teacher', periods:'timetable_periods' };
   function initTimetableView(){
+    const accessibleTabs = Object.keys(TIMETABLE_TAB_PERM_KEYS).filter(t => getTimetableTabAccess(currentUser.role, TIMETABLE_TAB_PERM_KEYS[t]));
+    Object.keys(TIMETABLE_TAB_PERM_KEYS).forEach(t => { const btn = document.getElementById('tttab-'+t); if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none'; });
+    if(!accessibleTabs.includes(timetableTab)) timetableTab = accessibleTabs[0] || 'class';
     switchTimetableTab(timetableTab);
   }
   function switchTimetableTab(tab){
     timetableTab = tab;
-    ['class','teacher','periods'].forEach(t => document.getElementById('tttab-'+t).classList.toggle('active', t===tab));
+    ['class','teacher','periods'].forEach(t => { const btn = document.getElementById('tttab-'+t); if(btn) btn.classList.toggle('active', t===tab); });
     renderTimetableBody();
   }
   function renderTimetableBody(){
     const body = document.getElementById('timetableBody');
     if(!body) return;
+    if(!getTimetableTabAccess(currentUser.role, TIMETABLE_TAB_PERM_KEYS[timetableTab])){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
     if(timetableTab === 'class') return renderClassTimetableTab(body);
     if(timetableTab === 'teacher') return renderTeacherTimetableTab(body);
     if(timetableTab === 'periods') return renderTimetablePeriodsTab(body);
@@ -11828,6 +12146,7 @@
     `;
   }
   function renderTtClassGrid(){
+    const canEditTt = canSub('timetable_class','timetable','edit');
     const rows = timetablePeriods.map(p => {
       if(p.isBreak){
         return `<tr><td style="font-weight:600; background:rgba(203,154,46,0.1);">${p.label}<br><span style="font-size:0.7rem; color:var(--ink-soft); font-weight:400;">${p.start}–${p.end}</span></td><td colspan="${activeTimetableDays().length}" style="text-align:center; background:rgba(203,154,46,0.1); color:var(--ink-soft); font-style:italic;">${p.label}</td></tr>`;
@@ -11836,8 +12155,8 @@
         ${activeTimetableDays().map(day => {
           const entry = timetableEntries.find(e => e.className===ttClass && e.section===ttSection && e.day===day && e.period===p.id);
           const staff = entry ? staffList.find(s => s.id===entry.staffId) : null;
-          return `<td style="cursor:pointer; text-align:center; min-width:110px;" onclick="openTtCellModal('${day}','${p.id}')">
-            ${entry ? `<div style="font-weight:600; color:var(--magenta); font-size:0.82rem;">${entry.subject}</div><div style="font-size:0.72rem; color:var(--ink-soft);">${staff ? staff.firstName+' '+staff.lastName : ''}</div>` : `<span style="color:var(--ink-soft); font-size:0.78rem;">+ Add</span>`}
+          return `<td style="${canEditTt?'cursor:pointer;':''} text-align:center; min-width:110px;" ${canEditTt ? `onclick="openTtCellModal('${day}','${p.id}')"` : ''}>
+            ${entry ? `<div style="font-weight:600; color:var(--magenta); font-size:0.82rem;">${entry.subject}</div><div style="font-size:0.72rem; color:var(--ink-soft);">${staff ? staff.firstName+' '+staff.lastName : ''}</div>` : (canEditTt ? `<span style="color:var(--ink-soft); font-size:0.78rem;">+ Add</span>` : `<span style="color:var(--ink-soft); font-size:0.78rem;">—</span>`)}
           </td>`;
         }).join('')}
       </tr>`;
@@ -11957,6 +12276,11 @@
 
   /* --- Periods Setup --- */
   function renderTimetablePeriodsTab(body){
+    const canEditTt = canSub('timetable_periods','timetable','edit');
+    if(!canEditTt){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
     const activeDays = activeTimetableDays();
     const teachingCount = timetablePeriods.filter(p => !p.isBreak).length;
     const breakCount = timetablePeriods.filter(p => p.isBreak).length;
@@ -12120,7 +12444,12 @@
   }
 
   function initInventoryView(){
-    inventoryTab = 'items'; invItemsView = 'list'; invQuickOpen = false;
+    inventoryTab = getInventoryTabAccess(currentUser.role, 'inventory_items') ? 'items'
+      : getInventoryTabAccess(currentUser.role, 'inventory_approvals') ? 'approvals'
+      : getInventoryTabAccess(currentUser.role, 'inventory_saleshistory') ? 'saleshistory'
+      : getInventoryTabAccess(currentUser.role, 'inventory_stockoverview') ? 'stockoverview'
+      : 'items';
+    invItemsView = 'list'; invQuickOpen = false;
     renderInventoryBody();
   }
   function switchInventoryTab(tab){
@@ -12136,9 +12465,14 @@
   function pendingInventoryApprovalsCount(){
     return pendingApprovals.filter(a => a.type==='inventory_item' && a.status==='Pending').length;
   }
+  const INV_TAB_PERM_KEYS = { items:'inventory_items', sellcart:'inventory_sell', sellcheckout:'inventory_sell', approvals:'inventory_approvals', saleshistory:'inventory_saleshistory', stockoverview:'inventory_stockoverview' };
   function renderInventoryBody(){
     const body = document.getElementById('inventoryBody');
     if(!body) return;
+    if(!getInventoryTabAccess(currentUser.role, INV_TAB_PERM_KEYS[inventoryTab])){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
     if(inventoryTab === 'items') return invItemsView==='edit' ? renderInventoryItemEditor(body) : renderInventoryItemsList(body);
     if(inventoryTab === 'sellcart') return renderInventorySellCart(body);
     if(inventoryTab === 'sellcheckout') return renderInventoryCheckout(body);
@@ -12166,13 +12500,13 @@
             <button class="btn btn-ghost btn-sm" onclick="toggleInvQuickMenu(event)">☰ Quick Actions ▾</button>
             ${invQuickOpen ? `
             <div style="position:absolute; right:0; top:calc(100% + 4px); background:var(--white); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,0.15); z-index:30; min-width:190px; overflow:hidden;">
-              <button style="display:block; width:100%; text-align:left; padding:10px 14px; border:none; background:none; cursor:pointer; font-size:0.85rem;" onclick="switchInventoryTab('approvals')">✅ Approvals${pendingInventoryApprovalsCount()>0?` (${pendingInventoryApprovalsCount()})`:''}</button>
-              <button style="display:block; width:100%; text-align:left; padding:10px 14px; border:none; background:none; cursor:pointer; font-size:0.85rem;" onclick="switchInventoryTab('saleshistory')">🧾 Sales History</button>
-              <button style="display:block; width:100%; text-align:left; padding:10px 14px; border:none; background:none; cursor:pointer; font-size:0.85rem;" onclick="switchInventoryTab('stockoverview')">📊 Stock Overview</button>
+              ${getInventoryTabAccess(currentUser.role,'inventory_approvals') ? `<button style="display:block; width:100%; text-align:left; padding:10px 14px; border:none; background:none; cursor:pointer; font-size:0.85rem;" onclick="switchInventoryTab('approvals')">✅ Approvals${pendingInventoryApprovalsCount()>0?` (${pendingInventoryApprovalsCount()})`:''}</button>` : ''}
+              ${getInventoryTabAccess(currentUser.role,'inventory_saleshistory') ? `<button style="display:block; width:100%; text-align:left; padding:10px 14px; border:none; background:none; cursor:pointer; font-size:0.85rem;" onclick="switchInventoryTab('saleshistory')">🧾 Sales History</button>` : ''}
+              ${getInventoryTabAccess(currentUser.role,'inventory_stockoverview') ? `<button style="display:block; width:100%; text-align:left; padding:10px 14px; border:none; background:none; cursor:pointer; font-size:0.85rem;" onclick="switchInventoryTab('stockoverview')">📊 Stock Overview</button>` : ''}
             </div>` : ``}
           </div>
-          <button class="btn btn-ghost btn-sm" onclick="openInventorySellCart()">🛒 Sell</button>
-          <button class="btn btn-primary btn-sm" onclick="openInventoryItemEditor()">+ Add Product</button>
+          ${canSub('inventory_sell','inventory','create') ? `<button class="btn btn-ghost btn-sm" onclick="openInventorySellCart()">🛒 Sell</button>` : ''}
+          ${canSub('inventory_items','inventory','create') ? `<button class="btn btn-primary btn-sm" onclick="openInventoryItemEditor()">+ Add Product</button>` : ''}
         </div>
       </div>
       <div class="table-wrap">
@@ -12193,8 +12527,8 @@
             <td>${out?`<span class="balance-tag due">Out of Stock</span>`:low?`<span class="pill" style="background:rgba(203,154,46,0.18); color:#8a6a1f;">Low Stock</span>`:`<span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">In Stock</span>`}</td>
             <td style="font-size:0.78rem; color:var(--ink-soft);">${it.createdBy||'—'}</td>
             <td style="white-space:nowrap;">
-              <button class="btn-edit-text" onclick="openInventoryItemEditor('${it.id}')">Edit</button>
-              &nbsp;·&nbsp;<button class="btn-edit-text" onclick="quickSellItem('${it.id}')">Sell</button>
+              ${canSub('inventory_items','inventory','edit') ? `<button class="btn-edit-text" onclick="openInventoryItemEditor('${it.id}')">Edit</button>` : ''}
+              ${canSub('inventory_sell','inventory','create') ? `&nbsp;·&nbsp;<button class="btn-edit-text" onclick="quickSellItem('${it.id}')">Sell</button>` : ''}
               ${isAdmin ? `&nbsp;·&nbsp;<button class="btn-edit-text" onclick="toggleInventoryItemActive('${it.id}')">${disabled?'Enable':'Disable'}</button>` : ''}
               ${isAdmin ? `&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteInventoryItem('${it.id}')">Delete</button>` : ''}
             </td>
@@ -12777,7 +13111,7 @@
       </div>
       ${allRoles.map(r => {
         const modCount = r.override
-          ? PERMISSION_MODULES.filter(m => r.override.permissions[m.key] && r.override.permissions[m.key].view).length
+          ? PERMISSION_MODULES.filter(m => !m.hidden && r.override.permissions[m.key] && r.override.permissions[m.key].view).length
           : (ROLE_VIEWS[r.name] || []).length;
         return `<div class="list-manage-row">
           <div><div class="lm-name">${r.name} ${r.builtIn ? '<span class="pill" style="font-size:0.68rem;">Built-in</span>' : ''}${r.override ? '<span class="pill" style="font-size:0.68rem; background:rgba(24,143,134,0.15); color:#0f6a63;">Customized</span>' : ''}</div><div class="lm-meta">${modCount} module${modCount===1?'':'s'} accessible${modCount===0?' · <span style="color:#b8621b; font-weight:600;">⚠ No assign permission</span>':''}</div></div>
@@ -12844,23 +13178,32 @@
     const roleName = permEditingRoleName;
     const existing = findRoleOverride(roleName);
     const permissions = existing ? existing.permissions : seedPermissionsFromDefault(roleName);
-    const categories = [...new Set(PERMISSION_MODULES.map(m => m.category))];
+    const visibleModules = PERMISSION_MODULES.filter(m => !m.hidden);
+    const categories = [...new Set(visibleModules.map(m => m.category))];
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToPermissionsList()">Roles &amp; Permissions</a> &nbsp;/&nbsp; ${roleName}</div>
+      <div class="perm-legend">
+        <div class="perm-legend-item">👁 <b>View</b> — open this page/tab</div>
+        <div class="perm-legend-item">➕ <b>Create</b> — add new records</div>
+        <div class="perm-legend-item">✏️ <b>Edit</b> — modify existing records</div>
+        <div class="perm-legend-item">🗑️ <b>Delete</b> — remove records</div>
+        <div class="perm-legend-item">🖨️ <b>Print</b> — print / export</div>
+        <div class="perm-legend-item">✅ <b>Approve</b> — approve a workflow (payroll, admissions, etc.)</div>
+      </div>
       ${categories.map(cat => `
         <div class="perm-category">
           <div class="perm-category-head" style="background:${PERMISSION_CATEGORY_COLORS[cat]||'#555'};" onclick="togglePermCategory(this)">
-            <span class="perm-chevron">▾</span> ${cat} <span class="perm-cat-count">(${PERMISSION_MODULES.filter(m=>m.category===cat).length} features)</span>
+            <span class="perm-chevron">▾</span> ${cat} <span class="perm-cat-count">(${visibleModules.filter(m=>m.category===cat).length} features)</span>
           </div>
           <div class="perm-category-body">
             <table class="perm-table">
               <thead><tr><th>Module</th><th>Full Access</th>${PERMISSION_ACTIONS.map(a => `<th>${a[0].toUpperCase()+a.slice(1)}</th>`).join('')}</tr></thead>
               <tbody>
-              ${PERMISSION_MODULES.filter(m => m.category===cat).map(m => {
+              ${visibleModules.filter(m => m.category===cat).map(m => {
                 const p = permissions[m.key] || Object.fromEntries(PERMISSION_ACTIONS.map(a => [a, false]));
                 const full = PERMISSION_ACTIONS.every(a => p[a]);
-                return `<tr>
-                  <td>${m.icon} ${m.label}${m.comingSoon ? ' <span class="pill" style="font-size:0.62rem; vertical-align:middle;">Coming Soon</span>' : ''}</td>
+                return `<tr class="${m.parent ? 'perm-row-sub' : ''}">
+                  <td>${m.icon} ${m.label}${m.comingSoon ? ' <span class="pill" style="font-size:0.62rem; vertical-align:middle;">Coming Soon</span>' : ''}${m.isNew ? ' <span class="perm-new-pill">New</span>' : ''}</td>
                   <td><input type="checkbox" class="perm-full" data-module="${m.key}" ${full?'checked':''} onchange="onPermFullToggle(this)"></td>
                   ${PERMISSION_ACTIONS.map(a => `<td><input type="checkbox" class="perm-action" data-module="${m.key}" data-action="${a}" ${p[a]?'checked':''} onchange="onPermActionToggle(this)"></td>`).join('')}
                 </tr>`;
@@ -12870,6 +13213,11 @@
           </div>
         </div>
       `).join('')}
+      <div class="perm-locked-section">
+        <h4>🔒 System Administration — always Admin-only</h4>
+        <p>These pages manage who can log in and what every role is allowed to do, so they're never delegable through this matrix — no role, however customized, can grant itself or anyone else more access than it already has. Only the built-in Admin role can see them.</p>
+        ${LOCKED_ADMIN_ONLY_PAGES.map(pg => `<div class="perm-locked-row"><span>${pg.icon}</span> ${pg.label} <span class="perm-locked-always">Admin only</span></div>`).join('')}
+      </div>
       <div style="margin-top:20px; display:flex; gap:10px;">
         <button class="btn btn-ghost" onclick="backToPermissionsList()">Cancel</button>
         <button class="btn btn-primary" onclick="saveRolePermissions()">Save Permissions</button>
@@ -12895,15 +13243,25 @@
   }
   async function saveRolePermissions(){
     const roleName = permEditingRoleName;
+    const existingRole = findRoleOverride(roleName);
     const newPermissions = {};
     PERMISSION_MODULES.forEach(m => {
+      if(m.hidden){
+        // Legacy fallback-only key (e.g. 'setup') no longer has its own
+        // checkboxes in the editor — carry its existing value forward
+        // untouched instead of silently resetting it to "no access" just
+        // because the visible sub-modules got saved.
+        const seeded = seedPermissionsFromDefault(roleName);
+        newPermissions[m.key] = (existingRole && existingRole.permissions[m.key]) || seeded[m.key] || Object.fromEntries(PERMISSION_ACTIONS.map(a => [a, false]));
+        return;
+      }
       newPermissions[m.key] = {};
       PERMISSION_ACTIONS.forEach(a => {
         const box = document.querySelector(`.perm-action[data-module="${m.key}"][data-action="${a}"]`);
         newPermissions[m.key][a] = box ? box.checked : false;
       });
     });
-    let role = findRoleOverride(roleName);
+    let role = existingRole;
     if(role){
       role.permissions = newPermissions;
     }else{
@@ -13396,15 +13754,17 @@
 
   /* --- Fee Structure --- */
   function renderFeeStructureTab(body){
+    const canEditStruct = canSub('managefee_structure','managefee','edit');
+    const dis = canEditStruct ? '' : 'disabled';
     const rows = CLASS_LEVELS.map(c => {
       const s = classStruct(c);
       return `
         <tr>
           <td class="name-cell">${c}</td>
-          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="admission" value="${s.admission||0}" style="max-width:120px;"></td>
-          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="fee" value="${s.fee||0}" style="max-width:120px;"></td>
-          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="bus" value="${s.bus||0}" style="max-width:120px;"></td>
-          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="stock" value="${s.stock||0}" style="max-width:120px;"></td>
+          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="admission" value="${s.admission||0}" style="max-width:120px;" ${dis}></td>
+          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="fee" value="${s.fee||0}" style="max-width:120px;" ${dis}></td>
+          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="bus" value="${s.bus||0}" style="max-width:120px;" ${dis}></td>
+          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="stock" value="${s.stock||0}" style="max-width:120px;" ${dis}></td>
         </tr>
       `;
     }).join('');
@@ -13421,9 +13781,9 @@
       <div class="profile-card" style="max-width:320px; margin-bottom:20px;">
         <h4>Hostel — Annual Expected Total (₹)</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin-bottom:10px;">Hostel isn't tracked per-student yet, so this stays a single flat total until the Hostel module exists.</p>
-        <input type="number" min="0" class="input" id="fsHostel" value="${financeSettings.hostel||0}" style="width:100%;">
+        <input type="number" min="0" class="input" id="fsHostel" value="${financeSettings.hostel||0}" style="width:100%;" ${dis}>
       </div>
-      <button class="btn btn-primary" onclick="saveFeeStructure()">🏗️ Save Fee Structure</button>
+      ${canEditStruct ? `<button class="btn btn-primary" onclick="saveFeeStructure()">🏗️ Save Fee Structure</button>` : ''}
     `;
   }
 
@@ -13449,18 +13809,26 @@
   }
   let promoTransferTab = 'promote';
   let ptClass = '', ptView = 'grid';
+  const PT_TAB_PERM_KEYS = { promote:'promo_promote', transfer:'promo_transfer', approvals:'promo_approvals' };
   function initPromoTransferView(){
+    const accessibleTabs = Object.keys(PT_TAB_PERM_KEYS).filter(t => getPromoTransferTabAccess(currentUser.role, PT_TAB_PERM_KEYS[t]));
+    Object.keys(PT_TAB_PERM_KEYS).forEach(t => { const btn = document.getElementById('pttab-'+t); if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none'; });
+    if(!accessibleTabs.includes(promoTransferTab)) promoTransferTab = accessibleTabs[0] || 'promote';
     switchPromoTransferTab(promoTransferTab);
   }
   function switchPromoTransferTab(tab){
     promoTransferTab = tab;
-    ['promote','transfer','approvals'].forEach(t => document.getElementById('pttab-'+t).classList.toggle('active', t===tab));
+    ['promote','transfer','approvals'].forEach(t => { const btn = document.getElementById('pttab-'+t); if(btn) btn.classList.toggle('active', t===tab); });
     ptView = 'grid';
     renderPromoTransferBody();
   }
   function renderPromoTransferBody(){
     const body = document.getElementById('promoTransferBody');
     if(!body) return;
+    if(!getPromoTransferTabAccess(currentUser.role, PT_TAB_PERM_KEYS[promoTransferTab])){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
     if(promoTransferTab === 'approvals') return renderApprovalsTab(body);
     if(ptView === 'grid') return renderPTClassGrid(body);
     if(ptView === 'roster') return renderPTRoster(body);
@@ -13535,7 +13903,7 @@
           </tbody></table>
           ${list.length===0 ? `<div class="empty-state"><b>No active students in this class</b></div>` : ``}
         </div>
-        <button class="btn btn-primary" style="margin-top:16px;" onclick="applyPromotions()">${isAdmin ? 'Promote Selected Students' : 'Submit for Admin Approval'}</button>
+        ${canSub('promo_promote','promotransfer','edit') ? `<button class="btn btn-primary" style="margin-top:16px;" onclick="applyPromotions()">${isAdmin ? 'Promote Selected Students' : 'Submit for Admin Approval'}</button>` : ''}
       `;
     }else{
       body.innerHTML = `
@@ -13553,7 +13921,7 @@
           </tbody></table>
           ${list.length===0 ? `<div class="empty-state"><b>No active students in this class</b></div>` : ``}
         </div>
-        <button class="btn btn-primary" style="margin-top:16px;" onclick="applyTransfers()">${isAdmin ? 'Transfer Selected Students' : 'Submit for Admin Approval'}</button>
+        ${canSub('promo_transfer','promotransfer','edit') ? `<button class="btn btn-primary" style="margin-top:16px;" onclick="applyTransfers()">${isAdmin ? 'Transfer Selected Students' : 'Submit for Admin Approval'}</button>` : ''}
       `;
     }
   }
@@ -13858,9 +14226,9 @@
         <td>${s.fatherAddress || s.motherAddress || '—'}</td>
         <td>${s.admDate || '—'}</td>
         <td>
-          <button class="btn-edit-text" onclick="event.stopPropagation(); editStudent('${s.id}')">Edit</button>
-          &nbsp;·&nbsp;
-          <button class="btn-danger-text" onclick="event.stopPropagation(); deleteStudent('${s.id}')">Delete</button>
+          ${canDo('admissions','edit') ? `<button class="btn-edit-text" onclick="event.stopPropagation(); editStudent('${s.id}')">Edit</button>` : ''}
+          ${(canDo('admissions','edit') && canDo('admissions','delete')) ? '&nbsp;·&nbsp;' : ''}
+          ${canDo('admissions','delete') ? `<button class="btn-danger-text" onclick="event.stopPropagation(); deleteStudent('${s.id}')">Delete</button>` : ''}
         </td>
       </tr>
     `).join('');
@@ -13976,8 +14344,8 @@
           <div class="p-meta">${s.admissionNo} · ${s.className} — Section ${s.section} · <span class="pill">${s.status||'Active'}</span></div>
         </div>
         <div class="profile-actions">
-          <button class="btn btn-ghost" onclick="editStudent('${s.id}')">Edit</button>
-          <button class="btn btn-danger-text" style="border:1.5px solid var(--border); border-radius:10px; padding:11px 20px;" onclick="deleteStudent('${s.id}')">Delete</button>
+          ${canDo('admissions','edit') ? `<button class="btn btn-ghost" onclick="editStudent('${s.id}')">Edit</button>` : ''}
+          ${canDo('admissions','delete') ? `<button class="btn btn-danger-text" style="border:1.5px solid var(--border); border-radius:10px; padding:11px 20px;" onclick="deleteStudent('${s.id}')">Delete</button>` : ''}
         </div>
       </div>
       ${buildProfileCardsHTML(s)}
@@ -14079,7 +14447,7 @@
 
       <div class="dash-section-title"><div><h3>Payment History &amp; Receipts</h3></div></div>
       <div class="table-wrap"><table><thead><tr><th>Date</th><th>Category</th><th>Mode</th><th>Amount</th><th></th></tr></thead><tbody>
-        ${studentPayments.length ? studentPayments.map(p => `<tr><td>${p.date||'—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${p.mode||'—'}</td><td>${fmtMoney(p.amount)}</td><td><button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button></td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
+        ${studentPayments.length ? studentPayments.map(p => `<tr><td>${p.date||'—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${p.mode||'—'}</td><td>${fmtMoney(p.amount)}</td><td>${canSub('managefee_collection','managefee','print') ? `<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
       </tbody></table></div>
     `;
   }
@@ -14279,9 +14647,9 @@
         <td>${s.email||'—'}</td>
         <td>${s.admDate||'—'}</td>
         <td>
-          <button class="btn-edit-text" onclick="event.stopPropagation(); editStudent('${s.id}')">Edit</button>
-          &nbsp;·&nbsp;
-          <button class="btn-danger-text" onclick="event.stopPropagation(); deleteStudent('${s.id}')">Delete</button>
+          ${canDo('admissions','edit') ? `<button class="btn-edit-text" onclick="event.stopPropagation(); editStudent('${s.id}')">Edit</button>` : ''}
+          ${(canDo('admissions','edit') && canDo('admissions','delete')) ? '&nbsp;·&nbsp;' : ''}
+          ${canDo('admissions','delete') ? `<button class="btn-danger-text" onclick="event.stopPropagation(); deleteStudent('${s.id}')">Delete</button>` : ''}
         </td>
       </tr>
     `).join('');
