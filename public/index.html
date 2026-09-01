@@ -10377,11 +10377,22 @@
   /* ===== INVENTORY MODULE ===== */
   const INVENTORY_ITEMS_KEY = "inventory-items";
   const INVENTORY_SALES_KEY = "inventory-sales";
-  [INVENTORY_ITEMS_KEY, INVENTORY_SALES_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
-  let inventoryItems = [], inventorySales = [];
+  const INVENTORY_RETURNS_KEY = "inventory-returns";
+  const INVENTORY_VENDOR_RETURNS_KEY = "inventory-vendor-returns";
+  [INVENTORY_ITEMS_KEY, INVENTORY_SALES_KEY, INVENTORY_RETURNS_KEY, INVENTORY_VENDOR_RETURNS_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
+  let inventoryItems = [], inventorySales = [], inventoryReturns = [], inventoryVendorReturns = [];
   async function loadInventory(){
     inventoryItems = await storageGet(INVENTORY_ITEMS_KEY, []);
     inventorySales = await storageGet(INVENTORY_SALES_KEY, []);
+    inventoryReturns = await storageGet(INVENTORY_RETURNS_KEY, []);
+    inventoryVendorReturns = await storageGet(INVENTORY_VENDOR_RETURNS_KEY, []);
+  }
+  // How much of a sale line has already been returned — always derived from the
+  // returns log itself, never stored back onto the original sale, so the sale
+  // record stays an untouched, permanent record of what actually happened at
+  // checkout (needed for correct historical reporting).
+  function returnedQtyForSale(saleId){
+    return inventoryReturns.filter(r => r.saleId === saleId).reduce((s,r) => s + r.qty, 0);
   }
   const INVENTORY_CATEGORIES = ['Student Supplies','Uniforms','Books','Stationery','Sports','Other'];
   let inventoryTab = 'items';
@@ -12751,6 +12762,7 @@
             <td style="white-space:nowrap;">
               ${canSub('inventory_items','inventory','edit') ? `<button class="btn-edit-text" onclick="openInventoryItemEditor('${it.id}')">Edit</button>` : ''}
               ${canSub('inventory_sell','inventory','create') ? `&nbsp;·&nbsp;<button class="btn-edit-text" onclick="quickSellItem('${it.id}')">Sell</button>` : ''}
+              ${canSub('inventory_items','inventory','edit') && it.quantity>0 ? `&nbsp;·&nbsp;<button class="btn-edit-text" onclick="openVendorReturnModal('${it.id}')">Return to Vendor</button>` : ''}
               ${isAdmin ? `&nbsp;·&nbsp;<button class="btn-edit-text" onclick="toggleInventoryItemActive('${it.id}')">${disabled?'Enable':'Disable'}</button>` : ''}
               ${isAdmin ? `&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteInventoryItem('${it.id}')">Delete</button>` : ''}
             </td>
@@ -12758,9 +12770,63 @@
         }).join('') : `<tr><td colspan="9"><div class="empty-state"><b>No ${invFilterType.toLowerCase()} items${invSearchQuery?' match your search':''}</b>${invSearchQuery?'':'Click "+ Add Product" to list your first item.'}</div></td></tr>`}
         </tbody></table>
       </div>
+      <div id="vendorReturnModalWrap"></div>
     `;
   }
   function setInvFilterType(t){ invFilterType = t; renderInventoryItemsList(document.getElementById('inventoryBody')); }
+  /* --- Return unsold stock to the vendor/supplier: reduces quantity & stock
+     value only — never touches Revenue, Collected or Profit, since no sale or
+     payment is involved. Kept as its own log, separate from buyer returns. --- */
+  function openVendorReturnModal(itemId){
+    const it = inventoryItems.find(x => x.id === itemId);
+    if(!it) return;
+    const wrap = document.getElementById('vendorReturnModalWrap');
+    if(!wrap) return;
+    wrap.innerHTML = `
+      <div style="position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:999; padding:20px;">
+        <div class="profile-card" style="width:100%; max-width:400px;">
+          <h4>Return to Vendor — ${it.name}</h4>
+          <p style="font-size:0.8rem; color:var(--ink-soft); margin:4px 0 14px;">${it.quantity} currently in stock.</p>
+          <input type="hidden" id="vretItemId" value="${it.id}">
+          <div class="f-field" style="margin-bottom:10px;"><label>Quantity to Return (max ${it.quantity})</label><input type="number" id="vretQty" min="1" max="${it.quantity}" value="1"></div>
+          <div class="f-field" style="margin-bottom:10px;"><label>Vendor / Supplier</label><input type="text" id="vretVendor" placeholder="e.g. name of the supplier"></div>
+          <div class="f-field" style="margin-bottom:14px;"><label>Reason</label><input type="text" id="vretReason" placeholder="e.g. unsold, damaged, wrong order"></div>
+          <div style="background:rgba(24,143,134,0.10); border-left:4px solid var(--teal); border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:0.76rem;">Only reduces stock on hand and stock value at cost — does not affect Revenue, Amount Collected, or Profit.</div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-primary btn-sm" onclick="submitVendorReturn()">Confirm Return</button>
+            <button class="btn btn-ghost btn-sm" onclick="closeVendorReturnModal()">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  function closeVendorReturnModal(){
+    const wrap = document.getElementById('vendorReturnModalWrap');
+    if(wrap) wrap.innerHTML = '';
+  }
+  async function submitVendorReturn(){
+    const itemId = document.getElementById('vretItemId').value;
+    const it = inventoryItems.find(x => x.id === itemId);
+    if(!it) return;
+    const qty = Math.max(1, Math.min(Number(document.getElementById('vretQty').value) || 0, it.quantity));
+    if(qty <= 0){ showToast('Enter a valid quantity.'); return; }
+    const vendor = document.getElementById('vretVendor').value.trim();
+    const reason = document.getElementById('vretReason').value.trim();
+    const today = new Date().toISOString().slice(0,10);
+    const costReversed = Math.round(qty * (it.costPrice||0) * 100) / 100;
+
+    it.quantity -= qty;
+    inventoryVendorReturns.push({
+      id:'ivret_'+Date.now()+'_'+it.id, itemId:it.id, itemName:it.name, qty, costReversed,
+      vendor, reason, date:today, processedBy:currentUser.name,
+    });
+
+    await storageSet(INVENTORY_ITEMS_KEY, inventoryItems);
+    await storageSet(INVENTORY_VENDOR_RETURNS_KEY, inventoryVendorReturns);
+    closeVendorReturnModal();
+    renderInventoryBody();
+    showToast(`${qty} unit${qty===1?'':'s'} of ${it.name} returned to vendor — stock updated.`);
+  }
 
   /* --- Add / Edit product, with Admin approval required for non-Admin stock changes --- */
   function openInventoryItemEditor(id){
@@ -13104,7 +13170,7 @@
           payments.push({ id:'pay_'+Date.now()+'_'+c.itemId, receiptNo:nextReceiptNo(), studentId:invCheckoutStudentId, studentName:buyerStudent.firstName+' '+buyerStudent.lastName, category:'extra', extraFeeName:c.name, extraFeeId:sefId, mode:invCheckoutPaymentMode, amount:linePaid, discount:c.discount, instalment:'', date:today, note:notes, classAtPayment:buyerStudent.className });
         }
       }
-      inventorySales.push({ id:'isale_'+Date.now()+'_'+c.itemId, itemId:c.itemId, itemName:c.name, buyerType:invCheckoutBuyerType, studentId:invCheckoutBuyerType==='Student'?invCheckoutStudentId:'', buyerName, qty:c.qty, unitPrice:c.price, unitCost:c.cost, discount:c.discount, totalAmount:lineTotal, totalCost:lineCost, paidAmount:linePaid, mode:invCheckoutPaymentMode, notes, date:today, soldBy:currentUser.name });
+      inventorySales.push({ id:'isale_'+Date.now()+'_'+c.itemId, itemId:c.itemId, itemName:c.name, buyerType:invCheckoutBuyerType, studentId:invCheckoutBuyerType==='Student'?invCheckoutStudentId:'', buyerName, qty:c.qty, unitPrice:c.price, unitCost:c.cost, discount:c.discount, totalAmount:lineTotal, totalCost:lineCost, paidAmount:linePaid, mode:invCheckoutPaymentMode, notes, date:today, soldBy:currentUser.name, sefId });
     });
     await storageSet(INVENTORY_ITEMS_KEY, inventoryItems);
     await storageSet(INVENTORY_SALES_KEY, inventorySales);
@@ -13164,10 +13230,20 @@
   }
 
   /* --- Sales History --- */
+  // Every dashboard figure below nets returns against sales rather than the
+  // raw sale totals — a return is never allowed to touch the original sale
+  // record (that stays a permanent, untouched fact of what was sold and
+  // when), so returns are always subtracted back out at display time instead.
+  function inventoryNetTotals(){
+    const totalRevenue = inventorySales.reduce((sum,s) => sum+s.totalAmount, 0) - inventoryReturns.reduce((sum,r) => sum+r.refundAmount, 0);
+    const totalCost = inventorySales.reduce((sum,s) => sum+s.totalCost, 0) - inventoryReturns.reduce((sum,r) => sum+r.costReversed, 0);
+    const totalCollected = inventorySales.reduce((sum,s) => sum+(s.paidAmount||0), 0) - inventoryReturns.reduce((sum,r) => sum+(r.cashRefunded||0), 0);
+    return { totalRevenue, totalCost, totalProfit: totalRevenue-totalCost, totalCollected, totalDue: Math.max(0, totalRevenue-totalCollected) };
+  }
   function renderInventorySalesHistoryTab(body){
-    const totalRevenue = inventorySales.reduce((sum,s) => sum+s.totalAmount, 0);
-    const totalCost = inventorySales.reduce((sum,s) => sum+s.totalCost, 0);
-    const totalProfit = totalRevenue - totalCost;
+    const canReturn = getInventoryTabAccess(currentUser.role, 'inventory_saleshistory', 'edit');
+    const { totalRevenue, totalCost, totalProfit } = inventoryNetTotals();
+    const totalRefunded = inventoryReturns.reduce((sum,r) => sum+r.refundAmount, 0);
     const byItem = {};
     inventorySales.forEach(s => {
       if(!byItem[s.itemId]) byItem[s.itemId] = { name:s.itemName, qty:0, revenue:0, cost:0 };
@@ -13175,29 +13251,175 @@
       byItem[s.itemId].revenue += s.totalAmount;
       byItem[s.itemId].cost += s.totalCost;
     });
+    inventoryReturns.forEach(r => {
+      if(!byItem[r.itemId]) byItem[r.itemId] = { name:r.itemName, qty:0, revenue:0, cost:0 };
+      byItem[r.itemId].qty -= r.qty;
+      byItem[r.itemId].revenue -= r.refundAmount;
+      byItem[r.itemId].cost -= r.costReversed;
+    });
     const recent = inventorySales.slice().sort((a,b) => b.id.localeCompare(a.id)).slice(0,30);
+    const recentReturns = inventoryReturns.slice().sort((a,b) => b.id.localeCompare(a.id)).slice(0,30);
     body.innerHTML = `
       <div style="margin-bottom:16px;"><button class="btn btn-ghost btn-sm" onclick="switchInventoryTab('items')">← Back to Items</button></div>
       <div class="fee-summary-row" style="margin-bottom:24px;">
-        <div class="fee-sum-card"><b>${fmtMoney(totalRevenue)}</b><span>Total Revenue</span></div>
-        <div class="fee-sum-card"><b>${fmtMoney(totalCost)}</b><span>Total Cost</span></div>
-        <div class="fee-sum-card"><b style="color:${totalProfit>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(totalProfit)}</b><span>Total Profit</span></div>
+        <div class="fee-sum-card"><b>${fmtMoney(totalRevenue)}</b><span>Net Revenue</span></div>
+        <div class="fee-sum-card"><b>${fmtMoney(totalCost)}</b><span>Net Cost</span></div>
+        <div class="fee-sum-card"><b style="color:${totalProfit>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(totalProfit)}</b><span>Net Profit</span></div>
+        <div class="fee-sum-card"><b style="color:var(--magenta);">${fmtMoney(totalRefunded)}</b><span>Returned (Revenue Reversed)</span></div>
       </div>
-      <div class="dash-section-title"><div><h3>Profit by Item</h3></div></div>
+      <div class="dash-section-title"><div><h3>Profit by Item (net of returns)</h3></div></div>
       <div class="table-wrap" style="margin-bottom:28px;">
-        <table><thead><tr><th>Item</th><th>Units Sold</th><th>Revenue</th><th>Cost</th><th>Profit</th></tr></thead>
+        <table><thead><tr><th>Item</th><th>Net Units Sold</th><th>Net Revenue</th><th>Net Cost</th><th>Net Profit</th></tr></thead>
         <tbody>
         ${Object.keys(byItem).length ? Object.values(byItem).map(it => `<tr><td class="name-cell">${it.name}</td><td>${it.qty}</td><td>${fmtMoney(it.revenue)}</td><td>${fmtMoney(it.cost)}</td><td style="color:${(it.revenue-it.cost)>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(it.revenue-it.cost)}</td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No sales yet</b></div></td></tr>`}
         </tbody></table>
       </div>
       <div class="dash-section-title"><div><h3>Recent Sales</h3></div></div>
-      <div class="table-wrap">
-        <table><thead><tr><th>Date</th><th>Item</th><th>Buyer</th><th>Qty</th><th>Amount</th><th>Paid</th><th>Mode</th><th>Sold By</th></tr></thead>
+      <div class="table-wrap" style="margin-bottom:28px;">
+        <table><thead><tr><th>Date</th><th>Item</th><th>Buyer</th><th>Qty</th><th>Amount</th><th>Paid</th><th>Mode</th><th>Sold By</th><th></th></tr></thead>
         <tbody>
-        ${recent.length ? recent.map(s => { const st = s.studentId ? students.find(x=>x.id===s.studentId) : null; const buyer = st ? st.firstName+' '+st.lastName : (s.buyerName||s.buyerType); return `<tr><td>${s.date}</td><td>${s.itemName}</td><td>${buyer}</td><td>${s.qty}</td><td>${fmtMoney(s.totalAmount)}</td><td>${fmtMoney(s.paidAmount||0)}</td><td>${s.mode||'—'}</td><td>${s.soldBy||'—'}</td></tr>`; }).join('') : `<tr><td colspan="8"><div class="empty-state"><b>No sales yet</b></div></td></tr>`}
+        ${recent.length ? recent.map(s => {
+          const st = s.studentId ? students.find(x=>x.id===s.studentId) : null;
+          const buyer = st ? st.firstName+' '+st.lastName : (s.buyerName||s.buyerType);
+          const alreadyReturned = returnedQtyForSale(s.id);
+          const returnable = s.qty - alreadyReturned;
+          return `<tr><td>${s.date}</td><td>${s.itemName}${alreadyReturned>0?` <span class="pill" style="font-size:0.62rem; background:rgba(203,154,46,0.18); color:#8a6a1f;">${alreadyReturned} returned</span>`:''}</td><td>${buyer}</td><td>${s.qty}</td><td>${fmtMoney(s.totalAmount)}</td><td>${fmtMoney(s.paidAmount||0)}</td><td>${s.mode||'—'}</td><td>${s.soldBy||'—'}</td><td>${canReturn && returnable>0 ? `<button class="btn-edit-text" onclick="openInventoryReturnModal('${s.id}')">Return</button>` : (returnable<=0 ? '<span style="color:var(--ink-soft); font-size:0.76rem;">Fully returned</span>' : '')}</td></tr>`;
+        }).join('') : `<tr><td colspan="9"><div class="empty-state"><b>No sales yet</b></div></td></tr>`}
         </tbody></table>
       </div>
+      <div class="dash-section-title"><div><h3>Returns Log</h3></div></div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Date</th><th>Item</th><th>Buyer</th><th>Qty</th><th>Revenue Reversed</th><th>Cash Refunded</th><th>Mode</th><th>Reason</th><th>Processed By</th></tr></thead>
+        <tbody>
+        ${recentReturns.length ? recentReturns.map(r => { const st = r.studentId ? students.find(x=>x.id===r.studentId) : null; const buyer = st ? st.firstName+' '+st.lastName : (r.buyerName||r.buyerType||'—'); return `<tr><td>${r.date}</td><td>${r.itemName}</td><td>${buyer}</td><td>${r.qty}</td><td>${fmtMoney(r.refundAmount)}</td><td>${fmtMoney(r.cashRefunded||0)}</td><td>${r.refundMode||'—'}</td><td>${r.reason||'—'}</td><td>${r.processedBy||'—'}</td></tr>`; }).join('') : `<tr><td colspan="9"><div class="empty-state"><b>No returns recorded</b></div></td></tr>`}
+        </tbody></table>
+      </div>
+      <div id="invReturnModalWrap"></div>
     `;
+  }
+  /* --- Process a student/buyer return of a completed sale --- */
+  function openInventoryReturnModal(saleId){
+    const s = inventorySales.find(x => x.id === saleId);
+    if(!s) return;
+    const alreadyReturned = returnedQtyForSale(saleId);
+    const returnable = s.qty - alreadyReturned;
+    if(returnable <= 0){ showToast('Nothing left to return on this sale.'); return; }
+    const st = s.studentId ? students.find(x=>x.id===s.studentId) : null;
+    const buyer = st ? st.firstName+' '+st.lastName : (s.buyerName||s.buyerType);
+    const perUnitPrice = s.totalAmount / s.qty;
+    const perUnitPaid = (s.paidAmount||0) / s.qty;
+    const wrap = document.getElementById('invReturnModalWrap');
+    wrap.innerHTML = `
+      <div style="position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:999; padding:20px;">
+        <div class="profile-card" style="width:100%; max-width:380px;">
+          <h4>Return — ${s.itemName}</h4>
+          <p style="font-size:0.8rem; color:var(--ink-soft); margin:4px 0 14px;">Sold to ${buyer} on ${s.date} · ${s.qty} unit${s.qty===1?'':'s'}${alreadyReturned>0?` (${alreadyReturned} already returned)`:''}.</p>
+          <input type="hidden" id="invRetSaleId" value="${saleId}">
+          <div class="f-field" style="margin-bottom:10px;">
+            <label>Quantity to Return (max ${returnable})</label>
+            <input type="number" id="invRetQty" min="1" max="${returnable}" value="${returnable}" oninput="onInvReturnQtyChange()">
+          </div>
+          <div class="f-field" style="margin-bottom:10px;">
+            <label>Reason</label>
+            <input type="text" id="invRetReason" placeholder="e.g. wrong size, changed subject">
+          </div>
+          <div id="invRetRefundFields"></div>
+          <div style="display:flex; gap:8px; margin-top:14px;">
+            <button class="btn btn-primary btn-sm" onclick="submitInventoryReturn()">Confirm Return</button>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('invReturnModalWrap').innerHTML=''">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+    onInvReturnQtyChange();
+  }
+  function onInvReturnQtyChange(){
+    const saleId = document.getElementById('invRetSaleId').value;
+    const s = inventorySales.find(x => x.id === saleId);
+    if(!s) return;
+    const returnable = s.qty - returnedQtyForSale(saleId);
+    let qty = Number(document.getElementById('invRetQty').value) || 0;
+    qty = Math.max(1, Math.min(qty, returnable));
+    document.getElementById('invRetQty').value = qty;
+    const perUnitPaid = (s.paidAmount||0) / s.qty;
+    const paidForReturn = Math.round(perUnitPaid * qty * 100) / 100;
+    const refundBox = document.getElementById('invRetRefundFields');
+    if(paidForReturn > 0){
+      refundBox.innerHTML = `
+        <div class="f-field" style="margin-bottom:10px;">
+          <label>Amount To Refund Now (already paid: ${fmtMoney(paidForReturn)})</label>
+          <input type="number" id="invRetCashRefund" min="0" max="${paidForReturn}" step="0.01" value="${paidForReturn}">
+        </div>
+        <div class="f-field">
+          <label>Refund Mode</label>
+          <select id="invRetMode"><option>Cash</option><option>UPI</option><option>Bank Transfer</option><option>Adjusted as Credit (not paid out now)</option></select>
+        </div>
+      `;
+    } else {
+      refundBox.innerHTML = `<p style="font-size:0.78rem; color:var(--ink-soft);">Nothing was collected for this quantity yet, so nothing needs to be refunded — the amount due will simply be reduced.</p>`;
+    }
+  }
+  async function submitInventoryReturn(){
+    const saleId = document.getElementById('invRetSaleId').value;
+    const s = inventorySales.find(x => x.id === saleId);
+    if(!s) return;
+    const returnable = s.qty - returnedQtyForSale(saleId);
+    const qty = Math.max(1, Math.min(Number(document.getElementById('invRetQty').value) || 0, returnable));
+    if(qty <= 0){ showToast('Enter a valid quantity.'); return; }
+    const reason = document.getElementById('invRetReason').value.trim();
+    const perUnitAmount = s.totalAmount / s.qty;
+    const perUnitCost = s.totalCost / s.qty;
+    const perUnitPaid = (s.paidAmount||0) / s.qty;
+    const refundAmount = Math.round(perUnitAmount * qty * 100) / 100;
+    const costReversed = Math.round(perUnitCost * qty * 100) / 100;
+    const paidForReturn = Math.round(perUnitPaid * qty * 100) / 100;
+    const cashInput = document.getElementById('invRetCashRefund');
+    const cashRefunded = cashInput ? Math.max(0, Math.min(Number(cashInput.value)||0, paidForReturn)) : 0;
+    const refundMode = document.getElementById('invRetMode') ? document.getElementById('invRetMode').value : '';
+    const today = new Date().toISOString().slice(0,10);
+
+    // 1. Restock — the returned units are assumed resellable.
+    const item = inventoryItems.find(x => x.id === s.itemId);
+    if(item) item.quantity += qty;
+
+    // 2. If this sale was billed to a student, shrink what they owe (and, if
+    // they'd paid more than the new reduced amount, cap what's on record as
+    // paid so the fee ledger never shows a due for something they returned).
+    if(s.buyerType === 'Student' && s.sefId){
+      const sef = studentExtraFees.find(x => x.id === s.sefId);
+      if(sef){
+        sef.amount = Math.max(0, Math.round((sef.amount - refundAmount) * 100) / 100);
+        sef.paidAmount = Math.max(0, Math.round((sef.paidAmount - cashRefunded) * 100) / 100);
+        sef.paid = sef.paidAmount >= sef.amount && sef.amount > 0 ? true : (sef.amount === 0);
+      }
+      if(cashRefunded > 0){
+        const st = students.find(x => x.id === s.studentId);
+        payments.push({
+          id:'pay_refund_'+Date.now()+'_'+s.itemId, receiptNo:nextReceiptNo(), studentId:s.studentId,
+          studentName: st ? st.firstName+' '+st.lastName : '', category:'extra', extraFeeName:s.itemName,
+          extraFeeId:s.sefId, mode:refundMode||'Cash', amount:-cashRefunded, discount:0, instalment:'',
+          date:today, note:`Refund — return of ${qty} × ${s.itemName}${reason?' ('+reason+')':''}`,
+          classAtPayment: st ? st.className : '',
+        });
+      }
+    }
+
+    inventoryReturns.push({
+      id:'iret_'+Date.now()+'_'+s.itemId, saleId:s.id, itemId:s.itemId, itemName:s.itemName, qty,
+      refundAmount, costReversed, cashRefunded, refundMode, studentId:s.studentId||'', buyerType:s.buyerType,
+      buyerName:s.buyerName||'', reason, date:today, processedBy:currentUser.name,
+    });
+
+    await storageSet(INVENTORY_ITEMS_KEY, inventoryItems);
+    await storageSet(INVENTORY_RETURNS_KEY, inventoryReturns);
+    if(s.buyerType === 'Student'){
+      await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
+      if(cashRefunded > 0) await storageSet(PAYMENTS_KEY, payments);
+    }
+    document.getElementById('invReturnModalWrap').innerHTML = '';
+    renderDashboard();
+    renderInventoryBody();
+    showToast(`Return recorded — ${qty} unit${qty===1?'':'s'} back in stock.`);
   }
 
   /* --- Stock Overview --- */
@@ -13206,14 +13428,12 @@
     const outOfStock = inventoryItems.filter(it => it.quantity <= 0);
     const lowStock = inventoryItems.filter(it => it.quantity > 0 && it.quantity <= it.threshold);
     const totalStockValue = inventoryItems.reduce((sum,it) => sum+it.quantity*it.costPrice, 0);
+    const totalVendorReturnValue = inventoryVendorReturns.reduce((sum,r) => sum+r.costReversed, 0);
 
-    const totalRevenue = inventorySales.reduce((sum,s) => sum+s.totalAmount, 0);
-    const totalCost = inventorySales.reduce((sum,s) => sum+s.totalCost, 0);
-    const totalProfit = totalRevenue - totalCost;
-    const totalCollected = inventorySales.reduce((sum,s) => sum+(s.paidAmount||0), 0);
-    const totalDue = Math.max(0, totalRevenue - totalCollected);
+    const { totalRevenue, totalCost, totalProfit, totalCollected, totalDue } = inventoryNetTotals();
+    const totalRefunded = inventoryReturns.reduce((sum,r) => sum+r.refundAmount, 0);
     const collectionPct = totalRevenue > 0 ? Math.round((totalCollected/totalRevenue)*100) : 0;
-    const totalUnitsSold = inventorySales.reduce((sum,s) => sum+s.qty, 0);
+    const totalUnitsSold = inventorySales.reduce((sum,s) => sum+s.qty, 0) - inventoryReturns.reduce((sum,r) => sum+r.qty, 0);
     const totalTransactions = inventorySales.length;
     const avgSaleValue = totalTransactions > 0 ? totalRevenue/totalTransactions : 0;
 
@@ -13224,12 +13444,22 @@
       byItem[s.itemId].revenue += s.totalAmount;
       byItem[s.itemId].cost += s.totalCost;
     });
+    inventoryReturns.forEach(r => {
+      if(!byItem[r.itemId]) byItem[r.itemId] = { name:r.itemName, qty:0, revenue:0, cost:0 };
+      byItem[r.itemId].qty -= r.qty;
+      byItem[r.itemId].revenue -= r.refundAmount;
+      byItem[r.itemId].cost -= r.costReversed;
+    });
     const topItems = Object.values(byItem).sort((a,b) => b.revenue-a.revenue).slice(0,5);
 
     const byMode = {};
     inventorySales.forEach(s => {
       const m = s.mode || 'Not specified';
       byMode[m] = (byMode[m]||0) + (s.paidAmount||0);
+    });
+    inventoryReturns.forEach(r => {
+      const m = r.refundMode || 'Not specified';
+      byMode[m] = (byMode[m]||0) - (r.cashRefunded||0);
     });
     const modeEntries = Object.entries(byMode).sort((a,b) => b[1]-a[1]);
 
@@ -13239,12 +13469,13 @@
         ${getInventoryTabAccess(currentUser.role,'inventory_saleshistory') ? `<button class="btn btn-ghost btn-sm" onclick="switchInventoryTab('saleshistory')">View Full Sales History →</button>` : ''}
       </div>
 
-      <div class="dash-section-title"><div><span class="eyebrow-sm">Sales Performance</span><h3>Revenue, Collections &amp; Profit</h3></div></div>
+      <div class="dash-section-title"><div><span class="eyebrow-sm">Sales Performance</span><h3>Revenue, Collections &amp; Profit (net of returns)</h3></div></div>
       <div class="fee-summary-row" style="margin-bottom:20px;">
-        <div class="fee-sum-card"><b>${fmtMoney(totalRevenue)}</b><span>Sale Done (Revenue)</span></div>
+        <div class="fee-sum-card"><b>${fmtMoney(totalRevenue)}</b><span>Sale Done (Net Revenue)</span></div>
         <div class="fee-sum-card"><b style="color:#0f6a63;">${fmtMoney(totalCollected)}</b><span>Amount Collected</span></div>
         <div class="fee-sum-card"><b style="color:var(--magenta);">${fmtMoney(totalDue)}</b><span>Amount To Be Collected</span></div>
         <div class="fee-sum-card"><b style="color:${totalProfit>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(totalProfit)}</b><span>Total Profit</span></div>
+        <div class="fee-sum-card"><b style="color:#8a6a1f;">${fmtMoney(totalRefunded)}</b><span>Returned to Buyers</span></div>
       </div>
 
       <div class="overview-panel" style="margin-bottom:24px;">
@@ -13272,6 +13503,7 @@
         <div class="fee-sum-card"><b style="color:var(--magenta);">${outOfStock.length}</b><span>Out of Stock</span></div>
         <div class="fee-sum-card"><b style="color:#8a6a1f;">${lowStock.length}</b><span>Low Stock</span></div>
         <div class="fee-sum-card"><b>${fmtMoney(totalStockValue)}</b><span>Stock Value (at cost)</span></div>
+        <div class="fee-sum-card"><b style="color:#8a6a1f;">${fmtMoney(totalVendorReturnValue)}</b><span>Returned to Vendor (Stock Write-down)</span></div>
       </div>
 
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px,1fr)); gap:16px; margin-bottom:24px;">
@@ -13289,6 +13521,14 @@
             <tbody>${modeEntries.length ? modeEntries.map(([mode,amt]) => `<tr><td>${mode}</td><td>${fmtMoney(amt)}</td></tr>`).join('') : '<tr><td colspan="2" style="color:var(--ink-soft);">No collections yet</td></tr>'}</tbody></table>
           </div>
         </div>
+      </div>
+
+      <div class="dash-section-title"><div><h3>Vendor Returns Log</h3></div></div>
+      <div class="table-wrap" style="margin-bottom:24px;">
+        <table><thead><tr><th>Date</th><th>Item</th><th>Qty</th><th>Stock Value Reversed</th><th>Vendor</th><th>Reason</th><th>Processed By</th></tr></thead>
+        <tbody>
+        ${inventoryVendorReturns.length ? inventoryVendorReturns.slice().sort((a,b) => b.id.localeCompare(a.id)).slice(0,30).map(r => `<tr><td>${r.date}</td><td class="name-cell">${r.itemName}</td><td>${r.qty}</td><td>${fmtMoney(r.costReversed)}</td><td>${r.vendor||'—'}</td><td>${r.reason||'—'}</td><td>${r.processedBy||'—'}</td></tr>`).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No vendor returns recorded</b></div></td></tr>`}
+        </tbody></table>
       </div>
 
       <div class="dash-section-title"><div><h3>Needs Attention</h3></div></div>
