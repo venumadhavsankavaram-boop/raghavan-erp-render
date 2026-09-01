@@ -240,9 +240,10 @@ await ensureSchema();
 // review) meant anyone who could reach this server at all. This hashes any
 // password that isn't already a bcrypt hash (those always start with
 // "$2") in place, once, right here at startup, before the server accepts
-// its first request — so a fresh install with the seeded admin/admin123
-// account, and this school's existing live accounts, both end up hashed
-// with no separate manual step. Running this again on a later restart
+// its first request — so this school's existing live accounts end up hashed
+// with no separate manual step. (A fresh install's seeded admin account is
+// inserted already hashed — see seedDefaultAdminIfEmpty below.) Running this
+// again on a later restart
 // finds every row already hashed and does nothing, so it's safe to leave
 // in place permanently rather than removing it after the first deploy.
 async function migratePlaintextPasswords() {
@@ -254,6 +255,37 @@ async function migratePlaintextPasswords() {
   if (rows.length) console.log(`Migrated ${rows.length} plaintext password(s) to bcrypt hashes.`);
 }
 await migratePlaintextPasswords();
+
+// ---------- Seed a default admin only when the users table is completely empty ----------
+// The client used to seed a hardcoded admin/admin123 account itself, and the login
+// screen displayed that literal credential to every visitor, permanently — anyone
+// who opened the browser's view-source could read the password straight out of the
+// shipped JavaScript, and anyone who simply loaded the login page saw it printed on
+// screen, whether or not an admin had ever changed it. This does the seeding here
+// instead: it runs once, only when no user rows exist yet, generates a random
+// password, hashes it before it ever reaches the database, and prints the plaintext
+// exactly once to this server's own console (visible only in the hosting dashboard's
+// logs — never sent to any client, never stored anywhere in plaintext).
+async function seedDefaultAdminIfEmpty() {
+  const rows = await sql`SELECT id FROM users LIMIT 1`;
+  if (rows.length) return;
+  const rawPassword = crypto.randomBytes(9).toString('base64url');
+  const hash = await bcrypt.hash(rawPassword, 10);
+  const recoveryCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+  await sql`
+    INSERT INTO users (id, name, username, password, role, linked_student_id, recovery_code)
+    VALUES ('u_admin', 'Administrator', 'admin', ${hash}, 'Admin', '', ${recoveryCode})
+  `;
+  console.log('============================================================');
+  console.log('First run: created the default admin account.');
+  console.log('  Username: admin');
+  console.log(`  Password: ${rawPassword}`);
+  console.log('Sign in with this once, then change the password immediately');
+  console.log('(Initial Setup -> Users & Roles). Printed only this one time —');
+  console.log('it is not stored anywhere in plaintext and will not be shown again.');
+  console.log('============================================================');
+}
+await seedDefaultAdminIfEmpty();
 
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
