@@ -17,7 +17,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(express.json());
+// Default body-size limit (100kb) is far too small the moment any record
+// carries a photo or document as a base64 data URL (website gallery photos,
+// student/staff photos, ID card photos, admit-card signatures, admin
+// downloads) — those routinely run several hundred KB to a few MB once
+// base64-encoded. Under the old default, a POST/PUT carrying one of those
+// was rejected by this middleware with 413 Payload Too Large before it ever
+// reached a route handler; the client didn't check the response status (see
+// the matching index.html fix), so it looked like a normal save while
+// nothing was actually written to the database.
+app.use(express.json({ limit: '25mb' }));
 
 // The public school website (a separate static site, on its own domain) talks to
 // this ERP straight over the network for a handful of resources — it isn't hosted
@@ -46,35 +55,123 @@ app.use((req, res, next) => {
 
 const sql = neon(process.env.DATABASE_URL);
 
-// A generic key/value table backs every module that doesn't need its own
-// dedicated table with real columns — Inventory, Timetable, Library, Transport,
-// Hostel, Accounting, Fee/Exam sub-settings, Report Template signatures, Class
-// & Section setup, Pending Approvals, and a few others. Each of those modules
-// used to call the frontend's storageGet/storageSet with no matching /api/*
-// route at all, which silently fell back to that one browser's own
-// localStorage — working fine until someone opened the ERP on a second
-// browser or device and the records simply weren't there. Rather than hand-
-// building ~35 more one-off tables and column mappings, they all now round-
-// trip their whole current value as JSON through this one shared table,
-// keyed by the same string each module already uses as its storage key.
-// created lazily on first request so a fresh deploy never needs a manual
-// migration step.
-let _kvTableReady = null;
-function ensureKvTable() {
-  if (!_kvTableReady) {
-    _kvTableReady = sql`
-      CREATE TABLE IF NOT EXISTS kv_store (
-        key TEXT PRIMARY KEY,
-        value JSONB NOT NULL DEFAULT '{}'::jsonb,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `.catch(err => { _kvTableReady = null; throw err; });
-  }
-  return _kvTableReady;
+// ---------- Schema bootstrap ----------
+// Every table this app needs, created only if missing. This means standing the
+// whole ERP up against a brand-new, completely empty Postgres database (a
+// fresh Neon project, for a future re-install) is just: set DATABASE_URL and
+// start the server — no separate schema.sql to run by hand, no migration
+// step to remember. It's a no-op against the current live database (every
+// one of these tables already exists there), so this changes nothing about
+// how the app behaves today; it only matters the day this ever needs to be
+// stood up again from scratch. Column types are the ones this app's own
+// read/write code already expects (JSONB where the code does `::jsonb`
+// casts and reads the result back as a real array/object; TEXT — not DATE —
+// for date-shaped fields, since a couple of them are legitimately sent as an
+// empty string before they're filled in, e.g. a discount's approval date
+// before it's approved).
+async function ensureSchema() {
+  await sql`CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY, name TEXT, username TEXT, password TEXT, role TEXT,
+    linked_student_id TEXT, recovery_code TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS payments (
+    id TEXT PRIMARY KEY, receipt_no TEXT, student_id TEXT, student_name TEXT, category TEXT, mode TEXT,
+    amount NUMERIC DEFAULT 0, discount NUMERIC DEFAULT 0, instalment TEXT, date TEXT, note TEXT,
+    class_at_payment TEXT, extra_fee_name TEXT, extra_fee_id TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS student_discounts (
+    id TEXT PRIMARY KEY, batch_id TEXT, student_id TEXT, type TEXT, applies_to TEXT, mode TEXT,
+    value NUMERIC DEFAULT 0, note TEXT, status TEXT, requested_by TEXT, requested_role TEXT, requested_date TEXT,
+    approver_id TEXT, approver_name TEXT, approved_by TEXT, approved_date TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS student_extra_fees (
+    id TEXT PRIMARY KEY, student_id TEXT, name TEXT, amount NUMERIC DEFAULT 0, paid BOOLEAN DEFAULT false,
+    paid_amount NUMERIC DEFAULT 0, date TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS attendance_records (
+    id TEXT PRIMARY KEY, student_id TEXT, date TEXT, status TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS holidays (
+    id TEXT PRIMARY KEY, date TEXT, name TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS exam_results (
+    id TEXT PRIMARY KEY, exam_id TEXT, student_id TEXT, subject TEXT, marks NUMERIC, absent BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS staff_attendance_records (
+    id TEXT PRIMARY KEY, staff_id TEXT, date TEXT, status TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS admission_inquiries (
+    id TEXT PRIMARY KEY, parent_name TEXT, parent_email TEXT, parent_phone TEXT, student_name TEXT,
+    applying_grade TEXT, notes TEXT, submitted_date TEXT, status TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS website_gallery (
+    id TEXT PRIMARY KEY, data_url TEXT, category TEXT, caption TEXT, uploaded_date TEXT, uploaded_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS students (
+    id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, class_name TEXT, section TEXT, status TEXT,
+    admission_no TEXT, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS staff (
+    id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, department TEXT, designation TEXT, status TEXT,
+    staff_id TEXT, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS staff_payroll (
+    id TEXT PRIMARY KEY, staff_id TEXT, month TEXT, status TEXT,
+    extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS comms_messages (
+    id TEXT PRIMARY KEY, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS rooms (
+    id TEXT PRIMARY KEY, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS exam_hall_tickets (
+    id TEXT PRIMARY KEY, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS exam_room_config (
+    id TEXT PRIMARY KEY, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS subjects (
+    id TEXT PRIMARY KEY, name TEXT, code TEXT, class_name TEXT,
+    sections JSONB NOT NULL DEFAULT '[]'::jsonb, section_staff JSONB NOT NULL DEFAULT '{}'::jsonb,
+    staff_ids JSONB NOT NULL DEFAULT '[]'::jsonb, countable BOOLEAN DEFAULT true, elective BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS exam_defs (
+    id TEXT PRIMARY KEY, name TEXT, exam_type TEXT, start_date TEXT, end_date TEXT,
+    class_subjects JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS custom_roles (
+    id TEXT PRIMARY KEY, name TEXT, permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS fee_structure (
+    class_name TEXT PRIMARY KEY, admission NUMERIC DEFAULT 0, fee NUMERIC DEFAULT 0,
+    bus NUMERIC DEFAULT 0, stock NUMERIC DEFAULT 0
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS attendance_settings (
+    id INTEGER PRIMARY KEY, threshold NUMERIC DEFAULT 75, working_days JSONB NOT NULL DEFAULT '[1,2,3,4,5,6]'::jsonb
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS school_info (
+    id INTEGER PRIMARY KEY, data JSONB NOT NULL DEFAULT '{}'::jsonb
+  )`;
+  // The generic key/value table backs every module that doesn't need its own
+  // dedicated table with real columns — Inventory, Timetable, Library, Transport,
+  // Hostel, Accounting, Fee/Exam sub-settings, Report Template signatures, Class
+  // & Section setup, Pending Approvals, and a few others (see index.html's
+  // OBJECT_BACKED_KEYS registrations for the full list). Each round-trips its
+  // whole current value as JSON, keyed by the same string the module already
+  // uses as its storage key, rather than needing one more hand-built table.
+  await sql`CREATE TABLE IF NOT EXISTS kv_store (
+    key TEXT PRIMARY KEY, value JSONB NOT NULL DEFAULT '{}'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
 }
+await ensureSchema();
+
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
-  await ensureKvTable();
   if (req.method === 'GET') {
     const rows = await sql`SELECT value FROM kv_store WHERE key = ${key}`;
     return res.status(200).json(rows.length ? rows[0].value : {});
@@ -584,6 +681,27 @@ app.all('/api/:resource', async (req, res) => {
     console.error(`${resource} API error:`, err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
+});
+
+// A request body that's still too large (bigger than the 25mb limit above)
+// or isn't valid JSON reaches here as an error instead of a route handler.
+// Without this, Express's default error page is a raw HTML blob with a 413
+// or 400 status — the frontend's fetch calls now check response.ok (see
+// index.html), so they need a real JSON body to work with, and a person
+// checking the browser's Network tab gets an actual explanation instead of
+// a wall of HTML.
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'That upload is too large. Try a smaller photo or file.' });
+  }
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Malformed request.' });
+  }
+  if (err) {
+    console.error('Unhandled error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+  next();
 });
 
 // ---------- Serve the ERP itself ----------
