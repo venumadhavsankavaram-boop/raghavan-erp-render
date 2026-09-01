@@ -11,6 +11,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { neon } from '@neondatabase/serverless';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -26,6 +27,18 @@ const app = express();
 // reached a route handler; the client didn't check the response status (see
 // the matching index.html fix), so it looked like a normal save while
 // nothing was actually written to the database.
+//
+// One route needs the opposite treatment: /api/admission-inquiries is the
+// only endpoint the public school website can POST to with zero login of
+// any kind (see WEBSITE_CORS_RULES below) — it's a plain text form (a
+// name, an email, a phone number, a note), so it never needs anything
+// close to 25mb. Registering a small-limit JSON parser for that one path
+// first means it — and only it — gets capped at 20kb; body-parser marks
+// the body as already-parsed, so the 25mb parser below skips it and still
+// applies normally to every other route. This keeps a stray or malicious
+// caller from using the one unauthenticated write endpoint in the app to
+// stuff giant payloads into the database.
+app.use('/api/admission-inquiries', express.json({ limit: '20kb' }));
 app.use(express.json({ limit: '25mb' }));
 
 // The public school website (a separate static site, on its own domain) talks to
@@ -54,6 +67,15 @@ app.use((req, res, next) => {
 });
 
 const sql = neon(process.env.DATABASE_URL);
+
+// A request header value that came from decodeURIComponent-encoded text
+// (see the client's actorHeaders() helper) — falls back to the raw value
+// if it isn't actually encoded, so this never throws on a header some
+// other caller (e.g. a script, not this app's own UI) sent unencoded.
+function decodeHeaderValue(v) {
+  if (!v) return '';
+  try { return decodeURIComponent(String(v)); } catch (e) { return String(v); }
+}
 
 // ---------- Schema bootstrap ----------
 // Every table this app needs, created only if missing. This means standing the
@@ -167,8 +189,71 @@ async function ensureSchema() {
   await sql`CREATE TABLE IF NOT EXISTS kv_store (
     key TEXT PRIMARY KEY, value JSONB NOT NULL DEFAULT '{}'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  // Who changed what, when. One row per successful write (POST/PUT/DELETE)
+  // to any /api/:resource endpoint, written centrally by the main dispatcher
+  // rather than by each individual handler — see the comment there. Actor
+  // fields are self-reported by the browser (no server-side sessions exist
+  // yet to read them from authoritatively), so treat this as "what the app
+  // told us happened," same trust level as everything else here today —
+  // still genuinely useful for spotting an accidental bulk-delete or
+  // tracking down when a record last changed.
+  await sql`CREATE TABLE IF NOT EXISTS audit_log (
+    id BIGSERIAL PRIMARY KEY, actor_name TEXT, actor_role TEXT, method TEXT, resource TEXT,
+    record_id TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+
+  // ---------- Indexes ----------
+  // The tables above are all read by student_id / staff_id / username / date
+  // lookups constantly (a student's fee history, a staff member's payroll
+  // months, attendance for one student across a year, the login lookup on
+  // every sign-in) — without an index Postgres has to scan the whole table
+  // for each of those. IF NOT EXISTS makes this idempotent and safe to run
+  // on every boot, same as the CREATE TABLE statements above. Non-unique on
+  // purpose: this is a performance fix, not a data-integrity change — adding
+  // a UNIQUE constraint on username here could fail outright (or silently
+  // change behavior) if any duplicate usernames already exist in the live
+  // data, which is a separate decision from "make lookups fast."
+  await sql`CREATE INDEX IF NOT EXISTS idx_users_username ON users (LOWER(username))`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_payments_student_id ON payments (student_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_payments_date ON payments (date)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_student_discounts_student_id ON student_discounts (student_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_student_discounts_batch_id ON student_discounts (batch_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_student_extra_fees_student_id ON student_extra_fees (student_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_attendance_records_student_id ON attendance_records (student_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_attendance_records_date ON attendance_records (date)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_exam_results_exam_id ON exam_results (exam_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_exam_results_student_id ON exam_results (student_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_staff_attendance_records_staff_id ON staff_attendance_records (staff_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_staff_attendance_records_date ON staff_attendance_records (date)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_staff_payroll_staff_id ON staff_payroll (staff_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_admission_inquiries_status ON admission_inquiries (status)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_website_gallery_category ON website_gallery (category)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (created_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log (resource)`;
 }
 await ensureSchema();
+
+// ---------- One-time password migration ----------
+// Every password in the `users` table has been plain text since this app's
+// first version — readable by anyone who could call GET /api/users, which
+// (with no server-side login check on any route yet — see the security
+// review) meant anyone who could reach this server at all. This hashes any
+// password that isn't already a bcrypt hash (those always start with
+// "$2") in place, once, right here at startup, before the server accepts
+// its first request — so a fresh install with the seeded admin/admin123
+// account, and this school's existing live accounts, both end up hashed
+// with no separate manual step. Running this again on a later restart
+// finds every row already hashed and does nothing, so it's safe to leave
+// in place permanently rather than removing it after the first deploy.
+async function migratePlaintextPasswords() {
+  const rows = await sql`SELECT id, password FROM users WHERE password IS NOT NULL AND password NOT LIKE '$2%'`;
+  for (const row of rows) {
+    const hash = await bcrypt.hash(String(row.password), 10);
+    await sql`UPDATE users SET password = ${hash} WHERE id = ${row.id}`;
+  }
+  if (rows.length) console.log(`Migrated ${rows.length} plaintext password(s) to bcrypt hashes.`);
+}
+await migratePlaintextPasswords();
 
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
@@ -365,6 +450,61 @@ async function handleSimple(req, res, config) {
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: 'Missing id.' });
     await sql.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+    return res.status(200).json({ ok: true });
+  }
+  return res.status(405).json({ error: 'Method not allowed.' });
+}
+
+// The `users` resource needs its own version of the above rather than going
+// through the generic handleSimple(): it's the one resource with a password
+// field, which has two rules nothing else needs — GET must never send it
+// back (hashed or not, the browser has no legitimate use for it), and a
+// PUT that doesn't include a new one must leave the existing hash alone
+// instead of overwriting it with null the way handleSimple's generic
+// "missing field → null" behavior would (every edit to a user's name,
+// role, etc. goes through the same PUT the client already used before this
+// change, and the client can no longer echo back a password it was never
+// given in the first place).
+async function handleUsers(req, res) {
+  const config = SIMPLE_RESOURCES.users;
+  const { table, fields } = config;
+  if (req.method === 'GET') {
+    const rows = await sql.query(`SELECT * FROM ${table} ORDER BY created_at ASC NULLS LAST`);
+    return res.status(200).json(rows.map(r => {
+      const shaped = simpleToAppShape(r, fields);
+      delete shaped.password;
+      return shaped;
+    }));
+  }
+  if (req.method === 'POST' || req.method === 'PUT') {
+    const body = { ...(req.body || {}) };
+    if (!body.id) return res.status(400).json({ error: 'Missing id.' });
+    if (req.method === 'POST') {
+      if (!body.password) return res.status(400).json({ error: 'Password is required for a new user.' });
+      body.password = await bcrypt.hash(String(body.password), 10);
+    } else if (body.password) {
+      body.password = await bcrypt.hash(String(body.password), 10);
+    } else {
+      const existing = await sql`SELECT password FROM users WHERE id = ${body.id}`;
+      body.password = existing.length ? existing[0].password : null;
+    }
+    const cols = fields.map(f => f.col);
+    const vals = fields.map(f => (body[f.app] === undefined ? null : body[f.app]));
+    if (req.method === 'POST') {
+      const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+      await sql.query(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`, vals);
+      return res.status(201).json({ ok: true });
+    } else {
+      const setClause = cols.filter(c => c !== 'id').map((c, i) => `${c} = $${i + 2}`).join(', ');
+      const updateVals = [body.id, ...fields.filter(f => f.col !== 'id').map(f => (body[f.app] === undefined ? null : body[f.app]))];
+      await sql.query(`UPDATE ${table} SET ${setClause} WHERE id = $1`, updateVals);
+      return res.status(200).json({ ok: true });
+    }
+  }
+  if (req.method === 'DELETE') {
+    const { id } = req.query;
+    if (!id) return res.status(400).json({ error: 'Missing id.' });
+    await sql`DELETE FROM users WHERE id = ${id}`;
     return res.status(200).json({ ok: true });
   }
   return res.status(405).json({ error: 'Method not allowed.' });
@@ -661,13 +801,222 @@ app.post('/api/payments/verify', async (req, res) => {
   }
 });
 
+// ---------- Login ----------
+// The only place a username/password pair is ever checked now that GET
+// /api/users no longer sends passwords to the browser at all (see
+// handleUsers and the migration above) — the app's own login screen, the
+// "change my password" screens (which re-verify the current password
+// before accepting a new one), and nothing else, all call this instead of
+// comparing locally. Deliberately returns the same generic message on a
+// bad username and a bad password, rather than confirming which one was
+// wrong, so this can't be used to enumerate valid usernames.
+// ---------- Login rate limiting ----------
+// In-memory (per-process) tracking of failed login attempts, keyed by
+// IP + username so one bad actor guessing one account can't lock out
+// every other user, and one legitimate user mistyping their own password
+// a few times doesn't get caught by someone else's attempts elsewhere.
+// This is enough for this app's actual deployment — a single Render
+// instance, no load balancer spreading requests across processes — without
+// adding a dependency or a database table just to store short-lived
+// counters that only ever need to survive a few minutes.
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const loginAttempts = new Map(); // key -> { count, firstAttempt, blockedUntil }
+
+function loginRateKey(req, username) {
+  const fwd = req.headers['x-forwarded-for'];
+  const ip = (fwd ? String(fwd).split(',')[0].trim() : '') || req.socket.remoteAddress || 'unknown';
+  return ip + '|' + String(username || '').toLowerCase();
+}
+
+// Returns seconds remaining if this key is currently blocked, otherwise null.
+function checkLoginRateLimit(key) {
+  const rec = loginAttempts.get(key);
+  if (!rec) return null;
+  if (rec.blockedUntil && Date.now() < rec.blockedUntil) {
+    return Math.ceil((rec.blockedUntil - Date.now()) / 1000);
+  }
+  if (rec.blockedUntil && Date.now() >= rec.blockedUntil) {
+    loginAttempts.delete(key); // block expired — start fresh
+  }
+  return null;
+}
+
+function recordLoginFailure(key) {
+  const now = Date.now();
+  let rec = loginAttempts.get(key);
+  if (!rec || now - rec.firstAttempt > LOGIN_WINDOW_MS) {
+    rec = { count: 0, firstAttempt: now, blockedUntil: null };
+  }
+  rec.count++;
+  if (rec.count >= LOGIN_MAX_ATTEMPTS) {
+    rec.blockedUntil = now + LOGIN_WINDOW_MS;
+  }
+  loginAttempts.set(key, rec);
+}
+
+function recordLoginSuccess(key) {
+  loginAttempts.delete(key);
+}
+
+// Sweep stale entries periodically so this Map doesn't grow unbounded over
+// the life of the process. unref() so this timer never keeps the process
+// alive on its own.
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, rec] of loginAttempts) {
+    if ((!rec.blockedUntil || now > rec.blockedUntil) && now - rec.firstAttempt > LOGIN_WINDOW_MS) {
+      loginAttempts.delete(key);
+    }
+  }
+}, 10 * 60 * 1000).unref();
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) return res.status(400).json({ error: 'Username and password are required.' });
+    const rateKey = loginRateKey(req, username);
+    const blockedForSeconds = checkLoginRateLimit(rateKey);
+    if (blockedForSeconds) {
+      const mins = Math.ceil(blockedForSeconds / 60);
+      return res.status(429).json({ error: `Too many failed attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'}.` });
+    }
+    const rows = await sql`SELECT * FROM users WHERE LOWER(username) = LOWER(${String(username)})`;
+    if (!rows.length) { recordLoginFailure(rateKey); return res.status(401).json({ error: 'Invalid username or password.' }); }
+    const user = rows[0];
+    const ok = await bcrypt.compare(String(password), user.password || '');
+    if (!ok) { recordLoginFailure(rateKey); return res.status(401).json({ error: 'Invalid username or password.' }); }
+    recordLoginSuccess(rateKey);
+    const shaped = simpleToAppShape(user, SIMPLE_RESOURCES.users.fields);
+    delete shaped.password;
+    return res.status(200).json(shaped);
+  } catch (err) {
+    console.error('login error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// ---------- Full data backup/export ----------
+// A single admin-triggered dump of every table in the database as plain
+// JSON, so there's a real, human-inspectable disaster-recovery copy that
+// doesn't depend on remembering to configure anything on Neon's side, and
+// that can be opened and read even by someone without database access.
+// Reads the table list from Postgres itself (information_schema) rather
+// than hardcoding the 24+ tables from ensureSchema — that means a table
+// added later (the audit log below, or anything after it) is picked up
+// automatically with no risk of someone updating the schema and forgetting
+// to update a separate hardcoded backup list. Table names here come from
+// Postgres's own catalog, not from any request input, so building the
+// SELECT with a template string is safe — there's no user-controlled value
+// anywhere in it.
+app.get('/api/backup', async (req, res) => {
+  try {
+    const tableRows = await sql`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+      ORDER BY table_name
+    `;
+    const backup = { generatedAt: new Date().toISOString(), tables: {} };
+    for (const row of tableRows) {
+      const name = row.table_name;
+      backup.tables[name] = await sql.query(`SELECT * FROM "${name}"`);
+    }
+    const filename = `raghavan-erp-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.status(200).json(backup);
+  } catch (err) {
+    console.error('backup error:', err);
+    return res.status(500).json({ error: 'Could not generate backup.' });
+  }
+});
+
+// Read-only viewer for the audit log — newest first, capped at 500 rows per
+// call so this stays fast and bounded no matter how long the table gets
+// (the Admin-only UI reads this straight through, no further pagination
+// needed for a log meant for "what changed recently," not full history
+// mining).
+app.get('/api/audit-log', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 500`;
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error('audit-log fetch error:', err);
+    return res.status(500).json({ error: 'Could not load the audit log.' });
+  }
+});
+
+// The one write this app accepts from a completely anonymous caller. Every
+// other POST/PUT in the app is reached only through the ERP's own UI, used
+// by staff who are (for now) trusted the moment they're on the login
+// screen — but this one is open to anyone who can reach the public school
+// website, logged in or not. A short server-side sanity check here, in
+// addition to the 20kb body-size cap above, means a bad actor can't stuff
+// oversized or missing-field junk straight into the admissions pipeline.
+const ADMISSION_INQUIRY_FIELD_LIMITS = {
+  studentName: 120, parentName: 120, parentEmail: 160, parentPhone: 40, applyingGrade: 40, notes: 2000,
+};
+function validateAdmissionInquiry(body) {
+  if (!body || typeof body !== 'object') return 'Invalid submission.';
+  // The id is meant to be an opaque token, and index.html's admin view
+  // later drops it, unescaped, inside an onclick="...('<id>')" attribute —
+  // so anything containing a quote, angle bracket, backtick or backslash is
+  // rejected here, since a legitimate auto-generated id never needs one.
+  // This is deliberately a blocklist of the dangerous characters rather
+  // than an allowlist of an assumed id format, since the public website
+  // that generates these ids is a separate project this session can't see
+  // the source of — a blocklist can't reject a legitimate historical id
+  // whose exact shape isn't known here, while an allowlist could.
+  if (!body.id || typeof body.id !== 'string' || body.id.length > 200 || /['"<>`\\]/.test(body.id)) {
+    return 'Missing or invalid id.';
+  }
+  if (!body.parentName || !body.studentName) return 'Parent name and student name are required.';
+  for (const [field, max] of Object.entries(ADMISSION_INQUIRY_FIELD_LIMITS)) {
+    const v = body[field];
+    if (v != null && String(v).length > max) return `${field} is too long.`;
+  }
+  return null;
+}
+
 // ---------- Main API route ----------
 // This one route replaces the old api/[resource].js dynamic file — same
 // logic, just reading the resource name from Express's route parameter
 // (req.params.resource) instead of Vercel's automatic req.query.resource.
 app.all('/api/:resource', async (req, res) => {
   const { resource } = req.params;
+  // Log every write centrally, right here, instead of inside each of the
+  // individual handlers below (handleUsers, handleSimple, handleHybrid,
+  // handleSubjects, ...) — one place to get right instead of N, and any
+  // future resource added to this dispatcher is covered automatically.
+  // Logged from res.on('finish') so this reflects what actually happened:
+  // a validation error or a DB failure further down still ends the
+  // request with a 4xx/5xx and produces no log entry, same as if the
+  // write had never been attempted.
+  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE') {
+    const actorName = decodeHeaderValue(req.headers['x-actor-name']) || '(unknown)';
+    const actorRole = decodeHeaderValue(req.headers['x-actor-role']) || '';
+    const recordId = (req.body && req.body.id) || req.query.id || null;
+    res.on('finish', () => {
+      if (res.statusCode >= 400) return;
+      sql`INSERT INTO audit_log (actor_name, actor_role, method, resource, record_id)
+          VALUES (${actorName}, ${actorRole}, ${req.method}, ${resource}, ${recordId ? String(recordId) : null})`
+        .catch(err => console.error('audit log insert failed:', err));
+    });
+  }
   try {
+    // CORS (above) only stops a BROWSER from calling this cross-origin —
+    // it does nothing against a direct request from curl, a script, or
+    // any other non-browser caller, and this app has no server-side auth
+    // yet (see the security review) that would otherwise close that gap.
+    // So this check runs for PUT too, not just the POST the public form
+    // itself is meant to send.
+    if (resource === 'admission-inquiries' && (req.method === 'POST' || req.method === 'PUT')) {
+      const validationError = validateAdmissionInquiry(req.body);
+      if (validationError) return res.status(400).json({ error: validationError });
+    }
+    // 'users' is also in SIMPLE_RESOURCES (its column/field list is reused
+    // by handleUsers above), but takes its own dedicated handler instead of
+    // the generic one because of the password rules described there.
+    if (resource === 'users') return await handleUsers(req, res);
     if (SIMPLE_RESOURCES[resource]) return await handleSimple(req, res, SIMPLE_RESOURCES[resource]);
     if (HYBRID_RESOURCES[resource]) return await handleHybrid(req, res, HYBRID_RESOURCES[resource]);
     if (resource === 'subjects') return await handleSubjects(req, res);
