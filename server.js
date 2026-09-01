@@ -296,7 +296,7 @@ const SIMPLE_RESOURCES = {
     fields: [
       { app: 'id', col: 'id' }, { app: 'receiptNo', col: 'receipt_no' }, { app: 'studentId', col: 'student_id' },
       { app: 'studentName', col: 'student_name' }, { app: 'category', col: 'category' }, { app: 'mode', col: 'mode' },
-      { app: 'amount', col: 'amount' }, { app: 'discount', col: 'discount' }, { app: 'instalment', col: 'instalment' },
+      { app: 'amount', col: 'amount', numeric: true }, { app: 'discount', col: 'discount', numeric: true }, { app: 'instalment', col: 'instalment' },
       { app: 'date', col: 'date' }, { app: 'note', col: 'note' }, { app: 'classAtPayment', col: 'class_at_payment' },
       { app: 'extraFeeName', col: 'extra_fee_name' }, { app: 'extraFeeId', col: 'extra_fee_id' },
     ],
@@ -306,7 +306,7 @@ const SIMPLE_RESOURCES = {
     fields: [
       { app: 'id', col: 'id' }, { app: 'batchId', col: 'batch_id' }, { app: 'studentId', col: 'student_id' },
       { app: 'type', col: 'type' }, { app: 'appliesTo', col: 'applies_to' }, { app: 'mode', col: 'mode' },
-      { app: 'value', col: 'value' }, { app: 'note', col: 'note' }, { app: 'status', col: 'status' },
+      { app: 'value', col: 'value', numeric: true }, { app: 'note', col: 'note' }, { app: 'status', col: 'status' },
       { app: 'requestedBy', col: 'requested_by' }, { app: 'requestedRole', col: 'requested_role' },
       { app: 'requestedDate', col: 'requested_date' }, { app: 'approverId', col: 'approver_id' },
       { app: 'approverName', col: 'approver_name' }, { app: 'approvedBy', col: 'approved_by' },
@@ -317,7 +317,7 @@ const SIMPLE_RESOURCES = {
     table: 'student_extra_fees',
     fields: [
       { app: 'id', col: 'id' }, { app: 'studentId', col: 'student_id' }, { app: 'name', col: 'name' },
-      { app: 'amount', col: 'amount' }, { app: 'paid', col: 'paid' }, { app: 'paidAmount', col: 'paid_amount' },
+      { app: 'amount', col: 'amount', numeric: true }, { app: 'paid', col: 'paid' }, { app: 'paidAmount', col: 'paid_amount', numeric: true },
       { app: 'date', col: 'date' },
     ],
   },
@@ -336,7 +336,7 @@ const SIMPLE_RESOURCES = {
     table: 'exam_results',
     fields: [
       { app: 'id', col: 'id' }, { app: 'examId', col: 'exam_id' }, { app: 'studentId', col: 'student_id' },
-      { app: 'subject', col: 'subject' }, { app: 'marks', col: 'marks' }, { app: 'absent', col: 'absent' },
+      { app: 'subject', col: 'subject' }, { app: 'marks', col: 'marks', numeric: true }, { app: 'absent', col: 'absent' },
     ],
   },
   'staff-attendance': {
@@ -415,11 +415,21 @@ const HYBRID_RESOURCES = {
 };
 
 // ---------- Generic helpers for "simple" resources ----------
+// Postgres NUMERIC columns come back from this driver as strings, not JS
+// numbers — arbitrary-precision decimals can't always be represented as a
+// float, so the driver plays it safe and hands back text (this is also why
+// handleFeeStructure and handleAttendanceSettings below already wrap their
+// NUMERIC columns in Number()). Every field marked `numeric: true` here
+// gets the same treatment, so a caller doing `total += row.amount` gets a
+// real sum instead of silently concatenating strings — exactly what was
+// happening to exam marks totals in report cards before this. Null stays
+// null (a real "not entered yet"/absent marker) rather than becoming 0.
 function simpleToAppShape(row, fields) {
   const out = {};
   fields.forEach(f => {
     let v = row[f.col];
     if (v && typeof v === 'object' && v instanceof Date) v = v.toISOString().slice(0, 10);
+    else if (f.numeric && v !== null && v !== undefined) v = Number(v);
     out[f.app] = v;
   });
   return out;
