@@ -6048,7 +6048,7 @@
     }).sort((a,b) => (a.date||'').localeCompare(b.date||''));
     const countableRows = rows.filter(r => r.countable);
     const totalMax = countableRows.reduce((sum,r) => sum+r.max, 0);
-    const totalObtained = countableRows.reduce((sum,r) => sum+(r.marks||0), 0);
+    const totalObtained = countableRows.reduce((sum,r) => sum+(Number(r.marks)||0), 0);
     const pct = totalMax > 0 ? Math.round((totalObtained/totalMax)*1000)/10 : 0;
     const grade = gradeForPct(pct);
     const attEndDate = exam.endDate || exam.startDate;
@@ -6157,7 +6157,7 @@
     }).sort((a,b) => (a.date||'').localeCompare(b.date||''));
     const countableRows = rows.filter(r => r.countable);
     const totalMax = countableRows.reduce((sum,r) => sum+r.max, 0);
-    const totalObtained = countableRows.reduce((sum,r) => sum+(r.marks||0), 0);
+    const totalObtained = countableRows.reduce((sum,r) => sum+(Number(r.marks)||0), 0);
     const pct = totalMax > 0 ? Math.round((totalObtained/totalMax)*1000)/10 : 0;
     const grade = gradeForPct(pct);
     const titleText = (t.titleOverride && t.titleOverride.trim()) ? t.titleOverride.toUpperCase() : `REPORT CARD — ${exam.name.toUpperCase()}`;
@@ -6222,7 +6222,7 @@
         return { marks: r ? r.marks : null, max: subj.maxMarks };
       });
       const totalMax = subjRows.reduce((sum,r) => sum+r.max, 0);
-      const totalObtained = subjRows.reduce((sum,r) => sum+(r.marks||0), 0);
+      const totalObtained = subjRows.reduce((sum,r) => sum+(Number(r.marks)||0), 0);
       const hasAny = subjRows.some(r => r.marks !== null);
       const pct = totalMax > 0 ? Math.round((totalObtained/totalMax)*1000)/10 : 0;
       return { s, totalObtained, totalMax, pct, hasAny, grade: gradeForPct(pct) };
@@ -6276,7 +6276,7 @@
         return { marks: r ? r.marks : null, max: subj.maxMarks };
       });
       const totalMax = subjRows.reduce((sum,r) => sum+r.max, 0);
-      const totalObtained = subjRows.reduce((sum,r) => sum+(r.marks||0), 0);
+      const totalObtained = subjRows.reduce((sum,r) => sum+(Number(r.marks)||0), 0);
       const hasAny = subjRows.some(r => r.marks !== null);
       const pct = totalMax > 0 ? Math.round((totalObtained/totalMax)*1000)/10 : 0;
       return { s, totalObtained, totalMax, pct, hasAny, grade: gradeForPct(pct) };
@@ -7595,7 +7595,7 @@
 
     const examTotals = relevantExams.map((ex, i) => {
       let obtained = 0, max = 0;
-      matrix.forEach(row => { const c = row.cells[i]; if(c && c.countable){ max += c.max; obtained += (c.marks||0); } });
+      matrix.forEach(row => { const c = row.cells[i]; if(c && c.countable){ max += c.max; obtained += (Number(c.marks)||0); } });
       return { obtained, max };
     });
     const grandObtained = examTotals.reduce((sum,t) => sum+t.obtained, 0);
@@ -7992,7 +7992,7 @@
         return { marks: r ? r.marks : null, max: subj.maxMarks, absent: r ? !!r.absent : false };
       });
       const totalMax = subjRows.reduce((sum,r) => sum+r.max, 0);
-      const totalObtained = subjRows.reduce((sum,r) => sum+(r.marks||0), 0);
+      const totalObtained = subjRows.reduce((sum,r) => sum+(Number(r.marks)||0), 0);
       const hasAny = subjRows.some(r => r.marks !== null || r.absent);
       const hasEmpty = subjRows.some(r => r.marks === null && !r.absent);
       const pct = totalMax > 0 ? Math.round((totalObtained/totalMax)*1000)/10 : 0;
