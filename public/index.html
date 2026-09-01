@@ -1190,6 +1190,7 @@
         <button type="button" class="mf-tab" id="mptab-profile" onclick="switchMyProfileTab('profile')">👤 Profile</button>
         <button type="button" class="mf-tab" id="mptab-fees" onclick="switchMyProfileTab('fees')">💳 Fees &amp; Payments</button>
         <button type="button" class="mf-tab" id="mptab-marks" onclick="switchMyProfileTab('marks')">📝 Marks</button>
+        <button type="button" class="mf-tab" id="mptab-classinfo" onclick="switchMyProfileTab('classinfo')">🗓️ Class &amp; Timetable</button>
         <button type="button" class="mf-tab" id="mptab-notices" onclick="switchMyProfileTab('notices')">📌 Notices</button>
       </div>
 
@@ -15281,7 +15282,7 @@
   let myProfileTab = 'notifications';
   function switchMyProfileTab(tab){
     myProfileTab = tab;
-    ['notifications','profile','fees','marks','notices'].forEach(t => {
+    ['notifications','profile','fees','marks','classinfo','notices'].forEach(t => {
       const el = document.getElementById('mptab-'+t);
       if(el) el.classList.toggle('active', t===tab);
     });
@@ -15302,6 +15303,7 @@
     if(myProfileTab === 'profile') return renderMyProfileProfileTab(body, s);
     if(myProfileTab === 'fees') return renderMyFeesTab(body, s);
     if(myProfileTab === 'marks') return renderMyMarksTab(body, s);
+    if(myProfileTab === 'classinfo') return renderMyClassInfoTab(body, s);
     if(myProfileTab === 'notices') return renderMyNoticesTab(body);
   }
 
@@ -15413,6 +15415,57 @@
       </div>
       <p style="font-size:0.8rem; color:var(--ink-soft); margin:-10px 0 16px;">Read-only view — contact the school office for any corrections.</p>
       ${buildProfileCardsHTML(s)}
+    `;
+  }
+
+  /* --- Class & Timetable tab: who the class teacher is (with contact
+     details) and the student's own weekly timetable — both read straight
+     from the same staffList/timetableEntries data the office already
+     maintains elsewhere (Staff Directory, Timetable → Class Timetable);
+     nothing new is stored per-student. --- */
+  function renderMyClassInfoTab(body, s){
+    const teacher = staffList.find(st => st.classTeacherClass===s.className && st.classTeacherSection===s.section && staffIsActive(st));
+    const teacherCard = teacher ? `
+      <div class="profile-card" style="margin-bottom:20px;">
+        <h4>Class Teacher</h4>
+        <div class="profile-head" style="margin:10px 0 14px;">
+          ${teacher.photo ? `<img class="profile-photo" src="${teacher.photo}">` : `<div class="profile-photo">${staffInitials(teacher)}</div>`}
+          <div>
+            <h2 style="font-size:1.05rem;">${teacher.firstName} ${teacher.lastName}</h2>
+            <div class="p-meta">${teacher.designation||'Class Teacher'}${teacher.department ? ' · '+teacher.department : ''}</div>
+          </div>
+        </div>
+        <div class="profile-row"><span>Phone</span><span>${teacher.phone ? `<a href="tel:${teacher.phone.replace(/\D/g,'')}">${teacher.phone}</a>` : '—'}</span></div>
+        <div class="profile-row"><span>Email</span><span>${teacher.email ? `<a href="mailto:${teacher.email}">${teacher.email}</a>` : '—'}</span></div>
+      </div>
+    ` : `<div class="empty-state" style="margin-bottom:20px;"><b>No class teacher assigned yet</b>Ask the school office once one is assigned to ${s.className} — Section ${s.section}.</div>`;
+
+    const hasEntries = timetableEntries.some(e => e.className===s.className && e.section===s.section);
+    const timetableBlock = !timetablePeriods.length ? `<div class="empty-state"><b>Timetable not set up yet</b>Check back once the office publishes it.</div>` : `
+      <div class="table-wrap">
+        <table><thead><tr><th>Period</th>${activeTimetableDays().map(d => `<th>${d}</th>`).join('')}</tr></thead>
+        <tbody>${timetablePeriods.map(p => {
+          if(p.isBreak){
+            return `<tr><td style="font-weight:600; background:rgba(203,154,46,0.1);">${p.label}<br><span style="font-size:0.7rem; color:var(--ink-soft); font-weight:400;">${p.start}–${p.end}</span></td><td colspan="${activeTimetableDays().length}" style="text-align:center; background:rgba(203,154,46,0.1); color:var(--ink-soft); font-style:italic;">${p.label}</td></tr>`;
+          }
+          return `<tr><td style="font-weight:600;">${p.label}<br><span style="font-size:0.7rem; color:var(--ink-soft); font-weight:400;">${p.start}–${p.end}</span></td>
+            ${activeTimetableDays().map(day => {
+              const entry = timetableEntries.find(e => e.className===s.className && e.section===s.section && e.day===day && e.period===p.id);
+              const staff = entry ? staffList.find(st => st.id===entry.staffId) : null;
+              return `<td style="text-align:center; min-width:110px;">
+                ${entry ? `<div style="font-weight:600; color:var(--magenta); font-size:0.82rem;">${entry.subject}</div><div style="font-size:0.72rem; color:var(--ink-soft);">${staff ? staff.firstName+' '+staff.lastName : ''}</div>` : `<span style="color:var(--ink-soft); font-size:0.78rem;">—</span>`}
+              </td>`;
+            }).join('')}
+          </tr>`;
+        }).join('')}</tbody></table>
+      </div>
+      ${!hasEntries ? `<p style="font-size:0.8rem; color:var(--ink-soft); margin-top:10px;">Nothing's been filled in for ${s.className} — Section ${s.section} yet — check back once the office publishes it.</p>` : ''}
+    `;
+
+    body.innerHTML = `
+      ${teacherCard}
+      <div class="dash-section-title"><div><h3>Weekly Timetable — ${s.className}, Section ${s.section}</h3></div></div>
+      ${timetableBlock}
     `;
   }
 
