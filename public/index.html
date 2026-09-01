@@ -2034,21 +2034,21 @@
     try{
       for(const s of oldStudents){
         if(!newIds.has(s.id)){
-          await fetch('/api/students?id=' + encodeURIComponent(s.id), { method:'DELETE' });
+          await throwIfNotOk(await fetch('/api/students?id=' + encodeURIComponent(s.id), { method:'DELETE' }));
         }
       }
       for(const s of students){
         const old = oldStudents.find(x => x.id === s.id);
         if(!old){
-          await fetch('/api/students', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(s) });
+          await throwIfNotOk(await fetch('/api/students', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(s) }));
         }else if(JSON.stringify(old) !== JSON.stringify(s)){
-          await fetch('/api/students', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(s) });
+          await throwIfNotOk(await fetch('/api/students', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(s) }));
         }
       }
       _studentsLastSynced = JSON.parse(JSON.stringify(students));
       localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
     }catch(e){
-      showToast("Could not reach the server — saved locally only.");
+      showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
       localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
     }
   }
@@ -2721,6 +2721,17 @@
   // every module is actually saved to the real database, not just this tab.
   [SETTINGS_KEY, ACADEMIC_YEARS_KEY, CURRENT_AY_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
   let _apiLastSynced = {};
+  // Throws with the server's own error message (when it sent JSON) on any
+  // non-2xx response — fetch() only rejects on a network failure, so without
+  // this an oversized upload or a server error (413, 500, ...) resolves
+  // "successfully" with an error body, and calling code has no way to tell
+  // the request didn't actually do anything.
+  async function throwIfNotOk(res){
+    if(res.ok) return res;
+    let msg = 'Request failed (' + res.status + ')';
+    try{ const body = await res.json(); if(body && body.error) msg = body.error; }catch(e){}
+    throw new Error(msg);
+  }
   async function syncArrayToApi(key, newArray){
     const apiPath = API_BACKED_KEYS[key];
     const oldArray = _apiLastSynced[key] || [];
@@ -2728,21 +2739,21 @@
     try{
       for(const item of oldArray){
         if(!newIds.has(item.id)){
-          await fetch(apiPath + '?id=' + encodeURIComponent(item.id), { method:'DELETE' });
+          await throwIfNotOk(await fetch(apiPath + '?id=' + encodeURIComponent(item.id), { method:'DELETE' }));
         }
       }
       for(const item of newArray){
         const old = oldArray.find(x => x.id === item.id);
         if(!old){
-          await fetch(apiPath, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) });
+          await throwIfNotOk(await fetch(apiPath, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) }));
         }else if(JSON.stringify(old) !== JSON.stringify(item)){
-          await fetch(apiPath, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) });
+          await throwIfNotOk(await fetch(apiPath, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) }));
         }
       }
       _apiLastSynced[key] = JSON.parse(JSON.stringify(newArray));
       localStorage.setItem(key, JSON.stringify(newArray)); // local fallback copy
     }catch(e){
-      showToast("Could not reach the server — saved locally only.");
+      showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
       localStorage.setItem(key, JSON.stringify(newArray));
     }
   }
@@ -2783,10 +2794,10 @@
   async function storageSet(key, value){
     if(OBJECT_BACKED_KEYS[key]){
       try{
-        await fetch(OBJECT_BACKED_KEYS[key], { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(value) });
+        await throwIfNotOk(await fetch(OBJECT_BACKED_KEYS[key], { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(value) }));
         localStorage.setItem(key, JSON.stringify(value));
       }catch(e){
-        showToast("Could not reach the server — saved locally only.");
+        showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
         localStorage.setItem(key, JSON.stringify(value));
       }
       return;
