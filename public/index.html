@@ -6039,8 +6039,9 @@
     const examId = document.getElementById('rcExamSelect').value;
     const exam = examDefs.find(e => e.id === examId);
     if(!s || !exam) return;
-    const t = currentReportTemplate() || { showAttendance:true, showClassTopper:true };
+    const t = currentReportTemplate() || { showAttendance:true, showClassTopper:true, showRank:true };
     const showTopper = t.showClassTopper !== false;
+    const showRank = t.showRank !== false;
     const rows = getExamSubjects(exam, s.className, s.section).map(subj => {
       const r = examResults.find(r => r.examId===exam.id && r.studentId===s.id && r.subject===subj.name);
       const topper = showTopper ? classTopperMarksFor(exam, s.className, s.section, subj.name) : null;
@@ -6051,6 +6052,7 @@
     const totalObtained = countableRows.reduce((sum,r) => sum+(Number(r.marks)||0), 0);
     const pct = totalMax > 0 ? Math.round((totalObtained/totalMax)*1000)/10 : 0;
     const grade = gradeForPct(pct);
+    const rankInfo = showRank ? classSectionRankFor(exam, s.className, s.section, s.id) : null;
     const attEndDate = exam.endDate || exam.startDate;
     let attCardHtml = '';
     if(t.showAttendance !== false){
@@ -6080,6 +6082,7 @@
       <div class="fee-summary-row" style="margin-top:16px;">
         <div class="fee-sum-card"><b>${pct}%</b><span>Percentage</span></div>
         <div class="fee-sum-card"><span class="grade-pill ${isFailGrade(grade)?'fail':''}" style="font-size:1.1rem;">${grade}</span><span>Grade</span></div>
+        ${rankInfo ? `<div class="fee-sum-card"><b>${ordinalSuffix(rankInfo.rank)}</b><span>Class Rank (${s.className} — ${s.section}, of ${rankInfo.outOf})</span></div>` : ''}
         ${attCardHtml}
       </div>
     `;
@@ -6147,9 +6150,52 @@
     });
     return top;
   }
+  // Class-and-section rank for one exam: every active student in the same
+  // class AND section is scored the same way the report card scores its own
+  // student (countable subjects only, same total-obtained/total-max math —
+  // see the fix for the report card percentage bug), then ranked highest
+  // percentage first. Ties share a rank and the next distinct score skips
+  // ahead to reflect how many students are ahead of it (1, 2, 2, 4 — the
+  // usual "competition ranking" convention on Indian school report cards),
+  // rather than every tied student getting a different number. A student
+  // with no countable subjects for this exam (nothing to score) is left out
+  // of the ranking entirely rather than counted as a last-place 0%.
+  function classSectionRankFor(exam, className, section, studentId){
+    const cohort = students.filter(x => x.className===className && x.section===section && isActive(x));
+    const scored = [];
+    cohort.forEach(x => {
+      const subjRows = getExamSubjects(exam, x.className, x.section).filter(subj => subj.countable !== false).map(subj => {
+        const r = examResults.find(r => r.examId===exam.id && r.studentId===x.id && r.subject===subj.name);
+        return { marks: r ? r.marks : null, max: subj.maxMarks };
+      });
+      const totalMax = subjRows.reduce((sum,r) => sum+r.max, 0);
+      const totalObtained = subjRows.reduce((sum,r) => sum+(Number(r.marks)||0), 0);
+      if(totalMax > 0) scored.push({ id: x.id, pct: (totalObtained/totalMax)*100 });
+    });
+    if(scored.length === 0) return null;
+    scored.sort((a,b) => b.pct - a.pct);
+    let rank = 1;
+    scored.forEach((row,i) => {
+      if(i > 0 && row.pct < scored[i-1].pct) rank = i+1;
+      row.rank = rank;
+    });
+    const mine = scored.find(x => x.id === studentId);
+    return mine ? { rank: mine.rank, outOf: scored.length } : null;
+  }
+  function ordinalSuffix(n){
+    const rem100 = n % 100;
+    if(rem100 >= 11 && rem100 <= 13) return n + 'th';
+    switch(n % 10){
+      case 1: return n + 'st';
+      case 2: return n + 'nd';
+      case 3: return n + 'rd';
+      default: return n + 'th';
+    }
+  }
   function reportCardPageHtml(s, exam, logoSrc, template){
-    const t = template || reportTemplates.find(x => x.isDefault) || reportTemplates[0] || { signatureLabel1:'Class Teacher', signatureLabel2:'Principal / Correspondent', showElective:true, showNotCounted:true, showAttendance:true, showClassTopper:true };
+    const t = template || reportTemplates.find(x => x.isDefault) || reportTemplates[0] || { signatureLabel1:'Class Teacher', signatureLabel2:'Principal / Correspondent', showElective:true, showNotCounted:true, showAttendance:true, showClassTopper:true, showRank:true };
     const showTopper = t.showClassTopper !== false;
+    const showRank = t.showRank !== false;
     const rows = getExamSubjects(exam, s.className, s.section).map(subj => {
       const r = examResults.find(r => r.examId===exam.id && r.studentId===s.id && r.subject===subj.name);
       const topper = showTopper ? classTopperMarksFor(exam, s.className, s.section, subj.name) : null;
@@ -6160,6 +6206,7 @@
     const totalObtained = countableRows.reduce((sum,r) => sum+(Number(r.marks)||0), 0);
     const pct = totalMax > 0 ? Math.round((totalObtained/totalMax)*1000)/10 : 0;
     const grade = gradeForPct(pct);
+    const rankInfo = showRank ? classSectionRankFor(exam, s.className, s.section, s.id) : null;
     const titleText = (t.titleOverride && t.titleOverride.trim()) ? t.titleOverride.toUpperCase() : `REPORT CARD — ${exam.name.toUpperCase()}`;
     return `
       <div class="rc-card">
@@ -6180,6 +6227,7 @@
       <div class="rc-summary">
         <div>Percentage: <b>${pct}%</b></div>
         <div>Grade: <b>${grade}</b></div>
+        ${rankInfo ? `<div>Class Rank: <b>${ordinalSuffix(rankInfo.rank)}</b> of ${rankInfo.outOf} (${s.className} — ${s.section})</div>` : ''}
       </div>
       ${t.footerNote ? `<p class="rc-foot">${t.footerNote}</p>` : ''}
       <div class="rc-sign">
@@ -6445,6 +6493,7 @@
           <label class="admission-toggle"><input type="checkbox" id="tmplShowElective" ${(!t || t.showElective!==false)?'checked':''}> Show "Elective" tag</label>
           <label class="admission-toggle"><input type="checkbox" id="tmplShowNotCounted" ${(!t || t.showNotCounted!==false)?'checked':''}> Show "Not counted" tag</label>
           <label class="admission-toggle"><input type="checkbox" id="tmplShowClassTopper" ${(!t || t.showClassTopper!==false)?'checked':''}> Show Highest Marks in Class per subject</label>
+          <label class="admission-toggle"><input type="checkbox" id="tmplShowRank" ${(!t || t.showRank!==false)?'checked':''}> Show Class Rank (section-wise)</label>
         </div>
         <div style="display:flex; gap:10px; margin-top:16px;">
           <button class="btn btn-ghost" onclick="backToTemplatesList()">Cancel</button>
@@ -6486,6 +6535,7 @@
       showElective: document.getElementById('tmplShowElective').checked,
       showNotCounted: document.getElementById('tmplShowNotCounted').checked,
       showClassTopper: document.getElementById('tmplShowClassTopper').checked,
+      showRank: document.getElementById('tmplShowRank').checked,
       showAttendance: infoFields.attendance,
     };
     if(editingTemplateId){
