@@ -729,6 +729,7 @@
       <button class="sb-link" id="navExams" onclick="switchView('exams')"><span class="dot"></span> Manage Exams</button>
       <button class="sb-link" id="navResult" onclick="switchView('result')"><span class="dot"></span> Result</button>
       <button class="sb-link" id="navTimetable" onclick="switchView('timetable')"><span class="dot"></span> Timetable</button>
+      <button class="sb-link" id="navSyllabus" onclick="switchView('syllabus')"><span class="dot"></span> Syllabus &amp; Homework</button>
       <button class="sb-link" id="navPromoTransfer" onclick="switchView('promotransfer')"><span class="dot"></span> Promotion &amp; Transfer</button>
       <button class="sb-link" id="navMyProfile" onclick="switchView('myprofile')" style="display:none;"><span class="dot"></span> My Profile<span class="nb-badge" id="navMyProfileBadge" style="display:none;"></span></button>
     </div>
@@ -1106,6 +1107,15 @@
       <div id="timetableBody"></div>
     </div>
 
+    <div id="view-syllabus" style="display:none;">
+      <div class="topbar"><div><h1>Syllabus &amp; Homework</h1><p>Track syllabus coverage and assign homework — both show up automatically in the student/parent portal.</p></div></div>
+      <div class="mf-tabs">
+        <button type="button" class="mf-tab active" id="sytab-tracker" onclick="switchSyllabusTab('tracker')">📖 Syllabus Tracker</button>
+        <button type="button" class="mf-tab" id="sytab-homework" onclick="switchSyllabusTab('homework')">📝 Homework</button>
+      </div>
+      <div id="syllabusBody"></div>
+    </div>
+
     <div id="view-transport" style="display:none;">
       <div class="topbar"><div><h1>Transport</h1><p>Bus routes, stops, and fares — assign students and it flows straight into their fee ledger.</p></div></div>
       <div class="mf-tabs">
@@ -1191,6 +1201,7 @@
         <button type="button" class="mf-tab" id="mptab-fees" onclick="switchMyProfileTab('fees')">💳 Fees &amp; Payments</button>
         <button type="button" class="mf-tab" id="mptab-marks" onclick="switchMyProfileTab('marks')">📝 Marks</button>
         <button type="button" class="mf-tab" id="mptab-classinfo" onclick="switchMyProfileTab('classinfo')">🗓️ Class &amp; Timetable</button>
+        <button type="button" class="mf-tab" id="mptab-syllabushw" onclick="switchMyProfileTab('syllabushw')">📔 Syllabus &amp; Homework</button>
         <button type="button" class="mf-tab" id="mptab-notices" onclick="switchMyProfileTab('notices')">📌 Notices</button>
       </div>
 
@@ -1610,6 +1621,55 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="syTopicModalOverlay">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-inner">
+      <button class="modal-close" type="button" onclick="closeSyllabusTopicModal()">&times;</button>
+      <h2 id="syTopicModalTitle">Add Syllabus Topic</h2>
+      <p class="modal-sub">For <b id="syTopicClassLabel"></b></p>
+      <form onsubmit="return saveSyllabusTopic(event)">
+        <div class="form-grid">
+          <div class="f-field"><label>Section</label><select id="syTopicSection"><option value="">All Sections</option></select></div>
+          <div class="f-field"><label>Subject *</label><select id="syTopicSubject" required><option value="">Select subject</option></select></div>
+          <div class="f-field full"><label>Topic / Chapter *</label><input type="text" id="syTopicName" required placeholder="e.g. Fractions — Chapter 4"></div>
+          <div class="f-field"><label>Status</label><select id="syTopicStatus"><option>Not Started</option><option>In Progress</option><option>Completed</option></select></div>
+          <div class="f-field"><label>Target Date</label><input type="date" id="syTopicTargetDate"></div>
+          <div class="f-field full"><label>Notes</label><textarea id="syTopicNotes" rows="2" placeholder="Optional"></textarea></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" onclick="closeSyllabusTopicModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="homeworkModalOverlay">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-inner">
+      <button class="modal-close" type="button" onclick="closeHomeworkModal()">&times;</button>
+      <h2 id="homeworkModalTitle">Assign Homework</h2>
+      <p class="modal-sub">For <b id="hwClassLabel"></b></p>
+      <form onsubmit="return saveHomework(event)">
+        <div class="form-grid">
+          <div class="f-field"><label>Section</label><select id="hwSection"><option value="">All Sections</option></select></div>
+          <div class="f-field"><label>Subject *</label><select id="hwSubject" required><option value="">Select subject</option></select></div>
+          <div class="f-field full"><label>Title *</label><input type="text" id="hwTitle" required placeholder="e.g. Worksheet 3 — Fractions"></div>
+          <div class="f-field full"><label>Description</label><textarea id="hwDescription" rows="3" placeholder="Optional — instructions, page numbers, etc."></textarea></div>
+          <div class="f-field"><label>Assigned Date</label><input type="date" id="hwAssignedDate"></div>
+          <div class="f-field"><label>Due Date</label><input type="date" id="hwDueDate"></div>
+          <div class="f-field full"><label>Assigned By</label><select id="hwStaff"><option value="">Select teacher</option></select></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" onclick="closeHomeworkModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="staffModalOverlay">
   <div class="modal" style="max-width:640px;">
     <div class="modal-inner">
@@ -1916,7 +1976,7 @@
   /* ===== SIDEBAR: collapsible sections ===== */
   const SB_VIEW_TO_SECTION = {
     dashboard:'overview',
-    admissions:'academics', attendance:'academics', subjects:'academics', exams:'academics', result:'academics', timetable:'academics', promotransfer:'academics', myprofile:'academics',
+    admissions:'academics', attendance:'academics', subjects:'academics', exams:'academics', result:'academics', timetable:'academics', syllabus:'academics', promotransfer:'academics', myprofile:'academics',
     managefee:'finance', accounting:'finance',
     announcements:'communication', noticeboard:'communication', websiteinquiries:'communication', websitegallery:'communication',
     staffdirectory:'staffsec', staffdepts:'staffsec', staffidcards:'staffsec', staffpayroll:'staffsec', staffattendance:'staffsec', staffreports:'staffsec',
@@ -2136,11 +2196,11 @@
   const USERS_KEY = "erp-users";
   const ROLES = ["Admin","Principal","Accountant","Office Assistant","Teacher","Staff","Student","Parent"];
   const ROLE_VIEWS = {
-    Admin: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','noticeboard','websiteinquiries','websitegallery','reports','inventory','timetable','transport','library','hostel','setup'],
-    Principal: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','noticeboard','websiteinquiries','websitegallery','reports','inventory','timetable','transport','library','hostel','setup'],
+    Admin: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','noticeboard','websiteinquiries','websitegallery','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
+    Principal: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','noticeboard','websiteinquiries','websitegallery','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
     Accountant: ['dashboard','admissions','managefee','accounting','reports','inventory','transport'],
     'Office Assistant': ['admissions'],
-    Teacher: ['admissions','attendance','exams','subjects','result','timetable','library','announcements'],
+    Teacher: ['admissions','attendance','exams','subjects','result','timetable','syllabus','library','announcements'],
     Staff: ['admissions','attendance'],
     Student: ['myprofile'],
     Parent: ['myprofile'],
@@ -2183,6 +2243,9 @@
     { key:'timetable_class',    label:'Class Timetable (edit)', icon:'📅', category:'Academics', parent:'timetable', isNew:true },
     { key:'timetable_teacher',  label:'Teacher View',           icon:'🧑‍🏫', category:'Academics', parent:'timetable', isNew:true },
     { key:'timetable_periods',  label:'Periods Setup',          icon:'⏰', category:'Academics', parent:'timetable', isNew:true },
+    { key:'syllabus',    label:'Syllabus & Homework', icon:'📔', category:'Academics' },
+    { key:'syllabus_tracker',  label:'Syllabus Tracker', icon:'📖', category:'Academics', parent:'syllabus', isNew:true },
+    { key:'syllabus_homework', label:'Homework',         icon:'📝', category:'Academics', parent:'syllabus', isNew:true },
     { key:'promotransfer', label:'Promotion & Transfer', icon:'🔀', category:'Academics' },
     { key:'promo_promote',  label:'Promote Students',  icon:'⬆️', category:'Academics', parent:'promotransfer', isNew:true },
     { key:'promo_transfer', label:'Transfer Students', icon:'🔁', category:'Academics', parent:'promotransfer', isNew:true },
@@ -2370,6 +2433,8 @@
   function getExamsTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'exams', action); }
   const TIMETABLE_SUBMODULE_KEYS = ['timetable_class','timetable_teacher','timetable_periods'];
   function getTimetableTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'timetable', action); }
+  const SYLLABUS_SUBMODULE_KEYS = ['syllabus_tracker','syllabus_homework'];
+  function getSyllabusTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'syllabus', action); }
   const PROMOTRANSFER_SUBMODULE_KEYS = ['promo_promote','promo_transfer','promo_approvals'];
   function getPromoTransferTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'promotransfer', action); }
   const COMMS_SUBMODULE_KEYS = ['comms_compose','comms_log'];
@@ -2412,6 +2477,7 @@
       staff: STAFF_SUBPAGE_KEYS,
       exams: EXAMS_SUBMODULE_KEYS,
       timetable: TIMETABLE_SUBMODULE_KEYS,
+      syllabus: SYLLABUS_SUBMODULE_KEYS,
       promotransfer: PROMOTRANSFER_SUBMODULE_KEYS,
       announcements: COMMS_SUBMODULE_KEYS,
       noticeboard: NOTICEBOARD_SUBMODULE_KEYS,
@@ -2711,6 +2777,7 @@
     document.getElementById('navAdminTools2').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
     document.getElementById('navInventory').style.display = allowed.includes('inventory') ? 'flex' : 'none';
     document.getElementById('navTimetable').style.display = allowed.includes('timetable') ? 'flex' : 'none';
+    document.getElementById('navSyllabus').style.display = allowed.includes('syllabus') ? 'flex' : 'none';
     document.getElementById('navTransport').style.display = allowed.includes('transport') ? 'flex' : 'none';
     document.getElementById('navLibrary').style.display = allowed.includes('library') ? 'flex' : 'none';
     document.getElementById('navHostel').style.display = allowed.includes('hostel') ? 'flex' : 'none';
@@ -2804,6 +2871,7 @@
     document.getElementById('view-admintools2').style.display = view === 'admintools2' ? 'block' : 'none';
     document.getElementById('view-inventory').style.display = view === 'inventory' ? 'block' : 'none';
     document.getElementById('view-timetable').style.display = view === 'timetable' ? 'block' : 'none';
+    document.getElementById('view-syllabus').style.display = view === 'syllabus' ? 'block' : 'none';
     document.getElementById('view-transport').style.display = view === 'transport' ? 'block' : 'none';
     document.getElementById('view-library').style.display = view === 'library' ? 'block' : 'none';
     document.getElementById('view-hostel').style.display = view === 'hostel' ? 'block' : 'none';
@@ -2840,6 +2908,7 @@
     document.getElementById('navAdminTools2').classList.toggle('active', view === 'admintools2');
     document.getElementById('navInventory').classList.toggle('active', view === 'inventory');
     document.getElementById('navTimetable').classList.toggle('active', view === 'timetable');
+    document.getElementById('navSyllabus').classList.toggle('active', view === 'syllabus');
     document.getElementById('navTransport').classList.toggle('active', view === 'transport');
     document.getElementById('navLibrary').classList.toggle('active', view === 'library');
     document.getElementById('navHostel').classList.toggle('active', view === 'hostel');
@@ -2870,6 +2939,7 @@
     if(view === 'admintools2'){ initAdminTools2Page(); }
     if(view === 'inventory'){ initInventoryView(); }
     if(view === 'timetable'){ initTimetableView(); }
+    if(view === 'syllabus'){ initSyllabusView(); }
     if(view === 'transport'){ initTransportView(); }
     if(view === 'library'){ initLibraryView(); }
     if(view === 'hostel'){ initHostelView(); }
@@ -10736,6 +10806,24 @@
   }
   let timetableTab = 'class';
   let ttClass = '', ttSection = '', ttTeacherId = '';
+
+  /* ===== SYLLABUS & HOMEWORK ===== */
+  // Two flat, kv-store-backed lists — one row per syllabus topic, one per
+  // homework item — each scoped by className + (optional) section + subject,
+  // the same scoping shape Timetable and Subjects already use. An entry with
+  // no section applies to every section of that class. Both lists are read
+  // directly by the Student/Parent portal's own tab (renderMySyllabusHomeworkTab)
+  // with zero extra fetching — same array, same data, just filtered to that
+  // one student's class & section.
+  const SYLLABUS_KEY = "syllabus-topics";
+  const HOMEWORK_KEY = "homework-items";
+  [SYLLABUS_KEY, HOMEWORK_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
+  let syllabusTopics = [], homeworkItems = [];
+  async function loadSyllabusHomework(){
+    syllabusTopics = await storageGet(SYLLABUS_KEY, []);
+    homeworkItems = await storageGet(HOMEWORK_KEY, []);
+  }
+
   /* ===== TRANSPORT MODULE ===== */
   const TRANSPORT_ROUTES_KEY = "transport-routes";
   OBJECT_BACKED_KEYS[TRANSPORT_ROUTES_KEY] = '/api/kv/' + TRANSPORT_ROUTES_KEY;
@@ -12897,6 +12985,208 @@
     await storageSet(TIMETABLE_DAYS_KEY, timetableActiveDays);
     showToast('Periods and days updated.');
     renderTimetableBody();
+  }
+
+  /* ===== SYLLABUS & HOMEWORK — admin UI =====
+     Two tabs sharing one Class/Section/Subject filter bar: a syllabus topic
+     tracker (with a status per topic) and a homework list (with a due date).
+     Both are read straight into the Student/Parent portal's own tab below —
+     nothing extra needed once a topic or homework item is saved here. */
+  const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_homework' };
+  let syllabusTab = 'tracker';
+  let syClass = '', sySection = '', sySubject = '';
+  function initSyllabusView(){
+    const accessibleTabs = Object.keys(SYLLABUS_TAB_PERM_KEYS).filter(t => getSyllabusTabAccess(currentUser.role, SYLLABUS_TAB_PERM_KEYS[t]));
+    Object.keys(SYLLABUS_TAB_PERM_KEYS).forEach(t => { const btn = document.getElementById('sytab-'+t); if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none'; });
+    if(!accessibleTabs.includes(syllabusTab)) syllabusTab = accessibleTabs[0] || 'tracker';
+    switchSyllabusTab(syllabusTab);
+  }
+  function switchSyllabusTab(tab){
+    syllabusTab = tab;
+    ['tracker','homework'].forEach(t => { const btn = document.getElementById('sytab-'+t); if(btn) btn.classList.toggle('active', t===tab); });
+    renderSyllabusBody();
+  }
+  function renderSyllabusBody(){
+    const body = document.getElementById('syllabusBody');
+    if(!body) return;
+    if(!getSyllabusTabAccess(currentUser.role, SYLLABUS_TAB_PERM_KEYS[syllabusTab])){
+      body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+      return;
+    }
+    if(syllabusTab === 'tracker') return renderSyllabusTrackerTab(body);
+    if(syllabusTab === 'homework') return renderHomeworkTab(body);
+  }
+  function syFilterBarHtml(){
+    return `
+      <div class="form-grid" style="max-width:640px; margin-bottom:16px;">
+        <div class="f-field"><label>Class</label><select onchange="syClass=this.value; sySection=''; sySubject=''; renderSyllabusBody();"><option value="">All Classes</option>${CLASS_LEVELS.map(c => `<option ${c===syClass?'selected':''}>${c}</option>`).join('')}</select></div>
+        <div class="f-field"><label>Section</label><select onchange="sySection=this.value; renderSyllabusBody();" ${!syClass?'disabled':''}><option value="">All Sections</option>${(syClass?sectionsForClass(syClass):[]).map(s => `<option ${s===sySection?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="f-field"><label>Subject</label><select onchange="sySubject=this.value; renderSyllabusBody();" ${!syClass?'disabled':''}><option value="">All Subjects</option>${[...new Set(subjectsList.filter(s=>s.className===syClass).map(s=>s.name))].map(n => `<option ${n===sySubject?'selected':''}>${n}</option>`).join('')}</select></div>
+      </div>
+    `;
+  }
+  function syllabusStatusPill(status){
+    const color = status==='Completed' ? '#0f6a63' : status==='In Progress' ? '#8a6a1f' : 'var(--ink-soft)';
+    const bg = status==='Completed' ? 'rgba(24,143,134,0.15)' : status==='In Progress' ? 'rgba(203,154,46,0.15)' : 'rgba(0,0,0,0.06)';
+    return `<span class="pill" style="background:${bg}; color:${color};">${status||'Not Started'}</span>`;
+  }
+  function renderSyllabusTrackerTab(body){
+    const canEdit = canSub('syllabus_tracker','syllabus','edit');
+    const rows = syllabusTopics.filter(t => (!syClass || t.className===syClass) && (!sySection || !t.section || t.section===sySection) && (!sySubject || t.subject===sySubject))
+      .sort((a,b) => (a.className+a.subject).localeCompare(b.className+b.subject) || (a.targetDate||'').localeCompare(b.targetDate||''));
+    body.innerHTML = `
+      ${syFilterBarHtml()}
+      ${canEdit ? `<button class="btn btn-primary btn-sm" style="margin-bottom:16px;" ${!syClass?'disabled title="Pick a class first"':''} onclick="openSyllabusTopicModal()">+ Add Topic</button>` : ''}
+      ${rows.length ? `
+      <div class="table-wrap">
+        <table><thead><tr><th>Class/Section</th><th>Subject</th><th>Topic</th><th>Status</th><th>Target Date</th>${canEdit?'<th></th>':''}</tr></thead><tbody>
+        ${rows.map(t => `
+          <tr>
+            <td>${t.className}${t.section?' — '+t.section:' — All Sections'}</td>
+            <td>${t.subject}</td>
+            <td>${t.topic}</td>
+            <td>${syllabusStatusPill(t.status)}</td>
+            <td>${t.targetDate||'—'}</td>
+            ${canEdit ? `<td style="white-space:nowrap;"><button class="btn-edit-text" onclick="openSyllabusTopicModal('${t.id}')">Edit</button> · <button class="btn-danger-text" onclick="deleteSyllabusTopic('${t.id}')">Delete</button></td>` : ''}
+          </tr>`).join('')}
+        </tbody></table>
+      </div>` : `<div class="empty-state"><b>No syllabus topics yet</b>${syClass ? 'Add the first topic for '+syClass+'.' : 'Pick a class above, then add topics — or leave it on All Classes to see everything at once.'}</div>`}
+    `;
+  }
+  let syEditId = '';
+  function openSyllabusTopicModal(id){
+    if(!syClass){ showToast('Pick a class first.'); return; }
+    syEditId = id || '';
+    const t = id ? syllabusTopics.find(x => x.id===id) : null;
+    document.getElementById('syTopicModalTitle').textContent = id ? 'Edit Topic' : 'Add Syllabus Topic';
+    document.getElementById('syTopicClassLabel').textContent = syClass;
+    const sectionSel = document.getElementById('syTopicSection');
+    sectionSel.innerHTML = `<option value="">All Sections</option>` + sectionsForClass(syClass).map(s => `<option ${t&&t.section===s?'selected':''}>${s}</option>`).join('');
+    const subjSel = document.getElementById('syTopicSubject');
+    const classSubjects = subjectsList.filter(s => s.className===syClass);
+    subjSel.innerHTML = `<option value="">Select subject</option>` + classSubjects.map(s => `<option ${t&&t.subject===s.name?'selected':''}>${s.name}</option>`).join('');
+    document.getElementById('syTopicName').value = t ? t.topic : '';
+    document.getElementById('syTopicStatus').value = t ? (t.status||'Not Started') : 'Not Started';
+    document.getElementById('syTopicTargetDate').value = t ? (t.targetDate||'') : '';
+    document.getElementById('syTopicNotes').value = t ? (t.notes||'') : '';
+    document.getElementById('syTopicModalOverlay').classList.add('open');
+  }
+  function closeSyllabusTopicModal(){ document.getElementById('syTopicModalOverlay').classList.remove('open'); }
+  async function saveSyllabusTopic(e){
+    e.preventDefault();
+    const subject = document.getElementById('syTopicSubject').value;
+    const topic = document.getElementById('syTopicName').value.trim();
+    if(!subject || !topic){ showToast('Subject and topic are required.'); return false; }
+    const existing = syEditId ? syllabusTopics.find(x => x.id===syEditId) : null;
+    const status = document.getElementById('syTopicStatus').value;
+    const data = {
+      className: syClass,
+      section: document.getElementById('syTopicSection').value,
+      subject, topic, status,
+      targetDate: document.getElementById('syTopicTargetDate').value,
+      completedDate: status === 'Completed' ? ((existing && existing.status === 'Completed' && existing.completedDate) ? existing.completedDate : new Date().toISOString().slice(0,10)) : '',
+      notes: document.getElementById('syTopicNotes').value.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+    if(existing){
+      const idx = syllabusTopics.findIndex(x => x.id===syEditId);
+      syllabusTopics[idx] = { ...existing, ...data };
+    }else{
+      syllabusTopics.push({ id:'syt_'+Date.now(), ...data });
+    }
+    await storageSet(SYLLABUS_KEY, syllabusTopics);
+    closeSyllabusTopicModal();
+    renderSyllabusBody();
+    showToast('Saved.');
+    return false;
+  }
+  async function deleteSyllabusTopic(id){
+    if(!await showConfirmDialog('Remove this syllabus topic?')) return;
+    syllabusTopics = syllabusTopics.filter(x => x.id!==id);
+    await storageSet(SYLLABUS_KEY, syllabusTopics);
+    renderSyllabusBody();
+  }
+  function renderHomeworkTab(body){
+    const canEdit = canSub('syllabus_homework','syllabus','edit');
+    const today = new Date().toISOString().slice(0,10);
+    const rows = homeworkItems.filter(h => (!syClass || h.className===syClass) && (!sySection || !h.section || h.section===sySection) && (!sySubject || h.subject===sySubject))
+      .sort((a,b) => (b.dueDate||'').localeCompare(a.dueDate||''));
+    body.innerHTML = `
+      ${syFilterBarHtml()}
+      ${canEdit ? `<button class="btn btn-primary btn-sm" style="margin-bottom:16px;" ${!syClass?'disabled title="Pick a class first"':''} onclick="openHomeworkModal()">+ Assign Homework</button>` : ''}
+      ${rows.length ? `
+      <div class="table-wrap">
+        <table><thead><tr><th>Class/Section</th><th>Subject</th><th>Title</th><th>Assigned</th><th>Due</th>${canEdit?'<th></th>':''}</tr></thead><tbody>
+        ${rows.map(h => {
+          const overdue = h.dueDate && h.dueDate < today;
+          return `<tr>
+            <td>${h.className}${h.section?' — '+h.section:' — All Sections'}</td>
+            <td>${h.subject}</td>
+            <td>${h.title}</td>
+            <td>${h.assignedDate||'—'}</td>
+            <td>${h.dueDate ? `<span style="${overdue?'color:var(--magenta); font-weight:600;':''}">${h.dueDate}${overdue?' (overdue)':''}</span>` : '—'}</td>
+            ${canEdit ? `<td style="white-space:nowrap;"><button class="btn-edit-text" onclick="openHomeworkModal('${h.id}')">Edit</button> · <button class="btn-danger-text" onclick="deleteHomework('${h.id}')">Delete</button></td>` : ''}
+          </tr>`;
+        }).join('')}
+        </tbody></table>
+      </div>` : `<div class="empty-state"><b>No homework assigned yet</b>${syClass ? 'Assign the first item for '+syClass+'.' : 'Pick a class above, then assign homework — or leave it on All Classes to see everything at once.'}</div>`}
+    `;
+  }
+  let hwEditId = '';
+  function openHomeworkModal(id){
+    if(!syClass){ showToast('Pick a class first.'); return; }
+    hwEditId = id || '';
+    const h = id ? homeworkItems.find(x => x.id===id) : null;
+    document.getElementById('homeworkModalTitle').textContent = id ? 'Edit Homework' : 'Assign Homework';
+    document.getElementById('hwClassLabel').textContent = syClass;
+    const sectionSel = document.getElementById('hwSection');
+    sectionSel.innerHTML = `<option value="">All Sections</option>` + sectionsForClass(syClass).map(s => `<option ${h&&h.section===s?'selected':''}>${s}</option>`).join('');
+    const subjSel = document.getElementById('hwSubject');
+    const classSubjects = subjectsList.filter(s => s.className===syClass);
+    subjSel.innerHTML = `<option value="">Select subject</option>` + classSubjects.map(s => `<option ${h&&h.subject===s.name?'selected':''}>${s.name}</option>`).join('');
+    const staffSel = document.getElementById('hwStaff');
+    const myStaffRecord = staffList.find(st => st.linkedUserId === currentUser.id);
+    const defaultStaffId = h ? h.staffId : (myStaffRecord ? myStaffRecord.id : '');
+    staffSel.innerHTML = `<option value="">Select teacher</option>` + staffList.filter(staffIsActive).map(st => `<option value="${st.id}" ${st.id===defaultStaffId?'selected':''}>${st.firstName} ${st.lastName}</option>`).join('');
+    document.getElementById('hwTitle').value = h ? h.title : '';
+    document.getElementById('hwDescription').value = h ? (h.description||'') : '';
+    document.getElementById('hwAssignedDate').value = h ? (h.assignedDate||'') : new Date().toISOString().slice(0,10);
+    document.getElementById('hwDueDate').value = h ? (h.dueDate||'') : '';
+    document.getElementById('homeworkModalOverlay').classList.add('open');
+  }
+  function closeHomeworkModal(){ document.getElementById('homeworkModalOverlay').classList.remove('open'); }
+  async function saveHomework(e){
+    e.preventDefault();
+    const subject = document.getElementById('hwSubject').value;
+    const title = document.getElementById('hwTitle').value.trim();
+    if(!subject || !title){ showToast('Subject and title are required.'); return false; }
+    const data = {
+      className: syClass,
+      section: document.getElementById('hwSection').value,
+      subject, title,
+      description: document.getElementById('hwDescription').value.trim(),
+      assignedDate: document.getElementById('hwAssignedDate').value,
+      dueDate: document.getElementById('hwDueDate').value,
+      staffId: document.getElementById('hwStaff').value,
+      updatedAt: new Date().toISOString(),
+    };
+    if(hwEditId){
+      const idx = homeworkItems.findIndex(x => x.id===hwEditId);
+      if(idx>-1) homeworkItems[idx] = { ...homeworkItems[idx], ...data };
+    }else{
+      homeworkItems.push({ id:'hw_'+Date.now(), createdAt: new Date().toISOString(), ...data });
+    }
+    await storageSet(HOMEWORK_KEY, homeworkItems);
+    closeHomeworkModal();
+    renderSyllabusBody();
+    showToast('Saved.');
+    return false;
+  }
+  async function deleteHomework(id){
+    if(!await showConfirmDialog('Remove this homework item?')) return;
+    homeworkItems = homeworkItems.filter(x => x.id!==id);
+    await storageSet(HOMEWORK_KEY, homeworkItems);
+    renderSyllabusBody();
   }
 
   function initMyAccountView(){
@@ -15282,7 +15572,7 @@
   let myProfileTab = 'notifications';
   function switchMyProfileTab(tab){
     myProfileTab = tab;
-    ['notifications','profile','fees','marks','classinfo','notices'].forEach(t => {
+    ['notifications','profile','fees','marks','classinfo','syllabushw','notices'].forEach(t => {
       const el = document.getElementById('mptab-'+t);
       if(el) el.classList.toggle('active', t===tab);
     });
@@ -15304,6 +15594,7 @@
     if(myProfileTab === 'fees') return renderMyFeesTab(body, s);
     if(myProfileTab === 'marks') return renderMyMarksTab(body, s);
     if(myProfileTab === 'classinfo') return renderMyClassInfoTab(body, s);
+    if(myProfileTab === 'syllabushw') return renderMySyllabusHomeworkTab(body, s);
     if(myProfileTab === 'notices') return renderMyNoticesTab(body);
   }
 
@@ -15466,6 +15757,63 @@
       ${teacherCard}
       <div class="dash-section-title"><div><h3>Weekly Timetable — ${s.className}, Section ${s.section}</h3></div></div>
       ${timetableBlock}
+    `;
+  }
+
+  /* --- Syllabus & Homework tab: homework assigned to this student's class
+     (soonest due date first, overdue ones highlighted) and syllabus progress
+     per subject, both read straight from the same syllabusTopics/homeworkItems
+     arrays the office/teachers maintain under Syllabus & Homework — nothing
+     new stored per-student, and it updates the moment staff save a change
+     there. An entry with no section set applies to every section of that
+     class, so those show up here too. --- */
+  function renderMySyllabusHomeworkTab(body, s){
+    const relevantTo = item => item.className===s.className && (!item.section || item.section===s.section);
+    const today = new Date().toISOString().slice(0,10);
+    const myHomework = homeworkItems.filter(relevantTo).sort((a,b) => (a.dueDate||'9999-99-99').localeCompare(b.dueDate||'9999-99-99'));
+    const homeworkHtml = myHomework.length ? myHomework.map(h => {
+      const overdue = h.dueDate && h.dueDate < today;
+      const staff = h.staffId ? staffList.find(st => st.id===h.staffId) : null;
+      return `
+        <div class="profile-card" style="margin-bottom:12px; ${overdue?'border-left:4px solid var(--magenta);':''}">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+            <div>
+              <span class="pill" style="font-size:0.62rem;">${h.subject}</span>
+              <h4 style="margin:6px 0 2px;">${h.title}</h4>
+              ${h.description ? `<p style="font-size:0.8rem; color:var(--ink-soft); margin:2px 0 6px; white-space:pre-wrap;">${h.description}</p>` : ''}
+              <p style="font-size:0.74rem; color:var(--ink-soft); margin:0;">${staff ? 'Assigned by '+staff.firstName+' '+staff.lastName+(h.assignedDate?' · ':'') : ''}${h.assignedDate ? 'Given '+h.assignedDate : ''}</p>
+            </div>
+            ${h.dueDate ? `<span class="pill" style="${overdue?'background:rgba(209,16,115,0.15); color:var(--magenta);':''} white-space:nowrap;">Due ${h.dueDate}${overdue?' — overdue':''}</span>` : ''}
+          </div>
+        </div>`;
+    }).join('') : `<div class="empty-state"><b>No homework assigned right now</b>New homework will show up here automatically.</div>`;
+
+    const mySyllabus = syllabusTopics.filter(relevantTo);
+    const bySubject = {};
+    mySyllabus.forEach(t => { (bySubject[t.subject] = bySubject[t.subject] || []).push(t); });
+    const subjectNames = Object.keys(bySubject).sort();
+    const syllabusHtml = subjectNames.length ? subjectNames.map(subject => {
+      const topics = bySubject[subject];
+      const done = topics.filter(t => t.status==='Completed').length;
+      const pct = topics.length ? Math.round((done/topics.length)*100) : 0;
+      return `
+        <div class="profile-card" style="margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px; flex-wrap:wrap;">
+            <h4 style="margin:0;">${subject}</h4>
+            <span style="font-size:0.76rem; color:var(--ink-soft);">${done} / ${topics.length} topics · ${pct}%</span>
+          </div>
+          <div style="height:6px; background:var(--cream); border-radius:4px; overflow:hidden; margin-bottom:12px;">
+            <div style="height:100%; width:${pct}%; background:var(--teal); border-radius:4px;"></div>
+          </div>
+          ${topics.map(t => `<div class="profile-row"><span>${t.topic}</span><span>${syllabusStatusPill(t.status)}</span></div>`).join('')}
+        </div>`;
+    }).join('') : `<div class="empty-state"><b>Syllabus not published yet</b>Check back once the school adds it.</div>`;
+
+    body.innerHTML = `
+      <div class="dash-section-title"><div><h3>Homework</h3></div></div>
+      ${homeworkHtml}
+      <div class="dash-section-title" style="margin-top:24px;"><div><h3>Syllabus Progress</h3></div></div>
+      ${syllabusHtml}
     `;
   }
 
@@ -16425,7 +16773,7 @@
     return false;
   }
 
-  loadClassLevels().then(() => loadSectionLevels()).then(() => loadClassSectionOverrides()).then(() => loadSchoolInfo()).then(() => loadFinance()).then(() => loadFeeExtras()).then(() => loadAttendance()).then(() => loadStaffAttendance()).then(() => loadExams()).then(() => loadRooms()).then(() => loadExamHallTickets()).then(() => loadExamRoomConfigs()).then(() => loadExamHolidays()).then(() => loadReportTemplates()).then(() => loadAdminDownloads()).then(() => loadPendingApprovals()).then(() => loadInventory()).then(() => loadTimetable()).then(() => loadTransport()).then(() => loadLibrary()).then(() => loadHostel()).then(() => loadAccounting()).then(() => loadComms()).then(() => loadStaff()).then(() => loadStaffPayroll()).then(() => loadSubjects()).then(() => loadCustomRoles()).then(() => loadStudents()).then(() => loadUsers()).then(() => initAuth()).then(() => applyTheme(document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'));
+  loadClassLevels().then(() => loadSectionLevels()).then(() => loadClassSectionOverrides()).then(() => loadSchoolInfo()).then(() => loadFinance()).then(() => loadFeeExtras()).then(() => loadAttendance()).then(() => loadStaffAttendance()).then(() => loadExams()).then(() => loadRooms()).then(() => loadExamHallTickets()).then(() => loadExamRoomConfigs()).then(() => loadExamHolidays()).then(() => loadReportTemplates()).then(() => loadAdminDownloads()).then(() => loadPendingApprovals()).then(() => loadInventory()).then(() => loadTimetable()).then(() => loadSyllabusHomework()).then(() => loadTransport()).then(() => loadLibrary()).then(() => loadHostel()).then(() => loadAccounting()).then(() => loadComms()).then(() => loadStaff()).then(() => loadStaffPayroll()).then(() => loadSubjects()).then(() => loadCustomRoles()).then(() => loadStudents()).then(() => loadUsers()).then(() => initAuth()).then(() => applyTheme(document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'));
 </script>
 
 </body>
