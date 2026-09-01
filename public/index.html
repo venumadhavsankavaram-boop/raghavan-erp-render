@@ -1521,9 +1521,9 @@
             </div>
           </div>
           <div class="f-field full">
-            <label>Password *</label>
+            <label>Password</label>
             <div style="display:flex; gap:10px; align-items:center;">
-              <input type="text" id="uPassword" required placeholder="Set a login password" style="flex:1;">
+              <input type="text" id="uPassword" placeholder="Set a login password" style="flex:1;">
               <button type="button" class="btn btn-ghost btn-sm" onclick="autoGeneratePassword()">Generate</button>
             </div>
           </div>
@@ -2034,15 +2034,15 @@
     try{
       for(const s of oldStudents){
         if(!newIds.has(s.id)){
-          await throwIfNotOk(await fetch('/api/students?id=' + encodeURIComponent(s.id), { method:'DELETE' }));
+          await throwIfNotOk(await fetch('/api/students?id=' + encodeURIComponent(s.id), { method:'DELETE', headers: actorHeaders() }));
         }
       }
       for(const s of students){
         const old = oldStudents.find(x => x.id === s.id);
         if(!old){
-          await throwIfNotOk(await fetch('/api/students', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(s) }));
+          await throwIfNotOk(await fetch('/api/students', { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(s) }));
         }else if(JSON.stringify(old) !== JSON.stringify(s)){
-          await throwIfNotOk(await fetch('/api/students', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(s) }));
+          await throwIfNotOk(await fetch('/api/students', { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(s) }));
         }
       }
       _studentsLastSynced = JSON.parse(JSON.stringify(students));
@@ -2355,6 +2355,23 @@
   let users = [];
   let currentUser = null;
 
+  // Headers the server's audit log reads to know who made a change — see
+  // server.js's central logging hook on the /api/:resource dispatcher.
+  // encodeURIComponent guards against names with non-ASCII characters
+  // (accented letters, non-Latin scripts), since raw UTF-8 in a header
+  // value can throw inside the browser's Headers implementation; the
+  // server decodes it back with decodeHeaderValue(). No entry is added
+  // when nobody is signed in (e.g. the one anonymous write this app
+  // accepts, the public admission-inquiry form) — the server just logs the
+  // actor as unknown in that case, which is the accurate answer.
+  function actorHeaders(){
+    if(!currentUser) return {};
+    return {
+      'X-Actor-Name': encodeURIComponent(currentUser.name || currentUser.username || ''),
+      'X-Actor-Role': encodeURIComponent(currentUser.role || ''),
+    };
+  }
+
   function generateRecoveryCode(){
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
@@ -2432,6 +2449,7 @@
       updateMyProfileBadge();
       const allowed = getRoleViews(currentUser.role).length ? getRoleViews(currentUser.role) : ['dashboard'];
       switchView(allowed[0]);
+      startIdleWatcher();
     }else{
       showLoginScreen();
     }
@@ -2446,16 +2464,43 @@
     document.getElementById('appShell').style.display = 'flex';
   }
 
-  function submitLogin(e){
+  // Verifies a username/password against the server (the only place that can
+  // check them now — passwords are hashed and the browser never has a real
+  // one to compare against locally). Returns the matching user record
+  // (never including a password) on success, or null on any failure —
+  // wrong credentials, unreachable server, whatever the reason.
+  // Returns the verified user record on success, or null. On failure, also
+  // stashes a human-readable reason on verifyLogin.lastError when the server
+  // gave one (e.g. a rate-limit message) — callers that want the generic
+  // "incorrect username or password" copy can just ignore it.
+  async function verifyLogin(username, password){
+    verifyLogin.lastError = '';
+    try{
+      const res = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ username, password }) });
+      if(!res.ok){
+        try{ const body = await res.json(); if(body && body.error) verifyLogin.lastError = body.error; }catch(e){}
+        return null;
+      }
+      return await res.json();
+    }catch(e){ return null; }
+  }
+  async function submitLogin(e){
     e.preventDefault();
     const uname = document.getElementById('loginUsername').value.trim();
     const pw = document.getElementById('loginPassword').value;
-    const u = users.find(x => x.username.toLowerCase() === uname.toLowerCase() && x.password === pw);
+    const u = await verifyLogin(uname, pw);
     if(!u){
-      document.getElementById('loginError').style.display = 'block';
+      const errEl = document.getElementById('loginError');
+      errEl.textContent = verifyLogin.lastError && /too many/i.test(verifyLogin.lastError) ? verifyLogin.lastError : 'Incorrect username or password.';
+      errEl.style.display = 'block';
       return false;
     }
     document.getElementById('loginError').style.display = 'none';
+    // Keep this app's in-memory copy of the record in sync with what the
+    // server just verified, so anything elsewhere that reads from `users`
+    // (e.g. the sessionStorage-based re-login on a page refresh) sees it too.
+    const idx = users.findIndex(x => x.id === u.id);
+    if(idx > -1) users[idx] = { ...users[idx], ...u }; else users.push(u);
     currentUser = u;
     sessionStorage.setItem('rgv_current_user', u.id);
     hideLoginScreen();
@@ -2464,15 +2509,96 @@
     updateMyProfileBadge();
     const allowed = getRoleViews(currentUser.role).length ? getRoleViews(currentUser.role) : ['dashboard'];
     switchView(allowed[0]);
+    startIdleWatcher();
     return false;
   }
 
   function logout(){
+    stopIdleWatcher();
     currentUser = null;
     sessionStorage.removeItem('rgv_current_user');
     document.getElementById('loginUsername').value = '';
     document.getElementById('loginPassword').value = '';
     showLoginScreen();
+  }
+
+  // ---------- Idle auto-logout ----------
+  // Nobody at this school locks their workstation between periods, and this
+  // ERP shows fee, payment and student-record data — leaving a signed-in
+  // session open on a shared front-office computer is a real exposure, not
+  // a hypothetical one. This watches for activity while someone is signed
+  // in and signs them out automatically after a stretch of inactivity,
+  // with a visible warning (and a countdown) before it actually happens so
+  // a person who's just reading the screen isn't cut off without notice.
+  const IDLE_LIMIT_MS = 20 * 60 * 1000;   // sign out after 20 minutes idle
+  const IDLE_WARNING_MS = 60 * 1000;      // warn 60 seconds before that
+  let idleLastActivity = Date.now();
+  let idleIntervalId = null;
+  let idleWarningVisible = false;
+
+  function idleMarkActivity(){
+    idleLastActivity = Date.now();
+    if(idleWarningVisible) idleHideWarning();
+  }
+
+  function idleTick(){
+    if(!currentUser) return; // shouldn't be running, but a safe no-op if it is
+    const idleFor = Date.now() - idleLastActivity;
+    if(idleFor >= IDLE_LIMIT_MS){
+      idleHideWarning();
+      logout();
+      showToast('Signed out after a period of inactivity.');
+      return;
+    }
+    if(idleFor >= IDLE_LIMIT_MS - IDLE_WARNING_MS){
+      const secondsLeft = Math.max(0, Math.ceil((IDLE_LIMIT_MS - idleFor) / 1000));
+      idleShowWarning(secondsLeft);
+    }
+  }
+
+  function idleShowWarning(secondsLeft){
+    idleWarningVisible = true;
+    let el = document.getElementById('idleWarningOverlay');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'idleWarningOverlay';
+      el.style.cssText = 'position:fixed; top:20px; right:20px; z-index:9999; background:var(--card-bg,#fff); color:var(--text,#1a1a1a); border:1px solid var(--border,#ddd); border-radius:10px; box-shadow:0 8px 28px rgba(0,0,0,0.22); padding:16px 18px; max-width:300px; font-size:0.88rem;';
+      el.innerHTML = '<div style="font-weight:600; margin-bottom:6px;">Still there?</div>'
+        + '<div id="idleWarningText" style="margin-bottom:12px; opacity:0.85;"></div>'
+        + '<div style="display:flex; gap:8px;">'
+        + '<button type="button" class="btn btn-primary" style="flex:1; justify-content:center;" onclick="idleMarkActivity()">Stay signed in</button>'
+        + '<button type="button" class="btn btn-ghost" style="flex:1; justify-content:center;" onclick="logout()">Sign out</button>'
+        + '</div>';
+      document.body.appendChild(el);
+    }
+    el.style.display = 'block';
+    document.getElementById('idleWarningText').textContent =
+      'You will be signed out in ' + secondsLeft + ' second' + (secondsLeft === 1 ? '' : 's') + ' due to inactivity.';
+  }
+
+  function idleHideWarning(){
+    idleWarningVisible = false;
+    const el = document.getElementById('idleWarningOverlay');
+    if(el) el.style.display = 'none';
+  }
+
+  function startIdleWatcher(){
+    if(idleIntervalId) return; // already running
+    idleLastActivity = Date.now();
+    ['mousemove','mousedown','keydown','scroll','touchstart','click'].forEach(evt =>
+      document.addEventListener(evt, idleMarkActivity, { passive: true })
+    );
+    idleIntervalId = setInterval(idleTick, 1000);
+  }
+
+  function stopIdleWatcher(){
+    if(!idleIntervalId) return;
+    clearInterval(idleIntervalId);
+    idleIntervalId = null;
+    idleHideWarning();
+    ['mousemove','mousedown','keydown','scroll','touchstart','click'].forEach(evt =>
+      document.removeEventListener(evt, idleMarkActivity)
+    );
   }
 
   function applyRolePermissions(){
@@ -2739,15 +2865,15 @@
     try{
       for(const item of oldArray){
         if(!newIds.has(item.id)){
-          await throwIfNotOk(await fetch(apiPath + '?id=' + encodeURIComponent(item.id), { method:'DELETE' }));
+          await throwIfNotOk(await fetch(apiPath + '?id=' + encodeURIComponent(item.id), { method:'DELETE', headers: actorHeaders() }));
         }
       }
       for(const item of newArray){
         const old = oldArray.find(x => x.id === item.id);
         if(!old){
-          await throwIfNotOk(await fetch(apiPath, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) }));
+          await throwIfNotOk(await fetch(apiPath, { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(item) }));
         }else if(JSON.stringify(old) !== JSON.stringify(item)){
-          await throwIfNotOk(await fetch(apiPath, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) }));
+          await throwIfNotOk(await fetch(apiPath, { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(item) }));
         }
       }
       _apiLastSynced[key] = JSON.parse(JSON.stringify(newArray));
@@ -2794,7 +2920,7 @@
   async function storageSet(key, value){
     if(OBJECT_BACKED_KEYS[key]){
       try{
-        await throwIfNotOk(await fetch(OBJECT_BACKED_KEYS[key], { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(value) }));
+        await throwIfNotOk(await fetch(OBJECT_BACKED_KEYS[key], { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(value) }));
         localStorage.setItem(key, JSON.stringify(value));
       }catch(e){
         showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
@@ -2925,6 +3051,22 @@
 
   function fmtMoney(n){
     return '₹' + Number(n||0).toLocaleString('en-IN');
+  }
+  // Escapes text before it's dropped into a template-literal innerHTML
+  // string, so a value containing "<", ">", "&", quotes, etc. renders as
+  // plain text instead of being parsed as markup. Needed anywhere text
+  // reaching this app from OUTSIDE the ERP's own staff-only UI gets
+  // displayed — right now that's exactly one place: admission inquiries
+  // submitted by anonymous visitors through the public school website's
+  // form (see renderAdmissionInquiries). Safe to use anywhere else too.
+  function escapeHtml(str){
+    if(str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   /* ===== DASHBOARD RENDER ===== */
@@ -11049,13 +11191,13 @@
         <table><thead><tr><th>Date</th><th>Student</th><th>Grade</th><th>Parent</th><th>Phone</th><th>Email</th><th>Notes</th><th>Status</th><th></th></tr></thead>
         <tbody>
         ${all.length ? all.map(q => `<tr>
-          <td>${q.submittedDate||'—'}</td>
-          <td class="name-cell">${q.studentName||'—'}</td>
-          <td>${q.applyingGrade||'—'}</td>
-          <td>${q.parentName||'—'}</td>
-          <td>${q.parentPhone||'—'}</td>
-          <td>${q.parentEmail||'—'}</td>
-          <td style="max-width:200px;">${q.notes||'—'}</td>
+          <td>${escapeHtml(q.submittedDate)||'—'}</td>
+          <td class="name-cell">${escapeHtml(q.studentName)||'—'}</td>
+          <td>${escapeHtml(q.applyingGrade)||'—'}</td>
+          <td>${escapeHtml(q.parentName)||'—'}</td>
+          <td>${escapeHtml(q.parentPhone)||'—'}</td>
+          <td>${escapeHtml(q.parentEmail)||'—'}</td>
+          <td style="max-width:200px;">${escapeHtml(q.notes)||'—'}</td>
           <td>
             ${canEditInq ? `<select onchange="setInquiryStatus('${q.id}', this.value)" style="font-size:0.78rem; padding:4px 6px;">
               ${['New','Contacted','Converted','Declined'].map(s => `<option ${q.status===s?'selected':''}>${s}</option>`).join('')}
@@ -12699,7 +12841,7 @@
     const next = document.getElementById('myCpNew').value;
     const confirm2 = document.getElementById('myCpConfirm').value;
     const u = users.find(x => x.username === currentUser.username);
-    if(!u || u.password !== current){ showToast('Current password is incorrect.'); return; }
+    if(!u || !(await verifyLogin(u.username, current))){ showToast('Current password is incorrect.'); return; }
     if(!next || next.length < 4){ showToast('New password must be at least 4 characters.'); return; }
     if(next !== confirm2){ showToast('New password and confirmation do not match.'); return; }
     u.password = next;
@@ -13595,6 +13737,12 @@
         <button class="btn btn-primary btn-sm" onclick="changeOwnPassword()">Update Password</button>
       </div>
 
+      <div class="profile-card" style="max-width:480px; margin-bottom:24px;">
+        <h4>💾 Full Data Backup</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Download every record in the database — students, staff, payments, attendance, everything — as one JSON file. Keep it somewhere safe; it's a full copy of the school's data.</p>
+        <button class="btn btn-primary btn-sm" id="backupDownloadBtn" onclick="downloadFullBackup()">Download Backup</button>
+      </div>
+
       <div class="profile-card" style="max-width:640px;">
         <h4>📥 Downloads</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Upload circulars, forms, or resources for staff to download from their own accounts.</p>
@@ -13616,14 +13764,71 @@
           </tbody></table>
         </div>
       </div>
+
+      <div class="profile-card" style="max-width:900px; margin-top:24px;">
+        <h4>🕵️ Audit Log</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">The most recent 500 changes made anywhere in the ERP — who, what, and when. Actor identity is self-reported by the app on each save, not a cryptographic guarantee.</p>
+        <button class="btn btn-ghost btn-sm" style="margin-bottom:12px;" onclick="loadAuditLogTab()">Refresh</button>
+        <div class="table-wrap" style="max-height:420px; overflow-y:auto;">
+          <table><thead><tr><th>When</th><th>Actor</th><th>Role</th><th>Action</th><th>Resource</th><th>Record</th></tr></thead>
+          <tbody id="auditLogTableBody"><tr><td colspan="6"><div class="empty-state"><b>Loading…</b></div></td></tr></tbody></table>
+        </div>
+      </div>
     `;
+    loadAuditLogTab();
+  }
+  async function loadAuditLogTab(){
+    const tbody = document.getElementById('auditLogTableBody');
+    if(!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Loading…</b></div></td></tr>`;
+    try{
+      const res = await fetch('/api/audit-log');
+      await throwIfNotOk(res);
+      const rows = await res.json();
+      if(!rows.length){ tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>No changes logged yet</b></div></td></tr>`; return; }
+      tbody.innerHTML = rows.map(r => `<tr>
+        <td>${escapeHtml(new Date(r.created_at).toLocaleString())}</td>
+        <td>${escapeHtml(r.actor_name) || '—'}</td>
+        <td>${escapeHtml(r.actor_role) || '—'}</td>
+        <td>${escapeHtml(r.method)}</td>
+        <td>${escapeHtml(r.resource)}</td>
+        <td>${escapeHtml(r.record_id) || '—'}</td>
+      </tr>`).join('');
+    }catch(e){
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Could not load the audit log</b>${escapeHtml(e.message)}</div></td></tr>`;
+    }
+  }
+  async function downloadFullBackup(){
+    const btn = document.getElementById('backupDownloadBtn');
+    const originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Preparing backup…';
+    try{
+      const res = await fetch('/api/backup');
+      await throwIfNotOk(res);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `raghavan-erp-backup-${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast('Backup downloaded.');
+    }catch(e){
+      showToast('Could not generate the backup (' + e.message + ').');
+    }finally{
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    }
   }
   async function changeOwnPassword(){
     const current = document.getElementById('cpCurrent').value;
     const next = document.getElementById('cpNew').value;
     const confirm2 = document.getElementById('cpConfirm').value;
     const u = users.find(x => x.username === currentUser.username);
-    if(!u || u.password !== current){ showToast('Current password is incorrect.'); return; }
+    if(!u || !(await verifyLogin(u.username, current))){ showToast('Current password is incorrect.'); return; }
     if(!next || next.length < 4){ showToast('New password must be at least 4 characters.'); return; }
     if(next !== confirm2){ showToast('New password and confirmation do not match.'); return; }
     u.password = next;
@@ -14198,6 +14403,7 @@
     document.getElementById('editUserId').value = '';
     document.getElementById('uRecoveryCode').value = generateRecoveryCode();
     userModalUsernameTouched = false;
+    document.getElementById('uPassword').placeholder = 'Set a login password';
     document.getElementById('uPassword').value = generateLoginPassword();
     if(presetName) document.getElementById('uName').value = presetName;
     populateUserRoleSelect(mode);
@@ -14231,7 +14437,11 @@
     document.getElementById('editUserId').value = u.id;
     document.getElementById('uName').value = u.name;
     document.getElementById('uUsername').value = u.username;
-    document.getElementById('uPassword').value = u.password;
+    // The server never sends a stored password back (see the security
+    // review), so there's nothing to pre-fill here — leave it blank and
+    // explain that blank means "no change," rather than showing "undefined".
+    document.getElementById('uPassword').value = '';
+    document.getElementById('uPassword').placeholder = 'Leave blank to keep the current password';
     populateUserRoleSelect();
     document.getElementById('uRole').value = u.role;
     document.getElementById('uRecoveryCode').value = u.recoveryCode || generateRecoveryCode();
@@ -14262,6 +14472,10 @@
     const uname = document.getElementById('uUsername').value.trim();
     if(users.some(u => u.username.toLowerCase()===uname.toLowerCase() && u.id!==editId)){
       showToast('That username is already taken.');
+      return false;
+    }
+    if(!editId && !document.getElementById('uPassword').value){
+      showToast('Set a password for this new user.');
       return false;
     }
     const data = {
