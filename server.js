@@ -1041,9 +1041,17 @@ setInterval(() => {
   }
 }, 10 * 60 * 1000).unref();
 
+// Which side of the login screen's Staff / Parent & Student toggle each
+// role belongs to. Purely a "you're on the wrong tab" guardrail, not a
+// substitute for the per-route role checks a real authorization layer
+// would add — a Teacher who successfully signs in here still gets
+// whatever a Teacher session normally gets, same as before this existed.
+const STAFF_LOGIN_ROLES = ['Admin', 'Principal', 'Accountant', 'Office Assistant', 'Teacher', 'Staff'];
+const PARENT_LOGIN_ROLES = ['Student', 'Parent'];
+
 app.post('/api/login', async (req, res) => {
   try {
-    const { username, password } = req.body || {};
+    const { username, password, audience } = req.body || {};
     if (!username || !password) return res.status(400).json({ error: 'Username and password are required.' });
     const rateKey = loginRateKey(req, username);
     const blockedForSeconds = checkLoginRateLimit(rateKey);
@@ -1056,6 +1064,19 @@ app.post('/api/login', async (req, res) => {
     const user = rows[0];
     const ok = await bcrypt.compare(String(password), user.password || '');
     if (!ok) { recordLoginFailure(rateKey); return res.status(401).json({ error: 'Invalid username or password.' }); }
+    // Checked only after the password is already confirmed correct, so this
+    // never gives anyone a way to learn an account's role without already
+    // knowing its password — at that point they could just switch tabs
+    // anyway. Treated as a successful login for rate-limiting purposes
+    // (it's a real account with the real password, just the wrong tab).
+    if (audience === 'staff' && !STAFF_LOGIN_ROLES.includes(user.role)) {
+      recordLoginSuccess(rateKey);
+      return res.status(403).json({ error: 'This is a Parent/Student account — switch to the "Parent & Student" tab to sign in.', wrongAudience: true });
+    }
+    if (audience === 'parent' && !PARENT_LOGIN_ROLES.includes(user.role)) {
+      recordLoginSuccess(rateKey);
+      return res.status(403).json({ error: 'This is a Staff account — switch to the "Staff" tab to sign in.', wrongAudience: true });
+    }
     recordLoginSuccess(rateKey);
     const shaped = simpleToAppShape(user, SIMPLE_RESOURCES.users.fields);
     delete shaped.password;
