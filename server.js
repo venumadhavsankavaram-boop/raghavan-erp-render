@@ -202,6 +202,19 @@ async function ensureSchema() {
     record_id TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
 
+  // One row per signed-in browser session. `id` is a SHA-256 hash of the
+  // random token actually sent to the browser (in an httpOnly cookie) —
+  // never the raw token itself — so reading this table (a backup export, a
+  // database console, a leaked dump) can't be turned into a working login
+  // cookie for anyone. See the "Session-based authentication" section below
+  // for how this is created, checked, and expired.
+  await sql`CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY, user_id TEXT, role TEXT, name TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL
+  )`;
+
   // ---------- Indexes ----------
   // The tables above are all read by student_id / staff_id / username / date
   // lookups constantly (a student's fee history, a staff member's payroll
@@ -230,6 +243,7 @@ async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_website_gallery_category ON website_gallery (category)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (created_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log (resource)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions (expires_at)`;
 }
 await ensureSchema();
 
@@ -286,6 +300,120 @@ async function seedDefaultAdminIfEmpty() {
   console.log('============================================================');
 }
 await seedDefaultAdminIfEmpty();
+
+// ---------- Session-based authentication ----------
+// Until now, nothing on the server checked whether a caller was logged in
+// before answering an /api/* request — the login screen was purely a
+// client-side gate, and a request made straight to the API (curl, a
+// script, anything other than this app's own login-gated UI) went through
+// unchecked. This closes that gap: /api/login now hands back a random
+// session token in an httpOnly cookie, and every /api/* route except the
+// short public allowlist below requires a valid, unexpired one.
+//
+// No new dependency: cookies are parsed by hand (a request has at most a
+// handful of small key=value pairs — not worth adding a library for), and
+// the session store is one more table in the same Postgres database this
+// app already has open, rather than a separate service to run and monitor.
+//
+// The token in the cookie and the token stored server-side are not the
+// same string: the cookie holds a random value the browser presents on
+// every request, and only that value's SHA-256 hash is kept in the
+// `sessions` table (see ensureSchema above) — so a leak of the database
+// (a backup file, a console query, anything read-only) can't be replayed
+// as a working login the way a stored raw token could be.
+function parseCookies(req) {
+  const header = req.headers.cookie;
+  const cookies = {};
+  if (!header) return cookies;
+  header.split(';').forEach(pair => {
+    const idx = pair.indexOf('=');
+    if (idx === -1) return;
+    const key = pair.slice(0, idx).trim();
+    const val = pair.slice(idx + 1).trim();
+    if (key) cookies[key] = decodeURIComponent(val);
+  });
+  return cookies;
+}
+function hashSessionToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+// Render terminates TLS at its edge and forwards to this process over
+// plain HTTP, so req.secure is never true here on its own; the standard
+// signal a proxy leaves behind is this header (same reasoning as the
+// x-forwarded-for read already used for login rate-limiting below).
+function isHttpsRequest(req) {
+  return req.secure || req.headers['x-forwarded-proto'] === 'https';
+}
+
+// A session is good for 30 minutes of inactivity (sliding — each
+// authenticated request pushes it back out), up to a hard cap of 12 hours
+// from login regardless of activity, so a cookie left open on a shared
+// front-office computer can't stay valid indefinitely.
+const SESSION_IDLE_MS = 30 * 60 * 1000;
+const SESSION_ABSOLUTE_MAX_MS = 12 * 60 * 60 * 1000;
+
+async function createSession(req, res, user) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + SESSION_IDLE_MS);
+  await sql`
+    INSERT INTO sessions (id, user_id, role, name, expires_at)
+    VALUES (${hashSessionToken(token)}, ${user.id}, ${user.role}, ${user.name}, ${expiresAt.toISOString()})
+  `;
+  const secureFlag = isHttpsRequest(req) ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `sid=${token}; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_ABSOLUTE_MAX_MS / 1000)}`);
+}
+async function destroySession(req, res) {
+  const cookies = parseCookies(req);
+  if (cookies.sid) {
+    await sql`DELETE FROM sessions WHERE id = ${hashSessionToken(cookies.sid)}`.catch(() => {});
+  }
+  res.setHeader('Set-Cookie', 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
+}
+
+// Routes (and only these methods on them) that must keep working with no
+// login at all: the public school website submits an inquiry and reads a
+// few read-only resources from its own separate domain (see
+// WEBSITE_CORS_RULES above — this list is deliberately the same set), plus
+// logging in and out are themselves how a session is created or cleared.
+const PUBLIC_API_ROUTES = [
+  { path: '/api/login', methods: ['POST'] },
+  { path: '/api/logout', methods: ['POST'] },
+  { path: '/api/admission-inquiries', methods: ['POST'] },
+  { path: '/api/comms-messages', methods: ['GET'] },
+  { path: '/api/website-gallery', methods: ['GET'] },
+  { path: '/api/school-info', methods: ['GET'] },
+];
+function isPublicApiRoute(req) {
+  return PUBLIC_API_ROUTES.some(r => r.path === req.path && r.methods.includes(req.method));
+}
+
+app.use(async (req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next(); // static files / the app shell itself stay open
+  if (req.method === 'OPTIONS' || isPublicApiRoute(req)) return next();
+  try {
+    const token = parseCookies(req).sid;
+    if (!token) return res.status(401).json({ error: 'Not logged in.' });
+    const idHash = hashSessionToken(token);
+    const rows = await sql`SELECT * FROM sessions WHERE id = ${idHash}`;
+    if (!rows.length) return res.status(401).json({ error: 'Session expired. Please log in again.' });
+    const session = rows[0];
+    const now = Date.now();
+    const createdAt = new Date(session.created_at).getTime();
+    if (new Date(session.expires_at).getTime() < now || now - createdAt > SESSION_ABSOLUTE_MAX_MS) {
+      await sql`DELETE FROM sessions WHERE id = ${idHash}`.catch(() => {});
+      return res.status(401).json({ error: 'Session expired. Please log in again.' });
+    }
+    // Sliding renewal, capped at the absolute 12-hour ceiling from login —
+    // fire-and-forget so a slow write here never delays the actual request.
+    const newExpires = new Date(Math.min(now + SESSION_IDLE_MS, createdAt + SESSION_ABSOLUTE_MAX_MS));
+    sql`UPDATE sessions SET expires_at = ${newExpires.toISOString()}, last_seen_at = now() WHERE id = ${idHash}`.catch(() => {});
+    req.authUser = { id: session.user_id, role: session.role, name: session.name };
+    next();
+  } catch (err) {
+    console.error('auth check error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
 
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
@@ -931,9 +1059,40 @@ app.post('/api/login', async (req, res) => {
     recordLoginSuccess(rateKey);
     const shaped = simpleToAppShape(user, SIMPLE_RESOURCES.users.fields);
     delete shaped.password;
+    await createSession(req, res, user);
     return res.status(200).json(shaped);
   } catch (err) {
     console.error('login error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.post('/api/logout', async (req, res) => {
+  try {
+    await destroySession(req, res);
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('logout error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// Lets the page ask "am I still logged in, and as whom?" on load/refresh
+// instead of trusting a client-side flag — the auth middleware above has
+// already rejected this request with 401 if the session cookie is missing
+// or expired, so reaching this handler at all means req.authUser is valid.
+// Looked up fresh from `users` (not just the id/role/name cached on the
+// session row) so a role or name change since login shows up immediately
+// on the next page load, same shape /api/login returns.
+app.get('/api/me', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM users WHERE id = ${req.authUser.id}`;
+    if (!rows.length) return res.status(401).json({ error: 'Account no longer exists.' });
+    const shaped = simpleToAppShape(rows[0], SIMPLE_RESOURCES.users.fields);
+    delete shaped.password;
+    return res.status(200).json(shaped);
+  } catch (err) {
+    console.error('me error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
@@ -1034,8 +1193,14 @@ app.all('/api/:resource', async (req, res) => {
   // request with a 4xx/5xx and produces no log entry, same as if the
   // write had never been attempted.
   if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE') {
-    const actorName = decodeHeaderValue(req.headers['x-actor-name']) || '(unknown)';
-    const actorRole = decodeHeaderValue(req.headers['x-actor-role']) || '';
+    // req.authUser now comes from a verified session (see the auth
+    // middleware above) for every write except the public, unauthenticated
+    // admission-inquiries submission — trust that over the client-supplied
+    // x-actor-name/x-actor-role headers whenever it's present, since those
+    // headers are just whatever the browser said and were never actually
+    // checked against who was logged in.
+    const actorName = req.authUser ? req.authUser.name : (decodeHeaderValue(req.headers['x-actor-name']) || '(unknown)');
+    const actorRole = req.authUser ? req.authUser.role : (decodeHeaderValue(req.headers['x-actor-role']) || '');
     const recordId = (req.body && req.body.id) || req.query.id || null;
     res.on('finish', () => {
       if (res.statusCode >= 400) return;
