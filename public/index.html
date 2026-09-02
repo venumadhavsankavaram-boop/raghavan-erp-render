@@ -2187,7 +2187,7 @@
       _studentsLastSynced = JSON.parse(JSON.stringify(students));
       localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
     }catch(e){
-      showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
+      if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
       localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
     }
   }
@@ -2585,11 +2585,31 @@
     return false;
   }
 
-  function initAuth(){
-    const uid = sessionStorage.getItem('rgv_current_user');
-    const u = uid ? users.find(x => x.id === uid) : null;
+  // Whether someone is signed in is now decided by the server, not by
+  // whatever sessionStorage happens to say — anyone could set
+  // rgv_current_user in devtools before, and the app would just believe it.
+  // /api/me answers based on the httpOnly session cookie the server issued
+  // at login, which client-side code never sees or controls. This call
+  // happens once, right after the app's very first (necessarily
+  // unauthenticated, since there's no cookie yet on a first visit) pass
+  // through loadAllAppData() below — so on a fresh visit this correctly
+  // finds no session and shows the login screen, and on a page refresh
+  // while already signed in, it finds the real session and re-runs
+  // loadAllAppData() a second time so every module has the actual data
+  // (the first pass, before we knew the session was valid, mostly got 401s
+  // and fell back to whatever was cached locally).
+  async function initAuth(){
+    let u = null;
+    try{
+      const res = await fetch('/api/me');
+      if(res.ok) u = await res.json();
+    }catch(e){}
     if(u){
+      const idx = users.findIndex(x => x.id === u.id);
+      if(idx > -1) users[idx] = { ...users[idx], ...u }; else users.push(u);
       currentUser = u;
+      sessionStorage.setItem('rgv_current_user', u.id);
+      await loadAllAppData();
       hideLoginScreen();
       applyRolePermissions();
       initSbSectionsCollapseState();
@@ -2598,6 +2618,8 @@
       switchView(allowed[0]);
       startIdleWatcher();
     }else{
+      currentUser = null;
+      sessionStorage.removeItem('rgv_current_user');
       showLoginScreen();
     }
   }
@@ -2650,6 +2672,13 @@
     if(idx > -1) users[idx] = { ...users[idx], ...u }; else users.push(u);
     currentUser = u;
     sessionStorage.setItem('rgv_current_user', u.id);
+    _sessionExpiredHandled = false;
+    // The app's very first data load (at page open, before this login)
+    // happened with no session cookie yet, so every module fell back to
+    // whatever was cached locally instead of the real server data. Now that
+    // /api/login has set a real session cookie, load everything again —
+    // this time every request is authenticated and gets the actual data.
+    await loadAllAppData();
     hideLoginScreen();
     applyRolePermissions();
     initSbSectionsCollapseState();
@@ -2664,6 +2693,11 @@
     stopIdleWatcher();
     currentUser = null;
     sessionStorage.removeItem('rgv_current_user');
+    // Best-effort — invalidates the session server-side so the cookie can't
+    // be reused even if it were somehow still sitting in the browser. Not
+    // awaited: there's nothing useful to do differently if this fails, and
+    // the local sign-out above already happened.
+    fetch('/api/logout', { method:'POST' }).catch(()=>{});
     document.getElementById('loginUsername').value = '';
     document.getElementById('loginPassword').value = '';
     showLoginScreen();
@@ -3003,8 +3037,26 @@
   // this an oversized upload or a server error (413, 500, ...) resolves
   // "successfully" with an error body, and calling code has no way to tell
   // the request didn't actually do anything.
+  // A 401 here means the server-side session cookie is missing, expired, or
+  // was never valid — never that this specific save failed for an ordinary
+  // reason. Route that case through forceSessionExpired() (shows the login
+  // screen with a clear reason) instead of falling into the generic
+  // "could not save, kept locally only" message every other failure gets,
+  // which would be actively misleading once the real problem is "you got
+  // signed out."
+  let _sessionExpiredHandled = false;
+  function forceSessionExpired(){
+    if(_sessionExpiredHandled) return;
+    _sessionExpiredHandled = true;
+    showToast('Your session has expired — please log in again.');
+    logout();
+  }
   async function throwIfNotOk(res){
     if(res.ok) return res;
+    if(res.status === 401){
+      forceSessionExpired();
+      throw new Error('SESSION_EXPIRED');
+    }
     let msg = 'Request failed (' + res.status + ')';
     try{ const body = await res.json(); if(body && body.error) msg = body.error; }catch(e){}
     throw new Error(msg);
@@ -3030,7 +3082,7 @@
       _apiLastSynced[key] = JSON.parse(JSON.stringify(newArray));
       localStorage.setItem(key, JSON.stringify(newArray)); // local fallback copy
     }catch(e){
-      showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
+      if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
       localStorage.setItem(key, JSON.stringify(newArray));
     }
   }
@@ -3074,7 +3126,7 @@
         await throwIfNotOk(await fetch(OBJECT_BACKED_KEYS[key], { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(value) }));
         localStorage.setItem(key, JSON.stringify(value));
       }catch(e){
-        showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
+        if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
         localStorage.setItem(key, JSON.stringify(value));
       }
       return;
@@ -16773,7 +16825,16 @@
     return false;
   }
 
-  loadClassLevels().then(() => loadSectionLevels()).then(() => loadClassSectionOverrides()).then(() => loadSchoolInfo()).then(() => loadFinance()).then(() => loadFeeExtras()).then(() => loadAttendance()).then(() => loadStaffAttendance()).then(() => loadExams()).then(() => loadRooms()).then(() => loadExamHallTickets()).then(() => loadExamRoomConfigs()).then(() => loadExamHolidays()).then(() => loadReportTemplates()).then(() => loadAdminDownloads()).then(() => loadPendingApprovals()).then(() => loadInventory()).then(() => loadTimetable()).then(() => loadSyllabusHomework()).then(() => loadTransport()).then(() => loadLibrary()).then(() => loadHostel()).then(() => loadAccounting()).then(() => loadComms()).then(() => loadStaff()).then(() => loadStaffPayroll()).then(() => loadSubjects()).then(() => loadCustomRoles()).then(() => loadStudents()).then(() => loadUsers()).then(() => initAuth()).then(() => applyTheme(document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'));
+  // Every module's data load, as one function — called once unconditionally
+  // below (a first, necessarily unauthenticated pass on a fresh page visit,
+  // since there's no session cookie yet), and called again by initAuth()
+  // and submitLogin() once a real session is confirmed, so every module
+  // ends up with actual server data rather than whatever the first,
+  // pre-login pass fell back to.
+  function loadAllAppData(){
+    return loadClassLevels().then(() => loadSectionLevels()).then(() => loadClassSectionOverrides()).then(() => loadSchoolInfo()).then(() => loadFinance()).then(() => loadFeeExtras()).then(() => loadAttendance()).then(() => loadStaffAttendance()).then(() => loadExams()).then(() => loadRooms()).then(() => loadExamHallTickets()).then(() => loadExamRoomConfigs()).then(() => loadExamHolidays()).then(() => loadReportTemplates()).then(() => loadAdminDownloads()).then(() => loadPendingApprovals()).then(() => loadInventory()).then(() => loadTimetable()).then(() => loadSyllabusHomework()).then(() => loadTransport()).then(() => loadLibrary()).then(() => loadHostel()).then(() => loadAccounting()).then(() => loadComms()).then(() => loadStaff()).then(() => loadStaffPayroll()).then(() => loadSubjects()).then(() => loadCustomRoles()).then(() => loadStudents()).then(() => loadUsers());
+  }
+  loadAllAppData().then(() => initAuth()).then(() => applyTheme(document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'));
 </script>
 
 </body>
