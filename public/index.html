@@ -16869,7 +16869,31 @@
   // ends up with actual server data rather than whatever the first,
   // pre-login pass fell back to.
   function loadAllAppData(){
-    return loadClassLevels().then(() => loadSectionLevels()).then(() => loadClassSectionOverrides()).then(() => loadSchoolInfo()).then(() => loadFinance()).then(() => loadFeeExtras()).then(() => loadAttendance()).then(() => loadStaffAttendance()).then(() => loadExams()).then(() => loadRooms()).then(() => loadExamHallTickets()).then(() => loadExamRoomConfigs()).then(() => loadExamHolidays()).then(() => loadReportTemplates()).then(() => loadAdminDownloads()).then(() => loadPendingApprovals()).then(() => loadInventory()).then(() => loadTimetable()).then(() => loadSyllabusHomework()).then(() => loadTransport()).then(() => loadLibrary()).then(() => loadHostel()).then(() => loadAccounting()).then(() => loadComms()).then(() => loadStaff()).then(() => loadStaffPayroll()).then(() => loadSubjects()).then(() => loadCustomRoles()).then(() => loadStudents()).then(() => loadUsers());
+    // These 29 loaders were chained one-after-another with .then() — fine
+    // back when each just read its own key out of this browser's
+    // localStorage instantly, but once the key/value store change made
+    // every one of them a real network round trip to Postgres
+    // (/api/kv/:key, plus a couple of dedicated endpoints), a strictly
+    // sequential chain meant total load time was the SUM of all 29 round
+    // trips, on every login (and once more, wastefully, on the very first
+    // unauthenticated page-open pass below). That's the "loading all the
+    // pages at a time" slowdown.
+    // Verified each loader only reads/writes its own module's globals and
+    // never depends on another loader having already run, so there's no
+    // ordering requirement between any two of them — safe to run together.
+    // Total wait time now tracks the single slowest request instead of the
+    // sum of all 29.
+    return Promise.all([
+      loadClassLevels(), loadSectionLevels(), loadClassSectionOverrides(),
+      loadSchoolInfo(), loadFinance(), loadFeeExtras(), loadAttendance(),
+      loadStaffAttendance(), loadExams(), loadRooms(), loadExamHallTickets(),
+      loadExamRoomConfigs(), loadExamHolidays(), loadReportTemplates(),
+      loadAdminDownloads(), loadPendingApprovals(), loadInventory(),
+      loadTimetable(), loadSyllabusHomework(), loadTransport(), loadLibrary(),
+      loadHostel(), loadAccounting(), loadComms(), loadStaff(),
+      loadStaffPayroll(), loadSubjects(), loadCustomRoles(), loadStudents(),
+      loadUsers(),
+    ]);
   }
   loadAllAppData().then(() => initAuth()).then(() => applyTheme(document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'));
 </script>
