@@ -308,13 +308,22 @@ async function migrateAccountingFromKv() {
       let voucherNo = item.voucherNo || null;
       if (!voucherNo || seen.has(voucherNo)) voucherNo = 'LEGACY-' + item.id;
       seen.add(voucherNo);
-      await sql`
-        INSERT INTO ${sql(table)} (id, voucher_no, date, category, cost_center, amount, party, mode, reference_no, description, added_by, voided, void_reason, voided_by, voided_at)
-        VALUES (${item.id}, ${voucherNo}, ${item.date || null}, ${item.category || null}, ${item.costCenter || null}, ${Number(item.amount) || 0},
-                ${item.party || null}, ${item.mode || null}, ${item.referenceNo || null}, ${item.description || null},
-                ${item.addedBy || null}, ${!!item.voided}, ${item.voidReason || null}, ${item.voidedBy || null}, ${item.voidedAt || null})
-        ON CONFLICT (id) DO NOTHING
-      `;
+      // table is always one of our own two hardcoded literals ('acct_income' /
+      // 'acct_expenses') passed in by migrateOne's caller below — never user
+      // input — so building it into the query text is safe. It has to be done
+      // this way (sql.query with $-placeholders) rather than the usual
+      // sql`...` tagged template: this driver (@neondatabase/serverless) only
+      // allows sql to be called as a tagged template, so the postgres.js-style
+      // sql(table) dynamic-identifier helper used here originally doesn't
+      // exist and throws at runtime — this is what broke the Sept 4 deploy.
+      await sql.query(
+        `INSERT INTO ${table} (id, voucher_no, date, category, cost_center, amount, party, mode, reference_no, description, added_by, voided, void_reason, voided_by, voided_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         ON CONFLICT (id) DO NOTHING`,
+        [item.id, voucherNo, item.date || null, item.category || null, item.costCenter || null, Number(item.amount) || 0,
+         item.party || null, item.mode || null, item.referenceNo || null, item.description || null,
+         item.addedBy || null, !!item.voided, item.voidReason || null, item.voidedBy || null, item.voidedAt || null]
+      );
       migrated++;
     }
     if (migrated) console.log(`Migrated ${migrated} legacy record(s) from kv_store["${kvKey}"] into ${table}.`);
