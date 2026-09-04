@@ -179,6 +179,44 @@ async function ensureSchema() {
   await sql`CREATE TABLE IF NOT EXISTS school_info (
     id INTEGER PRIMARY KEY, data JSONB NOT NULL DEFAULT '{}'::jsonb
   )`;
+  // One row per numbering series per period (e.g. series='income_voucher',
+  // period='26-27') — see the "Document numbering" section below for how
+  // this is used. Deliberately its own tiny table (not a kv_store entry):
+  // issuing a number is a single atomic UPDATE...RETURNING against one row
+  // here, which Postgres serializes correctly under concurrent requests.
+  // kv_store's whole-value PUT (see handleKv below) has no such guarantee —
+  // two staff saving a voucher at the same moment could both compute the
+  // same "next" number and silently overwrite each other, which is exactly
+  // the bug this table exists to close.
+  await sql`CREATE TABLE IF NOT EXISTS doc_counters (
+    series TEXT NOT NULL, period TEXT NOT NULL, next_seq INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (series, period)
+  )`;
+  // Accounting: Income (Receipt) and Payment vouchers. These used to live as
+  // a single JSON blob per school in kv_store (acct-income / acct-expenses)
+  // — every save round-tripped the ENTIRE list, so two staff saving around
+  // the same moment could each overwrite the other's entry with no error or
+  // warning. Real tables + voucher_no UNIQUE fix both that and the
+  // duplicate-numbering problem at once. migrateAccountingFromKv() below
+  // copies over anything already recorded the old way, once, at boot.
+  // cost_center is a SEPARATE dimension from category: category is the
+  // account head (Salaries, Donation, ...); cost_center is the segment this
+  // money belongs to (Transport, Inventory, Hostel, School Fees/General) —
+  // so income and expenditure can be compared segment-by-segment (e.g. "is
+  // running the bus profitable") independently of what account head it's
+  // filed under.
+  await sql`CREATE TABLE IF NOT EXISTS acct_income (
+    id TEXT PRIMARY KEY, voucher_no TEXT UNIQUE, date TEXT, category TEXT, cost_center TEXT, amount NUMERIC DEFAULT 0,
+    party TEXT, mode TEXT, reference_no TEXT, description TEXT, added_by TEXT,
+    voided BOOLEAN NOT NULL DEFAULT false, void_reason TEXT, voided_by TEXT, voided_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE TABLE IF NOT EXISTS acct_expenses (
+    id TEXT PRIMARY KEY, voucher_no TEXT UNIQUE, date TEXT, category TEXT, cost_center TEXT, amount NUMERIC DEFAULT 0,
+    party TEXT, mode TEXT, reference_no TEXT, description TEXT, added_by TEXT,
+    voided BOOLEAN NOT NULL DEFAULT false, void_reason TEXT, voided_by TEXT, voided_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
   // The generic key/value table backs every module that doesn't need its own
   // dedicated table with real columns — Inventory, Timetable, Library, Transport,
   // Hostel, Accounting, Fee/Exam sub-settings, Report Template signatures, Class
@@ -244,8 +282,47 @@ async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (created_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log (resource)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions (expires_at)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_acct_income_date ON acct_income (date)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_acct_expenses_date ON acct_expenses (date)`;
 }
 await ensureSchema();
+
+// ---------- One-time accounting migration: kv_store blobs -> real tables ----------
+// Runs once per table (skips if acct_income / acct_expenses already has rows,
+// so a restart doesn't re-copy anything). Old entries may already carry a
+// duplicate or missing voucherNo (that's the very bug being fixed here), so
+// anything that can't keep its original number safely gets a LEGACY- number
+// instead of being silently dropped or crashing the migration on the new
+// UNIQUE constraint.
+async function migrateAccountingFromKv() {
+  async function migrateOne(kvKey, table) {
+    const [{ c }] = await sql.query(`SELECT COUNT(*)::int AS c FROM ${table}`);
+    if (c > 0) return;
+    const kvRows = await sql`SELECT value FROM kv_store WHERE key = ${kvKey}`;
+    const items = kvRows.length && Array.isArray(kvRows[0].value) ? kvRows[0].value : [];
+    if (!items.length) return;
+    const seen = new Set();
+    let migrated = 0;
+    for (const item of items) {
+      if (!item || !item.id) continue;
+      let voucherNo = item.voucherNo || null;
+      if (!voucherNo || seen.has(voucherNo)) voucherNo = 'LEGACY-' + item.id;
+      seen.add(voucherNo);
+      await sql`
+        INSERT INTO ${sql(table)} (id, voucher_no, date, category, cost_center, amount, party, mode, reference_no, description, added_by, voided, void_reason, voided_by, voided_at)
+        VALUES (${item.id}, ${voucherNo}, ${item.date || null}, ${item.category || null}, ${item.costCenter || null}, ${Number(item.amount) || 0},
+                ${item.party || null}, ${item.mode || null}, ${item.referenceNo || null}, ${item.description || null},
+                ${item.addedBy || null}, ${!!item.voided}, ${item.voidReason || null}, ${item.voidedBy || null}, ${item.voidedAt || null})
+        ON CONFLICT (id) DO NOTHING
+      `;
+      migrated++;
+    }
+    if (migrated) console.log(`Migrated ${migrated} legacy record(s) from kv_store["${kvKey}"] into ${table}.`);
+  }
+  await migrateOne('acct-income', 'acct_income');
+  await migrateOne('acct-expenses', 'acct_expenses');
+}
+await migrateAccountingFromKv();
 
 // ---------- One-time password migration ----------
 // Every password in the `users` table has been plain text since this app's
@@ -441,6 +518,47 @@ app.all('/api/kv/:key', async (req, res) => {
   }
 });
 
+// ---------- Document numbering (Income/Payment vouchers, and any future series) ----------
+// Indian schools run their financial year April -> March; a receipt/payment
+// voucher series conventionally restarts at 1 each financial year rather
+// than counting up forever. "26-27" means FY starting April 2026.
+function currentFinancialYear() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const startY = now.getMonth() + 1 >= 4 ? y : y - 1; // Jan-Mar still belongs to the FY that started the previous April
+  return String(startY % 100).padStart(2, '0') + '-' + String((startY + 1) % 100).padStart(2, '0');
+}
+// Add a series here (and give it a prefix) any time a new numbered-document
+// type needs the same guarantee — e.g. Fee Receipts or Inventory bills later —
+// nothing else about this endpoint needs to change.
+const DOC_SERIES_PREFIX = {
+  income_voucher: 'RV',   // Receipt Voucher — money coming in, other than a fee payment
+  payment_voucher: 'PV',  // Payment Voucher — money going out
+};
+app.post('/api/next-doc-number', async (req, res) => {
+  try {
+    const series = req.body && req.body.series;
+    const prefix = DOC_SERIES_PREFIX[series];
+    if (!prefix) return res.status(400).json({ error: 'Unknown numbering series: ' + series });
+    const period = currentFinancialYear();
+    // Single atomic statement: Postgres locks the (series, period) row for
+    // the duration of this UPDATE, so two requests arriving at the same
+    // instant are still serialized into 1 and 2, never both getting the same
+    // number — this is the guarantee kv_store's whole-blob PUT couldn't give.
+    const rows = await sql`
+      INSERT INTO doc_counters (series, period, next_seq) VALUES (${series}, ${period}, 1)
+      ON CONFLICT (series, period) DO UPDATE SET next_seq = doc_counters.next_seq + 1
+      RETURNING next_seq
+    `;
+    const seq = rows[0].next_seq;
+    const docNumber = `${prefix}/${period}/${String(seq).padStart(6, '0')}`;
+    return res.status(200).json({ docNumber });
+  } catch (err) {
+    console.error('next-doc-number error:', err);
+    return res.status(500).json({ error: 'Could not issue a document number.' });
+  }
+});
+
 // ---------- Resource configuration (unchanged from the tested version) ----------
 const SIMPLE_RESOURCES = {
   users: {
@@ -521,6 +639,28 @@ const SIMPLE_RESOURCES = {
       { app: 'id', col: 'id' }, { app: 'dataUrl', col: 'data_url' }, { app: 'category', col: 'category' },
       { app: 'caption', col: 'caption' }, { app: 'uploadedDate', col: 'uploaded_date' },
       { app: 'uploadedBy', col: 'uploaded_by' },
+    ],
+  },
+  'acct-income': {
+    table: 'acct_income',
+    fields: [
+      { app: 'id', col: 'id' }, { app: 'voucherNo', col: 'voucher_no' }, { app: 'date', col: 'date' },
+      { app: 'category', col: 'category' }, { app: 'costCenter', col: 'cost_center' },
+      { app: 'amount', col: 'amount', numeric: true }, { app: 'party', col: 'party' }, { app: 'mode', col: 'mode' },
+      { app: 'referenceNo', col: 'reference_no' }, { app: 'description', col: 'description' }, { app: 'addedBy', col: 'added_by' },
+      { app: 'voided', col: 'voided' }, { app: 'voidReason', col: 'void_reason' },
+      { app: 'voidedBy', col: 'voided_by' }, { app: 'voidedAt', col: 'voided_at' },
+    ],
+  },
+  'acct-expenses': {
+    table: 'acct_expenses',
+    fields: [
+      { app: 'id', col: 'id' }, { app: 'voucherNo', col: 'voucher_no' }, { app: 'date', col: 'date' },
+      { app: 'category', col: 'category' }, { app: 'costCenter', col: 'cost_center' },
+      { app: 'amount', col: 'amount', numeric: true }, { app: 'party', col: 'party' }, { app: 'mode', col: 'mode' },
+      { app: 'referenceNo', col: 'reference_no' }, { app: 'description', col: 'description' }, { app: 'addedBy', col: 'added_by' },
+      { app: 'voided', col: 'voided' }, { app: 'voidReason', col: 'void_reason' },
+      { app: 'voidedBy', col: 'voided_by' }, { app: 'voidedAt', col: 'voided_at' },
     ],
   },
 };
