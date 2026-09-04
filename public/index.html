@@ -12186,7 +12186,22 @@
       if(!segments[name]) segments[name] = { income:0, expense:0 };
       return segments[name];
     }
-    payments.forEach(p => { seg(feePaymentCostCenter(p)).income += Number(p.amount)||0; });
+    // A student buying from the Inventory / canteen counter is recorded as a
+    // Fee payment with category 'extra' (so it shows on their fee ledger) —
+    // that's indistinguishable from any other one-off Extra Fee by category
+    // alone, which is why it was landing in General / Other. Match it back
+    // to the actual inventory sale it came from (via extraFeeId → sefId) and
+    // count it as Inventory income instead.
+    const inventorySefIds = new Set(inventorySales.filter(s => s.sefId).map(s => s.sefId));
+    payments.forEach(p => {
+      const key = (p.category === 'extra' && inventorySefIds.has(p.extraFeeId)) ? 'Inventory' : feePaymentCostCenter(p);
+      seg(key).income += Number(p.amount)||0;
+    });
+    // A non-student buyer (staff, walk-in, etc.) at the inventory counter
+    // never creates a Fee payment at all — it only exists in the Inventory
+    // module's own sales log — so pull those in directly or that income
+    // would be invisible here, not just miscategorised.
+    inventorySales.filter(s => s.buyerType !== 'Student').forEach(s => { seg('Inventory').income += Number(s.paidAmount)||0; });
     // Grouped strictly by the Account picked on each voucher — never by its
     // free-typed Category, which can vary in spelling/capitalisation between
     // entries that are really the same account and would otherwise split
@@ -12199,7 +12214,7 @@
     const totalIncome = names.reduce((s,n) => s + segments[n].income, 0);
     const totalExpense = names.reduce((s,n) => s + segments[n].expense, 0);
     body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">Profit &amp; loss by account — student fee collections are matched to an account automatically (tuition fee → Tuition Fee, bus fee → Vehicle Fee (Transport), hostel fee → Hostel Fee, stock/canteen fee → Inventory, everything else → General / Other); Income and Payment vouchers use whichever Account was picked when they were saved. This is what tells you, for example, whether running the school bus is actually profitable once fuel, driver salary and maintenance are counted against the bus fee it collects.</p>
+      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">Profit &amp; loss by account — student fee collections are matched to an account automatically (tuition fee → Tuition Fee, bus fee → Vehicle Fee (Transport), hostel fee → Hostel Fee, everything else → General / Other), and every Inventory / canteen counter sale — to a student or anyone else — is pulled in as Inventory income. Income and Payment vouchers use whichever Account was picked when they were saved. This is what tells you, for example, whether running the school bus is actually profitable once fuel, driver salary and maintenance are counted against the bus fee it collects — or whether the canteen is making money once what it paid for stock is counted against what it sold.</p>
       <div class="table-wrap">
         <table><thead><tr><th>Account</th><th>Income</th><th>Expenditure</th><th>Net</th></tr></thead>
         <tbody>
