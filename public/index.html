@@ -11152,11 +11152,11 @@
     if(p.category === 'stock') return 'Inventory';
     if(p.category === 'hostel') return 'Hostel Fee';
     if(p.category === 'fee') return 'Tuition Fee';
-    // 'extra' fees are each their own named income type (Admission Fee, Late
-    // Fee, a specific inventory item, etc — whatever's been set up under
-    // Extra Fees) — break each out under its own real name instead of
-    // dumping every one of them into a single generic bucket.
-    if(p.category === 'extra') return p.extraFeeName || 'Extra Fees';
+    // Every individual Extra Fee (admission fee, one-off fines, etc.) is its
+    // own free-form name, and a school can have many of them — breaking each
+    // one out as its own P&L row got noisy fast, splitting what really
+    // amounts to one kind of income across a dozen near-identical-looking
+    // rows. Kept as a single, clean bucket instead.
     return 'General / Other';
   }
   function acctFeeIncomeTotal(){
@@ -12187,13 +12187,14 @@
       return segments[name];
     }
     payments.forEach(p => { seg(feePaymentCostCenter(p)).income += Number(p.amount)||0; });
-    // Vouchers saved without an Account picked (mainly old entries from
-    // before this field existed) fall back to their own Category — e.g. a
-    // "Vehicle Maintenance" expense still shows up under its own real name
-    // instead of being dumped into one catch-all bucket — and only truly
-    // uncategorised entries land in General / Other.
-    acctIncome.filter(i => !i.voided).forEach(i => { seg(i.costCenter || i.category || 'General / Other').income += Number(i.amount)||0; });
-    acctExpenses.filter(e => !e.voided).forEach(e => { seg(e.costCenter || e.category || 'General / Other').expense += Number(e.amount)||0; });
+    // Grouped strictly by the Account picked on each voucher — never by its
+    // free-typed Category, which can vary in spelling/capitalisation between
+    // entries that are really the same account and would otherwise split
+    // one account across several near-duplicate rows. Anything with no
+    // Account set (older entries from before that field existed) goes into
+    // one clean General / Other row.
+    acctIncome.filter(i => !i.voided).forEach(i => { seg(i.costCenter || 'General / Other').income += Number(i.amount)||0; });
+    acctExpenses.filter(e => !e.voided).forEach(e => { seg(e.costCenter || 'General / Other').expense += Number(e.amount)||0; });
     const names = Object.keys(segments).sort((a,b) => (segments[b].income - segments[b].expense) - (segments[a].income - segments[a].expense));
     const totalIncome = names.reduce((s,n) => s + segments[n].income, 0);
     const totalExpense = names.reduce((s,n) => s + segments[n].expense, 0);
