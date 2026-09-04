@@ -1318,7 +1318,7 @@
         <button type="button" class="mf-tab active" id="acttab-overview" onclick="switchAccountingTab('overview')">📊 Overview</button>
         <button type="button" class="mf-tab" id="acttab-income" onclick="switchAccountingTab('income')">💰 Income</button>
         <button type="button" class="mf-tab" id="acttab-expense" onclick="switchAccountingTab('expense')">💸 Expenses</button>
-        <button type="button" class="mf-tab" id="acttab-segments" onclick="switchAccountingTab('segments')">📈 Segment P&amp;L</button>
+        <button type="button" class="mf-tab" id="acttab-segments" onclick="switchAccountingTab('segments')">📈 P&amp;L by Account</button>
         <button type="button" class="mf-tab" id="acttab-categories" onclick="switchAccountingTab('categories')">🏷️ Categories</button>
       </div>
       <div id="accountingBody"></div>
@@ -2438,7 +2438,7 @@
     { key:'accounting_overview', label:'Overview',   icon:'📊', category:'Finance', parent:'accounting' },
     { key:'accounting_income', label:'Income',       icon:'💰', category:'Finance', parent:'accounting' },
     { key:'accounting_expenses', label:'Expenses',   icon:'💸', category:'Finance', parent:'accounting' },
-    { key:'accounting_segments', label:'Segment P&L', icon:'📈', category:'Finance', parent:'accounting', isNew:true },
+    { key:'accounting_segments', label:'P&L by Account', icon:'📈', category:'Finance', parent:'accounting', isNew:true },
     { key:'accounting_categories', label:'Categories', icon:'🏷️', category:'Finance', parent:'accounting' },
 
     { key:'staff',       label:'Staff Directory',    icon:'🧑‍💼', category:'Staff' },
@@ -11129,7 +11129,7 @@
     acctIncome = await storageGet(ACCT_INCOME_KEY, []);
     acctExpenseCategories = await storageGet(ACCT_EXPENSE_CATS_KEY, ['Salaries','Utilities (Electricity/Water)','Maintenance & Repairs','Stationery & Supplies','Transport Fuel','Furniture & Equipment','Miscellaneous']);
     acctIncomeCategories = await storageGet(ACCT_INCOME_CATS_KEY, ['Donation','Government Grant','Rental Income','Interest Income','Miscellaneous']);
-    acctCostCenters = await storageGet(ACCT_COST_CENTERS_KEY, ['School / General','Transport (Vehicle)','Inventory / Canteen','Hostel']);
+    acctCostCenters = await storageGet(ACCT_COST_CENTERS_KEY, ['Tuition Fee','Vehicle Fee (Transport)','Inventory','Hostel Fee','General / Other']);
   }
   // Asks the server for the next number in a series — never guessed
   // client-side. See server.js's /api/next-doc-number: it's a single atomic
@@ -11148,10 +11148,11 @@
   // works. Anything not recognized (plain tuition, admission, fines, etc.)
   // falls back to the general school bucket.
   function feePaymentCostCenter(p){
-    if(p.category === 'bus') return 'Transport (Vehicle)';
-    if(p.category === 'stock') return 'Inventory / Canteen';
-    if(p.category === 'hostel') return 'Hostel';
-    return 'School / General';
+    if(p.category === 'bus') return 'Vehicle Fee (Transport)';
+    if(p.category === 'stock') return 'Inventory';
+    if(p.category === 'hostel') return 'Hostel Fee';
+    if(p.category === 'fee') return 'Tuition Fee';
+    return 'General / Other';
   }
   function acctFeeIncomeTotal(){
     return payments.reduce((sum,p) => sum + (Number(p.amount)||0), 0);
@@ -11915,12 +11916,12 @@
       ${canCreate ? `
       <div class="profile-card" style="max-width:640px; margin-bottom:24px;">
         <h4>💰 Record Income</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">For anything other than student fees — donations, grants, rental income, interest, and so on. A Receipt Voucher number is assigned automatically when you save.</p>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">For anything other than student fees — donations, grants, rental income, interest, and so on. Pick the <b>Account</b> this income belongs to (Tuition Fee, Vehicle Fee, Inventory, Hostel Fee, or General) so the "P&amp;L by Account" tab can total it up correctly. A Receipt Voucher number is assigned automatically when you save.</p>
         <div class="form-grid" style="margin-bottom:14px;">
           <div class="f-field"><label>Date</label><input type="date" id="acctIncDate" value="${new Date().toISOString().slice(0,10)}"></div>
           <div class="f-field"><label>Amount (₹)</label><input type="number" id="acctIncAmount" min="0" placeholder="0"></div>
           <div class="f-field">
-            <label>Category (account head)</label>
+            <label>Category</label>
             <select id="acctIncCategory" onchange="onAcctCategoryChange('acctIncCategory','acctIncNewCategory')">
               ${acctIncomeCategories.map(c => `<option>${c}</option>`).join('')}
               <option value="__new__">+ New Category...</option>
@@ -11928,7 +11929,7 @@
           </div>
           <div class="f-field" id="acctIncNewCategoryField" style="display:none;"><label>New Category Name</label><input type="text" id="acctIncNewCategory" placeholder="e.g. Alumni Contribution"></div>
           <div class="f-field">
-            <label>Segment</label>
+            <label>Account</label>
             <select id="acctIncCostCenter">${acctCostCenters.map(c => `<option>${c}</option>`).join('')}</select>
           </div>
           <div class="f-field"><label>Received From</label><input type="text" id="acctIncParty" placeholder="e.g. Rotary Club of Kadapa"></div>
@@ -11946,7 +11947,7 @@
       <h4 style="margin-bottom:10px;">Income Vouchers (${acctIncome.length})</h4>
       <input class="input" style="max-width:280px; margin-bottom:12px;" placeholder="Search vouchers..." value="${acctIncomeSearch}" oninput="acctIncomeSearch=this.value; renderAcctIncomeTab(document.getElementById('accountingBody'));">
       <div class="table-wrap">
-        <table><thead><tr><th>Voucher No.</th><th>Date</th><th>Category</th><th>Segment</th><th>Received From</th><th>Mode</th><th>Amount</th><th></th></tr></thead>
+        <table><thead><tr><th>Voucher No.</th><th>Date</th><th>Category</th><th>Account</th><th>Received From</th><th>Mode</th><th>Amount</th><th></th></tr></thead>
         <tbody>
         ${filtered.length ? filtered.map(i => `<tr${i.voided?' style="opacity:0.55; text-decoration:line-through;"':''}><td>${i.voucherNo}</td><td>${i.date}</td><td>${i.category}</td><td>${i.costCenter||'—'}</td><td>${i.party||'—'}</td><td>${i.mode}${i.referenceNo?' ('+i.referenceNo+')':''}</td><td style="color:#0f6a63; font-weight:600;">${fmtMoney(i.amount)}</td><td style="text-decoration:none; white-space:nowrap;">${canPrint?`<button class="btn-edit-text" onclick="printAccountingVoucher('income','${i.id}')">Print</button>`:''}${canVoid && !i.voided?` <button class="btn-danger-text" onclick="voidAccountingEntry('income','${i.id}')">Void</button>`:''}${i.voided?` <span class="pill" style="font-size:0.62rem;" title="${escapeHtml(i.voidReason||'')}">Voided</span>`:''}</td></tr>`).join('') : `<tr><td colspan="8"><div class="empty-state"><b>No income vouchers yet${acctIncomeSearch?' match your search':''}</b></div></td></tr>`}
         </tbody></table>
@@ -12008,12 +12009,12 @@
       ${canCreate ? `
       <div class="profile-card" style="max-width:640px; margin-bottom:24px;">
         <h4>💸 Record Expense</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Salaries, utilities, maintenance, supplies — anything the school spends on. A Payment Voucher number is assigned automatically when you save.</p>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Salaries, utilities, maintenance, supplies — anything the school spends on. Pick the <b>Account</b> this expense should be weighed against (Tuition Fee, Vehicle Fee, Inventory, Hostel Fee, or General) so the "P&amp;L by Account" tab can show whether that part of the school is running at a profit or a loss — e.g. driver salary and fuel go under Vehicle Fee, canteen stock purchases go under Inventory. A Payment Voucher number is assigned automatically when you save.</p>
         <div class="form-grid" style="margin-bottom:14px;">
           <div class="f-field"><label>Date</label><input type="date" id="acctExpDate" value="${new Date().toISOString().slice(0,10)}"></div>
           <div class="f-field"><label>Amount (₹)</label><input type="number" id="acctExpAmount" min="0" placeholder="0"></div>
           <div class="f-field">
-            <label>Category (account head)</label>
+            <label>Category</label>
             <select id="acctExpCategory" onchange="onAcctCategoryChange('acctExpCategory','acctExpNewCategory')">
               ${acctExpenseCategories.map(c => `<option>${c}</option>`).join('')}
               <option value="__new__">+ New Category...</option>
@@ -12021,7 +12022,7 @@
           </div>
           <div class="f-field" id="acctExpNewCategoryField" style="display:none;"><label>New Category Name</label><input type="text" id="acctExpNewCategory" placeholder="e.g. Sports Equipment"></div>
           <div class="f-field">
-            <label>Segment</label>
+            <label>Account</label>
             <select id="acctExpCostCenter">${acctCostCenters.map(c => `<option>${c}</option>`).join('')}</select>
           </div>
           <div class="f-field"><label>Paid To</label><input type="text" id="acctExpParty" placeholder="e.g. APSEB Electricity Board"></div>
@@ -12039,7 +12040,7 @@
       <h4 style="margin-bottom:10px;">Expense Vouchers (${acctExpenses.length})</h4>
       <input class="input" style="max-width:280px; margin-bottom:12px;" placeholder="Search vouchers..." value="${acctExpenseSearch}" oninput="acctExpenseSearch=this.value; renderAcctExpenseTab(document.getElementById('accountingBody'));">
       <div class="table-wrap">
-        <table><thead><tr><th>Voucher No.</th><th>Date</th><th>Category</th><th>Segment</th><th>Paid To</th><th>Mode</th><th>Amount</th><th></th></tr></thead>
+        <table><thead><tr><th>Voucher No.</th><th>Date</th><th>Category</th><th>Account</th><th>Paid To</th><th>Mode</th><th>Amount</th><th></th></tr></thead>
         <tbody>
         ${filtered.length ? filtered.map(e => `<tr${e.voided?' style="opacity:0.55; text-decoration:line-through;"':''}><td>${e.voucherNo}</td><td>${e.date}</td><td>${e.category}</td><td>${e.costCenter||'—'}</td><td>${e.party||'—'}</td><td>${e.mode}${e.referenceNo?' ('+e.referenceNo+')':''}</td><td style="color:var(--magenta); font-weight:600;">${fmtMoney(e.amount)}</td><td style="text-decoration:none; white-space:nowrap;">${canPrint?`<button class="btn-edit-text" onclick="printAccountingVoucher('expense','${e.id}')">Print</button>`:''}${canVoid && !e.voided?` <button class="btn-danger-text" onclick="voidAccountingEntry('expense','${e.id}')">Void</button>`:''}${e.voided?` <span class="pill" style="font-size:0.62rem;" title="${escapeHtml(e.voidReason||'')}">Voided</span>`:''}</td></tr>`).join('') : `<tr><td colspan="8"><div class="empty-state"><b>No expense vouchers yet${acctExpenseSearch?' match your search':''}</b></div></td></tr>`}
         </tbody></table>
@@ -12111,15 +12112,15 @@
         </div>
       </div>
       <div class="profile-card" style="max-width:400px;">
-        <h4>📈 Segments (Cost Centers)</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 12px;">Which part of the school an income or expense belongs to — Transport, Hostel, Inventory, General — so the Segment P&amp;L tab can show whether each one is profitable.</p>
+        <h4>📈 Accounts (for Profit &amp; Loss)</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 12px;">Which part of the school an income or expense belongs to — Tuition Fee, Vehicle Fee, Inventory, Hostel Fee, General — so the "P&amp;L by Account" tab can show whether each one is running at a profit or a loss.</p>
         ${canCreate ? `<div style="display:flex; gap:8px; margin:12px 0;">
           <input class="input" id="acctNewCostCenter" placeholder="e.g. Sports Wing" style="flex:1;">
           <button class="btn btn-primary btn-sm" onclick="addAcctCostCenter()">Add</button>
         </div>` : ''}
         <div class="table-wrap">
           <table><tbody>
-          ${acctCostCenters.length ? acctCostCenters.map((c,i) => `<tr><td>${c}</td><td style="text-align:right;">${canDelete ? `<button class="btn-danger-text" onclick="removeAcctCostCenter(${i})">Remove</button>` : ''}</td></tr>`).join('') : `<tr><td><div class="empty-state"><b>No segments yet</b></div></td></tr>`}
+          ${acctCostCenters.length ? acctCostCenters.map((c,i) => `<tr><td>${c}</td><td style="text-align:right;">${canDelete ? `<button class="btn-danger-text" onclick="removeAcctCostCenter(${i})">Remove</button>` : ''}</td></tr>`).join('') : `<tr><td><div class="empty-state"><b>No accounts yet</b></div></td></tr>`}
           </tbody></table>
         </div>
       </div>
@@ -12158,8 +12159,8 @@
   }
   async function addAcctCostCenter(){
     const name = document.getElementById('acctNewCostCenter').value.trim();
-    if(!name){ showToast('Enter a segment name.'); return; }
-    if(acctCostCenters.includes(name)){ showToast('That segment already exists.'); return; }
+    if(!name){ showToast('Enter an account name.'); return; }
+    if(acctCostCenters.includes(name)){ showToast('That account already exists.'); return; }
     acctCostCenters.push(name);
     await storageSet(ACCT_COST_CENTERS_KEY, acctCostCenters);
     renderAcctCategoriesTab(document.getElementById('accountingBody'));
@@ -12173,7 +12174,7 @@
     renderAcctCategoriesTab(document.getElementById('accountingBody'));
   }
 
-  /* --- Segment P&L --- */
+  /* --- P&L by Account --- */
   function renderAcctSegmentsTab(body){
     const segments = {};
     function seg(name){
@@ -12181,15 +12182,15 @@
       return segments[name];
     }
     payments.forEach(p => { seg(feePaymentCostCenter(p)).income += Number(p.amount)||0; });
-    acctIncome.filter(i => !i.voided).forEach(i => { seg(i.costCenter || 'School / General').income += Number(i.amount)||0; });
-    acctExpenses.filter(e => !e.voided).forEach(e => { seg(e.costCenter || 'School / General').expense += Number(e.amount)||0; });
+    acctIncome.filter(i => !i.voided).forEach(i => { seg(i.costCenter || 'General / Other').income += Number(i.amount)||0; });
+    acctExpenses.filter(e => !e.voided).forEach(e => { seg(e.costCenter || 'General / Other').expense += Number(e.amount)||0; });
     const names = Object.keys(segments).sort((a,b) => (segments[b].income - segments[b].expense) - (segments[a].income - segments[a].expense));
     const totalIncome = names.reduce((s,n) => s + segments[n].income, 0);
     const totalExpense = names.reduce((s,n) => s + segments[n].expense, 0);
     body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">Profit &amp; loss by segment — student fee collections are matched to a segment automatically (bus fee → Transport, hostel fee → Hostel, stock/canteen fee → Inventory, everything else → School / General); Income and Payment vouchers use whichever Segment was picked when they were saved.</p>
+      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">Profit &amp; loss by account — student fee collections are matched to an account automatically (tuition fee → Tuition Fee, bus fee → Vehicle Fee (Transport), hostel fee → Hostel Fee, stock/canteen fee → Inventory, everything else → General / Other); Income and Payment vouchers use whichever Account was picked when they were saved. This is what tells you, for example, whether running the school bus is actually profitable once fuel, driver salary and maintenance are counted against the bus fee it collects.</p>
       <div class="table-wrap">
-        <table><thead><tr><th>Segment</th><th>Income</th><th>Expenditure</th><th>Net</th></tr></thead>
+        <table><thead><tr><th>Account</th><th>Income</th><th>Expenditure</th><th>Net</th></tr></thead>
         <tbody>
         ${names.length ? names.map(n => {
           const s = segments[n];
@@ -12244,7 +12245,7 @@
         <div class="rcpt-row"><b>${partyLabel}:</b><span>${v.party || '—'}</span></div>
         <table class="rcpt-table">
           <tr><td style="width:60%;"><b>Particulars</b></td><td><b>Amount (₹)</b></td></tr>
-          <tr><td>${v.category}${v.description ? ' — ' + v.description : ''}<br><span style="font-size:0.78rem; color:#666;">Segment: ${v.costCenter || '—'}</span></td><td>${fmtMoney(v.amount)}</td></tr>
+          <tr><td>${v.category}${v.description ? ' — ' + v.description : ''}<br><span style="font-size:0.78rem; color:#666;">Account: ${v.costCenter || '—'}</span></td><td>${fmtMoney(v.amount)}</td></tr>
         </table>
         <div class="rcpt-row"><b>Amount in Words:</b><span>${amountWords}</span></div>
         <div class="rcpt-row"><b>Payment Mode:</b><span>${v.mode}${v.referenceNo ? ' (Ref: ' + v.referenceNo + ')' : ''}</span></div>
