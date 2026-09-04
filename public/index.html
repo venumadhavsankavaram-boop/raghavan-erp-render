@@ -12272,6 +12272,7 @@
         .rcpt-table{ width:100%; border-collapse:collapse; font-size:11.5px; margin-top:10px; }
         .rcpt-table td{ border:1px solid #999; padding:7px; }
         .rcpt-sign{ display:flex; justify-content:space-between; margin-top:60px; font-size:11.5px; font-weight:600; }
+        .rcpt-sign-block{ width:42%; text-align:center; border-top:1px solid #333; padding-top:5px; }
         .rcpt-note{ font-size:9.5px; margin-top:16px; padding-top:8px; border-top:1px dashed #ccc; font-style:italic; text-align:center; }
         ${v.voided ? '.watermark{ position:absolute; top:35%; left:8%; font-size:2.6rem; color:rgba(200,0,0,0.25); transform:rotate(-25deg); font-weight:800; pointer-events:none; }' : ''}
       </style></head>
@@ -12300,8 +12301,8 @@
           <div class="rcpt-line">Payment Mode:&nbsp; ${v.mode}${v.referenceNo ? ' (Ref: ' + v.referenceNo + ')' : ''}</div>
           ${v.voided ? `<div class="rcpt-line" style="color:#b00; margin-top:6px;"><b>VOIDED${v.voidedBy?' by '+v.voidedBy:''}${v.voidedAt?' on '+new Date(v.voidedAt).toLocaleDateString():''}:</b> ${v.voidReason || ''}</div>` : ''}
           <div class="rcpt-sign">
-            <div>Prepared by: ${v.addedBy || ''}</div>
-            <div>Authorised Signatory</div>
+            <div class="rcpt-sign-block">Accounts Head</div>
+            <div class="rcpt-sign-block">Receiver</div>
           </div>
           <div class="rcpt-note">System-generated voucher — for internal accounting records.</div>
         </div>
