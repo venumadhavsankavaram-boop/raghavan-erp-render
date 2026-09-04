@@ -12239,53 +12239,68 @@
     const partyLabel = type === 'income' ? 'Received From' : 'Paid To';
     const amountWords = 'Rupees ' + numberToWordsIndian(Math.round(Number(v.amount)||0)) + ' Only';
     // Same source every other print in this app uses for the school badge —
-    // the sidebar's own logo <img>, not schoolInfo.logo (which isn't always
-    // populated). This is what was missing before.
+    // the sidebar's own logo <img>, not schoolInfo.logo. If this still shows
+    // no name/address, it's not a print bug: Setup → School Profile hasn't
+    // been saved on this install yet, and every print in the app (including
+    // fee receipts) reads that exact same schoolInfo — filling it in there
+    // fixes it everywhere at once, this voucher included.
     const logoSrc = document.querySelector('.sb-brand img').src;
+    // Same compact block size/typography as the Fee Receipt print (that's
+    // the "page setup" being matched — small enough that two would sit
+    // side by side on one A4 sheet), just a single copy: unlike a fee
+    // receipt this voucher isn't handed to anyone else, so there's no
+    // second "Student/Parent Copy" to print — one copy is filed as-is.
     const w = window.open('', '_blank');
     w.document.write(`
       <html><head><title>${v.voucherNo}</title>
       <style>
-        body{ font-family: Arial, sans-serif; padding:24px; color:#1a1a1a; }
-        .rcpt-head{ text-align:center; margin-bottom:10px; }
-        .rcpt-logo{ max-height:60px; margin-bottom:6px; }
-        .rcpt-title{ font-size:1.1rem; font-weight:700; letter-spacing:1px; margin:10px 0; text-align:center; border-top:2px solid #333; border-bottom:2px solid #333; padding:6px 0; }
-        .rcpt-row{ display:flex; justify-content:space-between; margin:6px 0; font-size:0.92rem; }
-        .rcpt-row2col{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:10px 0; }
-        .rcpt-table{ width:100%; border-collapse:collapse; margin:14px 0; }
-        .rcpt-table td{ border:1px solid #999; padding:8px; font-size:0.9rem; }
-        .rcpt-line{ border-top:1px dashed #999; margin:14px 0; }
-        .rcpt-sign{ display:flex; justify-content:space-between; margin-top:50px; font-size:0.85rem; }
-        .rcpt-note{ font-size:0.75rem; color:#666; margin-top:20px; text-align:center; }
-        ${v.voided ? '.watermark{ position:fixed; top:40%; left:10%; font-size:4rem; color:rgba(200,0,0,0.25); transform:rotate(-25deg); font-weight:800; }' : ''}
-        @media print{ .no-print{ display:none; } }
+        @page{ size:A4; margin:6mm; }
+        body{ font-family:Arial,Helvetica,sans-serif; margin:0; color:#111; }
+        .rcpt-copy{ width:50%; box-sizing:border-box; padding:5mm; display:flex; flex-direction:column; border:1px solid #333; }
+        .rcpt-head{ display:flex; align-items:center; gap:6px; justify-content:center; margin-bottom:6px; }
+        .rcpt-logo{ width:30px; height:30px; border-radius:50%; }
+        .rcpt-head-text{ text-align:center; }
+        .rcpt-school{ font-weight:700; font-size:13px; }
+        .rcpt-addr{ font-size:9px; }
+        .rcpt-title{ text-align:center; font-weight:700; font-size:10px; border-top:1px solid #333; border-bottom:1px solid #333; padding:3px 0; margin-bottom:6px; letter-spacing:0.5px; }
+        .rcpt-row2col{ display:flex; justify-content:space-between; font-size:9.5px; margin-bottom:3px; }
+        .rcpt-line{ font-size:9.5px; margin-bottom:3px; }
+        .rcpt-table{ width:100%; border-collapse:collapse; font-size:9.5px; margin-top:6px; }
+        .rcpt-table td{ border:1px solid #999; padding:4px; }
+        .rcpt-sign{ display:flex; justify-content:space-between; margin-top:36px; font-size:9.5px; font-weight:600; }
+        .rcpt-note{ font-size:8px; margin-top:10px; padding-top:6px; border-top:1px dashed #ccc; font-style:italic; text-align:center; }
+        ${v.voided ? '.watermark{ position:absolute; top:35%; left:8%; font-size:2.6rem; color:rgba(200,0,0,0.25); transform:rotate(-25deg); font-weight:800; pointer-events:none; }' : ''}
       </style></head>
       <body onload="window.print()">
-        ${v.voided ? '<div class="watermark">VOID</div>' : ''}
-        <div class="rcpt-head">
-          <img src="${logoSrc}" class="rcpt-logo">
-          <div style="font-size:1.15rem; font-weight:700;">${schoolInfo.name || 'School Name'}</div>
-          <div style="font-size:0.8rem; color:#555;">${schoolInfo.address || ''}${schoolInfo.phone ? ', ' + schoolInfo.phone : ''}</div>
+        <div class="rcpt-copy" style="position:relative;">
+          ${v.voided ? '<div class="watermark">VOID</div>' : ''}
+          <div class="rcpt-head">
+            <img src="${logoSrc}" class="rcpt-logo">
+            <div class="rcpt-head-text">
+              <div class="rcpt-school">${schoolInfo.name || 'School Name'}</div>
+              <div class="rcpt-addr">${schoolInfo.address || ''}</div>
+              <div class="rcpt-addr">${schoolInfo.phone || ''}</div>
+            </div>
+          </div>
+          <div class="rcpt-title">${title}</div>
+          <div class="rcpt-row2col">
+            <span>Voucher No:&nbsp; <b>${v.voucherNo}</b></span>
+            <span>Date: <b>${v.date}</b></span>
+          </div>
+          <div class="rcpt-line">${partyLabel}&nbsp; :&nbsp; <b>${v.party || '—'}</b></div>
+          <table class="rcpt-table">
+            <tr><td style="width:65%;"><b>Particulars</b></td><td><b>Amount (₹)</b></td></tr>
+            <tr><td>${v.category}${v.description ? ' — ' + v.description : ''}<br><span style="font-size:8.5px; color:#666;">Account: ${v.costCenter || '—'}</span></td><td>${fmtMoney(v.amount)}</td></tr>
+          </table>
+          <div class="rcpt-line" style="margin-top:6px;">Amount in Words:&nbsp; ${amountWords}</div>
+          <div class="rcpt-line">Payment Mode:&nbsp; ${v.mode}${v.referenceNo ? ' (Ref: ' + v.referenceNo + ')' : ''}</div>
+          ${v.voided ? `<div class="rcpt-line" style="color:#b00; margin-top:6px;"><b>VOIDED${v.voidedBy?' by '+v.voidedBy:''}${v.voidedAt?' on '+new Date(v.voidedAt).toLocaleDateString():''}:</b> ${v.voidReason || ''}</div>` : ''}
+          <div class="rcpt-sign">
+            <div>Prepared by: ${v.addedBy || ''}</div>
+            <div>Authorised Signatory</div>
+          </div>
+          <div class="rcpt-note">System-generated voucher — for internal accounting records.</div>
         </div>
-        <div class="rcpt-title">${title}</div>
-        <div class="rcpt-row2col">
-          <div class="rcpt-row"><b>Voucher No:</b><span>${v.voucherNo}</span></div>
-          <div class="rcpt-row"><b>Date:</b><span>${v.date}</span></div>
-        </div>
-        <div class="rcpt-row"><b>${partyLabel}:</b><span>${v.party || '—'}</span></div>
-        <table class="rcpt-table">
-          <tr><td style="width:60%;"><b>Particulars</b></td><td><b>Amount (₹)</b></td></tr>
-          <tr><td>${v.category}${v.description ? ' — ' + v.description : ''}<br><span style="font-size:0.78rem; color:#666;">Account: ${v.costCenter || '—'}</span></td><td>${fmtMoney(v.amount)}</td></tr>
-        </table>
-        <div class="rcpt-row"><b>Amount in Words:</b><span>${amountWords}</span></div>
-        <div class="rcpt-row"><b>Payment Mode:</b><span>${v.mode}${v.referenceNo ? ' (Ref: ' + v.referenceNo + ')' : ''}</span></div>
-        ${v.voided ? `<div class="rcpt-line"></div><div class="rcpt-row" style="color:#b00;"><b>VOIDED${v.voidedBy?' by '+v.voidedBy:''}${v.voidedAt?' on '+new Date(v.voidedAt).toLocaleDateString():''}:</b><span>${v.voidReason || ''}</span></div>` : ''}
-        <div class="rcpt-line"></div>
-        <div class="rcpt-sign">
-          <div>Prepared by: ${v.addedBy || ''}</div>
-          <div>Authorised Signatory</div>
-        </div>
-        <div class="rcpt-note">This is a system-generated voucher and does not require a physical signature for internal accounting purposes.</div>
       </body></html>
     `);
     w.document.close();
