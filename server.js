@@ -13,11 +13,14 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { neon } from '@neondatabase/serverless';
+import { startVendorReporting, reportVendorError } from './vendor-reporting.js';
+import { handleVendorSupportLogin } from './vendor-support-login.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+startVendorReporting();
 // Default body-size limit (100kb) is far too small the moment any record
 // carries a photo or document as a base64 data URL (website gallery photos,
 // student/staff photos, ID card photos, admit-card signatures, admin
@@ -48,7 +51,15 @@ app.use(express.json({ limit: '25mb' }));
 // includes things like user records — stays inaccessible to any other site's
 // frontend code. Methods are scoped to what the website actually does with each:
 // it only submits inquiries (POST), and only reads everything else (GET).
-const WEBSITE_ORIGIN = 'https://raghavan-school-website.onrender.com';
+// Per-deployment value — set the WEBSITE_ORIGIN environment variable to this
+// school's public website URL (e.g. https://<school>-website.onrender.com).
+// Deliberately env-driven rather than hardcoded: this file is the shared ERP
+// template every school's Render service runs unmodified, so nothing here
+// should need a code edit per school. Left unset, these four endpoints simply
+// get no CORS header — the website's calls to them will fail closed (safe
+// default) until WEBSITE_ORIGIN is configured, rather than silently allowing
+// the wrong (or no) origin.
+const WEBSITE_ORIGIN = process.env.WEBSITE_ORIGIN || '';
 const WEBSITE_CORS_RULES = {
   '/api/admission-inquiries': 'POST, OPTIONS',
   '/api/comms-messages': 'GET, OPTIONS',
@@ -57,7 +68,7 @@ const WEBSITE_CORS_RULES = {
 };
 app.use((req, res, next) => {
   const allowedMethods = WEBSITE_CORS_RULES[req.path];
-  if (allowedMethods) {
+  if (allowedMethods && WEBSITE_ORIGIN) {
     res.header('Access-Control-Allow-Origin', WEBSITE_ORIGIN);
     res.header('Access-Control-Allow-Methods', allowedMethods);
     res.header('Access-Control-Allow-Headers', 'Content-Type');
@@ -464,6 +475,7 @@ async function destroySession(req, res) {
 const PUBLIC_API_ROUTES = [
   { path: '/api/login', methods: ['POST'] },
   { path: '/api/logout', methods: ['POST'] },
+  { path: '/api/vendor-support-login', methods: ['GET'] },
   { path: '/api/admission-inquiries', methods: ['POST'] },
   { path: '/api/comms-messages', methods: ['GET'] },
   { path: '/api/website-gallery', methods: ['GET'] },
@@ -1247,6 +1259,27 @@ app.post('/api/logout', async (req, res) => {
   }
 });
 
+app.get('/api/vendor-support-login', (req, res) => {
+  handleVendorSupportLogin(req.query.token, {
+    onValid: async (payload) => {
+      try {
+        await createSession(req, res, {
+          id: 'vendor-support',
+          role: 'Admin',
+          name: 'Vendor Support' + (payload && payload.adminName ? ` (${payload.adminName})` : ''),
+        });
+        res.redirect('/');
+      } catch (err) {
+        console.error('vendor support login error:', err);
+        res.status(500).send('Could not start the support session.');
+      }
+    },
+    onInvalid: (reason) => {
+      res.status(401).send('This support login link is invalid or has expired (' + reason + '). Ask your vendor to generate a new one.');
+    },
+  });
+});
+
 // Lets the page ask "am I still logged in, and as whom?" on load/refresh
 // instead of trusting a client-side flag — the auth middleware above has
 // already rejected this request with 401 if the session cookie is missing
@@ -1292,7 +1325,17 @@ app.get('/api/backup', async (req, res) => {
       const name = row.table_name;
       backup.tables[name] = await sql.query(`SELECT * FROM "${name}"`);
     }
-    const filename = `raghavan-erp-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    // Name the download after this school, not whichever school this shared
+    // template server was first written for — same slug logic as the
+    // frontend's slugifySchoolName().
+    let schoolSlug = 'school';
+    try {
+      const infoRows = await sql`SELECT data FROM school_info WHERE id = 1`;
+      const rawName = infoRows[0] && infoRows[0].data && infoRows[0].data.name;
+      const slug = String(rawName || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (slug) schoolSlug = slug;
+    } catch (e) { /* fall back to 'school' below */ }
+    const filename = `${schoolSlug}-erp-backup-${new Date().toISOString().slice(0, 10)}.json`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.status(200).json(backup);
   } catch (err) {
@@ -1405,6 +1448,7 @@ app.all('/api/:resource', async (req, res) => {
     return res.status(404).json({ error: `Unknown resource: ${resource}` });
   } catch (err) {
     console.error(`${resource} API error:`, err);
+    reportVendorError(err, { route: req.path });
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
