@@ -476,6 +476,7 @@ const PUBLIC_API_ROUTES = [
   { path: '/api/login', methods: ['POST'] },
   { path: '/api/logout', methods: ['POST'] },
   { path: '/api/vendor-support-login', methods: ['GET'] },
+  { path: '/api/vendor/admission-inquiries', methods: ['GET'] },
   { path: '/api/admission-inquiries', methods: ['POST'] },
   { path: '/api/comms-messages', methods: ['GET'] },
   { path: '/api/website-gallery', methods: ['GET'] },
@@ -1278,6 +1279,38 @@ app.get('/api/vendor-support-login', (req, res) => {
       res.status(401).send('This support login link is invalid or has expired (' + reason + '). Ask your vendor to generate a new one.');
     },
   });
+});
+
+// Lets the vendor dashboard read this school's public admission enquiries
+// (submitted through this school's own website) without logging in as this
+// school's staff — authenticated by the same VENDOR_API_KEY env var
+// vendor-support-login.js and vendor-reporting.js already use, sent as a
+// plain header since this is a direct server-to-server call, not a link a
+// person clicks. Read-only: nothing here can create, edit, or delete an
+// enquiry, only list what's already been submitted.
+app.get('/api/vendor/admission-inquiries', async (req, res) => {
+  try {
+    const key = req.headers['x-vendor-api-key'];
+    if (!process.env.VENDOR_API_KEY || !key || key !== process.env.VENDOR_API_KEY) {
+      return res.status(401).json({ error: 'Invalid or missing vendor API key.' });
+    }
+    const rows = await sql`SELECT * FROM admission_inquiries ORDER BY created_at DESC LIMIT 500`;
+    return res.status(200).json(rows.map(r => ({
+      id: r.id,
+      parentName: r.parent_name,
+      parentEmail: r.parent_email,
+      parentPhone: r.parent_phone,
+      studentName: r.student_name,
+      applyingGrade: r.applying_grade,
+      notes: r.notes,
+      submittedDate: r.submitted_date,
+      status: r.status,
+      createdAt: r.created_at,
+    })));
+  } catch (err) {
+    console.error('vendor admission-inquiries error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
 });
 
 // Lets the page ask "am I still logged in, and as whom?" on load/refresh
