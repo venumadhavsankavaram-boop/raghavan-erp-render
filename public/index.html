@@ -811,7 +811,7 @@
      After that, updating colours is just: change them in the builder,
      re-download the website + theme.json, re-upload both. This page never
      needs to be touched or redeployed again for a colour change. */
-  var WEBSITE_ORIGIN = 'https://raghavan-school-website.onrender.com';
+  var WEBSITE_ORIGIN = '';
   (function(){
     if(!WEBSITE_ORIGIN) return;
     function hexToRgbArr(hex){
@@ -994,6 +994,7 @@
       <button class="sb-link" id="navNoticeBoard" onclick="switchView('noticeboard')"><span class="dot"></span> Notice Board</button>
       <button class="sb-link" id="navWebsiteInquiries" onclick="switchView('websiteinquiries')"><span class="dot"></span> Website Inquiries</button>
       <button class="sb-link" id="navWebsiteGallery" onclick="switchView('websitegallery')"><span class="dot"></span> Website Gallery</button>
+      <button class="sb-link" id="navContactVendor" onclick="switchView('contactvendor')"><span class="dot"></span> Contact Vendor</button>
     </div>
     <button type="button" class="sb-section-toggle" id="sbToggle-finance" onclick="toggleSbSection('finance')">Finance <span class="sb-chevron" id="sbChevron-finance">▾</span></button>
     <div class="sb-section-group" id="sbGroup-finance">
@@ -1436,6 +1437,32 @@
     <div id="view-websitegallery" style="display:none;">
       <div class="topbar"><div><h1>Website Gallery</h1><p>Photos shown on the public website's Gallery section, grouped by category.</p></div></div>
       <div id="websiteGalleryBody"></div>
+    </div>
+
+    <div id="view-contactvendor" style="display:none;">
+      <div class="topbar"><div><h1>Contact Vendor</h1><p>Send a support issue or customization request straight to your vendor — it lands in their dashboard against this school, and they can reply from there.</p></div></div>
+      <div class="profile-card" style="max-width:560px;">
+        <div class="form-grid">
+          <div class="f-field full"><label>Subject *</label><input type="text" id="cvSubject" maxlength="300" placeholder="Short summary, e.g. Need a new fee report format"></div>
+          <div class="f-field">
+            <label>Type</label>
+            <select id="cvType">
+              <option value="support">Support issue</option>
+              <option value="customization">Customization request</option>
+            </select>
+          </div>
+          <div class="f-field">
+            <label>Priority</label>
+            <select id="cvPriority">
+              <option value="low">Low</option>
+              <option value="normal" selected>Normal</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+          <div class="f-field full"><label>Message *</label><textarea id="cvMessage" rows="6" placeholder="Describe what you need, or what isn't working..."></textarea></div>
+        </div>
+        <button class="btn btn-primary btn-sm" style="margin-top:14px;" onclick="submitContactVendor()">Send to Vendor</button>
+      </div>
     </div>
 
     <div id="view-myaccount" style="display:none;">
@@ -2234,7 +2261,7 @@
     dashboard:'overview',
     admissions:'academics', attendance:'academics', subjects:'academics', exams:'academics', result:'academics', timetable:'academics', syllabus:'academics', promotransfer:'academics', myprofile:'academics',
     managefee:'finance', accounting:'finance',
-    announcements:'communication', noticeboard:'communication', websiteinquiries:'communication', websitegallery:'communication',
+    announcements:'communication', noticeboard:'communication', websiteinquiries:'communication', websitegallery:'communication', contactvendor:'communication',
     staffdirectory:'staffsec', staffdepts:'staffsec', staffidcards:'staffsec', staffpayroll:'staffsec', staffattendance:'staffsec', staffreports:'staffsec',
     inventory:'facilities', transport:'facilities', library:'facilities', hostel:'facilities',
     reports:'reportssec',
@@ -2452,8 +2479,8 @@
   const USERS_KEY = "erp-users";
   const ROLES = ["Admin","Principal","Accountant","Office Assistant","Teacher","Staff","Student","Parent"];
   const ROLE_VIEWS = {
-    Admin: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','noticeboard','websiteinquiries','websitegallery','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
-    Principal: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','noticeboard','websiteinquiries','websitegallery','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
+    Admin: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
+    Principal: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
     Accountant: ['dashboard','admissions','managefee','accounting','reports','inventory','transport'],
     'Office Assistant': ['admissions'],
     Teacher: ['admissions','attendance','exams','subjects','result','timetable','syllabus','library','announcements'],
@@ -2515,6 +2542,7 @@
     { key:'noticeboard_headings', label:'Manage Headings',     icon:'🏷️', category:'Communication', parent:'noticeboard', isNew:true },
     { key:'websiteinquiries', label:'Website Inquiries', icon:'🌐', category:'Communication' },
     { key:'websitegallery', label:'Website Gallery',   icon:'🖼️', category:'Communication' },
+    { key:'contactvendor', label:'Contact Vendor',   icon:'✉️', category:'Communication' },
 
     { key:'managefee',   label:'Manage Fee',         icon:'💰', category:'Finance' },
     { key:'managefee_collection', label:'Fee Collection & Receipts', icon:'💳', category:'Finance', parent:'managefee', isNew:true },
@@ -3101,6 +3129,7 @@
     document.getElementById('navNoticeBoard').style.display = allowed.includes('noticeboard') ? 'flex' : 'none';
     document.getElementById('navWebsiteInquiries').style.display = allowed.includes('websiteinquiries') ? 'flex' : 'none';
     document.getElementById('navWebsiteGallery').style.display = allowed.includes('websitegallery') ? 'flex' : 'none';
+    document.getElementById('navContactVendor').style.display = allowed.includes('contactvendor') ? 'flex' : 'none';
     document.getElementById('navMyProfile').style.display = allowed.includes('myprofile') ? 'flex' : 'none';
     document.getElementById('sbUserName').textContent = currentUser.name;
     document.getElementById('sbUserRole').textContent = currentUser.role;
@@ -3195,6 +3224,7 @@
     document.getElementById('view-noticeboard').style.display = view === 'noticeboard' ? 'block' : 'none';
     document.getElementById('view-websiteinquiries').style.display = view === 'websiteinquiries' ? 'block' : 'none';
     document.getElementById('view-websitegallery').style.display = view === 'websitegallery' ? 'block' : 'none';
+    document.getElementById('view-contactvendor').style.display = view === 'contactvendor' ? 'block' : 'none';
     document.getElementById('view-myaccount').style.display = view === 'myaccount' ? 'block' : 'none';
     document.getElementById('view-myprofile').style.display = view === 'myprofile' ? 'block' : 'none';
     document.getElementById('navDashboard').classList.toggle('active', view === 'dashboard');
@@ -3232,6 +3262,7 @@
     document.getElementById('navNoticeBoard').classList.toggle('active', view === 'noticeboard');
     document.getElementById('navWebsiteInquiries').classList.toggle('active', view === 'websiteinquiries');
     document.getElementById('navWebsiteGallery').classList.toggle('active', view === 'websitegallery');
+    document.getElementById('navContactVendor').classList.toggle('active', view === 'contactvendor');
     document.getElementById('navMyProfile').classList.toggle('active', view === 'myprofile');
     if(view === 'dashboard') renderDashboard();
     if(view === 'admissions'){ admissionsView = 'grid'; renderAdmissionsBody(); }
@@ -3263,6 +3294,7 @@
     if(view === 'noticeboard'){ initNoticeBoardView(); }
     if(view === 'websiteinquiries'){ initWebsiteInquiriesView(); }
     if(view === 'websitegallery'){ initWebsiteGalleryView(); }
+    if(view === 'contactvendor'){ resetContactVendorForm(); }
     if(view === 'myaccount'){ initMyAccountView(); }
     if(view === 'myprofile'){ switchMyProfileTab(myProfileTab); }
   }
@@ -3535,6 +3567,15 @@
 
   function fmtMoney(n){
     return '₹' + Number(n||0).toLocaleString('en-IN');
+  }
+  // Turns this school's own name into a filename-safe slug, for exports
+  // (backup JSON, Excel templates) — so every school's downloads are named
+  // after itself instead of carrying another school's name, without this
+  // shared template file ever needing a per-school edit.
+  function slugifySchoolName(){
+    const base = (schoolInfo && schoolInfo.name || 'school').toLowerCase().trim()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return base || 'school';
   }
   // Escapes text before it's dropped into a template-literal innerHTML
   // string, so a value containing "<", ">", "&", quotes, etc. renders as
@@ -11431,6 +11472,39 @@
     editingNoticeId = '';
     renderNoticeBoard(document.getElementById('noticeBoardBody'));
   }
+  function resetContactVendorForm(){
+    const subj = document.getElementById('cvSubject');
+    const type = document.getElementById('cvType');
+    const pri = document.getElementById('cvPriority');
+    const msg = document.getElementById('cvMessage');
+    if(subj) subj.value = '';
+    if(type) type.value = 'support';
+    if(pri) pri.value = 'normal';
+    if(msg) msg.value = '';
+  }
+  async function submitContactVendor(){
+    const subject = (document.getElementById('cvSubject').value || '').trim();
+    const message = (document.getElementById('cvMessage').value || '').trim();
+    const type = document.getElementById('cvType').value;
+    const priority = document.getElementById('cvPriority').value;
+    if(!subject){ showToast('Please enter a subject.'); return; }
+    if(!message){ showToast('Please describe your issue or request.'); return; }
+    const btn = event && event.target;
+    if(btn) btn.disabled = true;
+    try{
+      await throwIfNotOk(await fetch('/api/contact-vendor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...actorHeaders() },
+        body: JSON.stringify({ subject, message, type, priority })
+      }));
+      showToast('Sent to your vendor — they will respond from their dashboard.');
+      resetContactVendorForm();
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not send your request. Please try again.');
+    }finally{
+      if(btn) btn.disabled = false;
+    }
+  }
   async function generateSyncTestCode(){
     const code = Math.random().toString(36).slice(2,8).toUpperCase();
     await storageSet(WEBSITE_SYNC_TEST_KEY, { code, generatedAt: new Date().toISOString() });
@@ -13209,7 +13283,7 @@
       <div class="breadcrumb"><a onclick="backToRoutesList()">Routes</a> &nbsp;/&nbsp; ${r ? r.name : 'New Route'}</div>
       <div class="profile-card" style="max-width:640px;">
         <div class="form-grid" style="margin-bottom:16px;">
-          <div class="f-field full"><label>Route Name *</label><input type="text" id="trRouteName" value="${trEditName}" placeholder="e.g. Route 1 — B. Kotha Kota Town"></div>
+          <div class="f-field full"><label>Route Name *</label><input type="text" id="trRouteName" value="${trEditName}" placeholder="e.g. Route 1 — Main Market Stop"></div>
           <div class="f-field"><label>Bus Number</label><input type="text" id="trBusNumber" value="${trEditBusNumber}" placeholder="e.g. AP 03 TZ 4521"></div>
           <div class="f-field"><label>Driver Name</label><input type="text" id="trDriverName" value="${trEditDriverName}" placeholder="e.g. Ramesh Kumar"></div>
           <div class="f-field"><label>Driver Phone</label><input type="text" id="trDriverPhone" value="${trEditDriverPhone}" placeholder="10-digit mobile"></div>
@@ -14918,7 +14992,7 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `raghavan-erp-backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.download = `${slugifySchoolName()}-erp-backup-${new Date().toISOString().slice(0,10)}.json`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -15188,6 +15262,8 @@
     document.title = (schoolInfo.name || 'Your School') + ' — ERP';
     const loginNameEl = document.getElementById('loginSchoolName');
     if(loginNameEl && schoolInfo.name) loginNameEl.textContent = schoolInfo.name;
+    const loginLogoEl = document.getElementById('loginLogoImg');
+    if(loginLogoEl && schoolInfo.logo) loginLogoEl.src = schoolInfo.logo;
   }
   function schoolLogoSrc(){
     return schoolLogoData || schoolInfo.logo || document.getElementById('sbLogoImg').src;
@@ -16893,8 +16969,8 @@
 
   async function downloadImportTemplate(){
     if(!(await ensureXLSX())) return;
-    const newRow = ['','Priya','Kumar','5th Class','A','Female','2015-06-12','priya@example.com','2026-06-01','B+','OC','Hindu','K. Ramesh','9876543210','K. Sita','9876500000','B. Kotha Kota','No','Active'];
-    const updateRow = ['RGV2026-001','Arjun','Rao','6th Class','A','Male','2014-03-20','arjun@example.com','2025-06-01','O+','BC-A','Hindu','K. Suresh','9876500001','K. Latha','9876500002','B. Kotha Kota','Yes','Active'];
+    const newRow = ['','Priya','Kumar','5th Class','A','Female','2015-06-12','priya@example.com','2026-06-01','B+','OC','Hindu','K. Ramesh','9876543210','K. Sita','9876500000','Main Bus Stand','No','Active'];
+    const updateRow = ['2026-001','Arjun','Rao','6th Class','A','Male','2014-03-20','arjun@example.com','2025-06-01','O+','BC-A','Hindu','K. Suresh','9876500001','K. Latha','9876500002','Main Bus Stand','Yes','Active'];
     const ws = XLSX.utils.aoa_to_sheet([
       IMPORT_TEMPLATE_HEADERS,
       newRow,
@@ -16905,7 +16981,7 @@
     ws['!cols'] = IMPORT_TEMPLATE_HEADERS.map(h => ({ wch: Math.max(14, h.length+2) }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Students');
-    XLSX.writeFile(wb, 'raghavan_student_import_template.xlsx');
+    XLSX.writeFile(wb, `${slugifySchoolName()}_student_import_template.xlsx`);
     showToast('Template downloaded — fill it in and use "Import Students (Excel)".');
     document.getElementById('moreActionsMenu').classList.remove('open');
   }
@@ -16927,7 +17003,7 @@
     ws['!cols'] = Object.keys(rows[0]).map(h => ({ wch: Math.max(14, h.length+2) }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Students');
-    XLSX.writeFile(wb, 'raghavan_students.xlsx');
+    XLSX.writeFile(wb, `${slugifySchoolName()}_students.xlsx`);
     document.getElementById('moreActionsMenu').classList.remove('open');
   }
 

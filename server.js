@@ -1313,6 +1313,59 @@ app.get('/api/vendor/admission-inquiries', async (req, res) => {
   }
 });
 
+// Lets a signed-in staff member send a message directly to the vendor from
+// inside the ERP (see the "Contact Vendor" screen) — it lands in the vendor
+// dashboard's Support tab against this school, so the vendor can see it and
+// reply. Uses the same VENDOR_DASHBOARD_URL / VENDOR_SCHOOL_ID /
+// VENDOR_API_KEY env vars the silent background reporting in
+// vendor-reporting.js already relies on, but unlike that module this is NOT
+// silent — whoever submits it needs to know whether it actually went
+// through, so errors are reported back rather than swallowed.
+app.post('/api/contact-vendor', async (req, res) => {
+  try {
+    const dashboardUrl = process.env.VENDOR_DASHBOARD_URL;
+    const schoolId = process.env.VENDOR_SCHOOL_ID;
+    const apiKey = process.env.VENDOR_API_KEY;
+    if (!dashboardUrl || !schoolId || !apiKey) {
+      return res.status(400).json({ error: 'Vendor contact is not configured on this ERP yet — ask your vendor to set VENDOR_DASHBOARD_URL, VENDOR_SCHOOL_ID, and VENDOR_API_KEY.' });
+    }
+    const { subject, message, priority, type } = req.body || {};
+    if (!subject || !String(subject).trim()) return res.status(400).json({ error: 'Subject is required.' });
+    if (!message || !String(message).trim()) return res.status(400).json({ error: 'Message is required.' });
+    const submittedBy = req.authUser ? `${req.authUser.name} (${req.authUser.role})` : 'ERP staff';
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let upstream;
+    try {
+      upstream = await fetch(dashboardUrl.replace(/\/$/, '') + '/api/ingest/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schoolId,
+          apiKey,
+          subject: String(subject).trim().slice(0, 300),
+          message: `From: ${submittedBy}\n\n${String(message).trim().slice(0, 3900)}`,
+          priority: ['low', 'normal', 'high'].includes(priority) ? priority : 'normal',
+          type: type === 'customization' ? 'customization' : 'support',
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!upstream.ok) {
+      const text = await upstream.text().catch(() => '');
+      let errMsg = 'The vendor dashboard rejected this message.';
+      try { const parsed = JSON.parse(text); if (parsed && parsed.error) errMsg = parsed.error; } catch {}
+      return res.status(502).json({ error: errMsg });
+    }
+    return res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error('contact-vendor error:', err);
+    return res.status(502).json({ error: 'Could not reach the vendor dashboard — it may be offline. Please try again shortly.' });
+  }
+});
+
 // Lets the page ask "am I still logged in, and as whom?" on load/refresh
 // instead of trusting a client-side flag — the auth middleware above has
 // already rejected this request with 401 if the session cookie is missing
