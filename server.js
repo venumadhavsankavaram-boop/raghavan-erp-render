@@ -1289,6 +1289,14 @@ app.get('/api/vendor-support-login', (req, res) => {
 // on the next page load, same shape /api/login returns.
 app.get('/api/me', async (req, res) => {
   try {
+    // A Vendor Support session (see vendor-support-login.js) is never a row
+    // in `users` — it's a temporary, vendor-issued identity, not a school
+    // staff account. Answer it straight from the session instead of
+    // re-querying `users`, or every support-login would 401 right back out
+    // to the login screen the instant the page called this on load.
+    if (req.authUser.id === 'vendor-support') {
+      return res.status(200).json({ id: 'vendor-support', role: req.authUser.role, name: req.authUser.name });
+    }
     const rows = await sql`SELECT * FROM users WHERE id = ${req.authUser.id}`;
     if (!rows.length) return res.status(401).json({ error: 'Account no longer exists.' });
     const shaped = simpleToAppShape(rows[0], SIMPLE_RESOURCES.users.fields);
