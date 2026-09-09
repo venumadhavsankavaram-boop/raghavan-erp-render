@@ -991,6 +991,7 @@
     <button type="button" class="sb-section-toggle" id="sbToggle-communication" onclick="toggleSbSection('communication')">Communication <span class="sb-chevron" id="sbChevron-communication">▾</span></button>
     <div class="sb-section-group" id="sbGroup-communication">
       <button class="sb-link" id="navAnnouncements" onclick="switchView('announcements')"><span class="dot"></span> Communications</button>
+      <button class="sb-link" id="navInbox" onclick="switchView('inbox')"><span class="dot"></span> Inbox</button>
       <button class="sb-link" id="navNoticeBoard" onclick="switchView('noticeboard')"><span class="dot"></span> Notice Board</button>
       <button class="sb-link" id="navWebsiteInquiries" onclick="switchView('websiteinquiries')"><span class="dot"></span> Website Inquiries</button>
       <button class="sb-link" id="navWebsiteGallery" onclick="switchView('websitegallery')"><span class="dot"></span> Website Gallery</button>
@@ -1465,6 +1466,15 @@
       </div>
     </div>
 
+    <div id="view-inbox" style="display:none;">
+      <div class="topbar"><div><h1>Inbox</h1><p>Concerns and homework/holiday-work submissions sent to you as Class Teacher, Subject Teacher, or Management.</p></div></div>
+      <div class="mf-tabs">
+        <button type="button" class="mf-tab active" id="inboxtab-concerns" onclick="switchInboxTab('concerns')">💬 Concerns</button>
+        <button type="button" class="mf-tab" id="inboxtab-submissions" onclick="switchInboxTab('submissions')">📥 Submissions</button>
+      </div>
+      <div id="inboxBody"></div>
+    </div>
+
     <div id="view-myaccount" style="display:none;">
       <div class="topbar"><div><h1>My Account</h1><p>Your profile photo, name, and login password.</p></div></div>
       <div id="myAccountBody"></div>
@@ -1485,6 +1495,7 @@
         <button type="button" class="mf-tab" id="mptab-marks" onclick="switchMyProfileTab('marks')">📝 Marks</button>
         <button type="button" class="mf-tab" id="mptab-classinfo" onclick="switchMyProfileTab('classinfo')">🗓️ Class &amp; Timetable</button>
         <button type="button" class="mf-tab" id="mptab-syllabushw" onclick="switchMyProfileTab('syllabushw')">📔 Syllabus &amp; Homework</button>
+        <button type="button" class="mf-tab" id="mptab-contact" onclick="switchMyProfileTab('contact')">💬 Contact &amp; Submit</button>
         <button type="button" class="mf-tab" id="mptab-notices" onclick="switchMyProfileTab('notices')">📌 Notices</button>
       </div>
 
@@ -2261,7 +2272,7 @@
     dashboard:'overview',
     admissions:'academics', attendance:'academics', subjects:'academics', exams:'academics', result:'academics', timetable:'academics', syllabus:'academics', promotransfer:'academics', myprofile:'academics',
     managefee:'finance', accounting:'finance',
-    announcements:'communication', noticeboard:'communication', websiteinquiries:'communication', websitegallery:'communication', contactvendor:'communication',
+    announcements:'communication', inbox:'communication', noticeboard:'communication', websiteinquiries:'communication', websitegallery:'communication', contactvendor:'communication',
     staffdirectory:'staffsec', staffdepts:'staffsec', staffidcards:'staffsec', staffpayroll:'staffsec', staffattendance:'staffsec', staffreports:'staffsec',
     inventory:'facilities', transport:'facilities', library:'facilities', hostel:'facilities',
     reports:'reportssec',
@@ -2479,12 +2490,12 @@
   const USERS_KEY = "erp-users";
   const ROLES = ["Admin","Principal","Accountant","Office Assistant","Teacher","Staff","Student","Parent"];
   const ROLE_VIEWS = {
-    Admin: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
-    Principal: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
+    Admin: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','inbox','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
+    Principal: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','inbox','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
     Accountant: ['dashboard','admissions','managefee','accounting','reports','inventory','transport'],
     'Office Assistant': ['admissions'],
-    Teacher: ['admissions','attendance','exams','subjects','result','timetable','syllabus','library','announcements'],
-    Staff: ['admissions','attendance'],
+    Teacher: ['admissions','attendance','exams','subjects','result','timetable','syllabus','library','announcements','inbox'],
+    Staff: ['admissions','attendance','inbox'],
     Student: ['myprofile'],
     Parent: ['myprofile'],
   };
@@ -2537,6 +2548,7 @@
     { key:'announcements', label:'Communications',    icon:'📣', category:'Communication' },
     { key:'comms_compose',  label:'Compose & Send',    icon:'✍️', category:'Communication', parent:'announcements', isNew:true },
     { key:'comms_log',      label:'Message Log',       icon:'🗂️', category:'Communication', parent:'announcements', isNew:true },
+    { key:'inbox',       label:'Inbox',              icon:'📥', category:'Communication', isNew:true },
     { key:'noticeboard', label:'Notice Board',         icon:'📌', category:'Communication' },
     { key:'noticeboard_post',     label:'Post / Edit Notices', icon:'✍️', category:'Communication', parent:'noticeboard', isNew:true },
     { key:'noticeboard_headings', label:'Manage Headings',     icon:'🏷️', category:'Communication', parent:'noticeboard', isNew:true },
@@ -3126,6 +3138,7 @@
     document.getElementById('navHostel').style.display = allowed.includes('hostel') ? 'flex' : 'none';
     document.getElementById('navAccounting').style.display = allowed.includes('accounting') ? 'flex' : 'none';
     document.getElementById('navAnnouncements').style.display = allowed.includes('announcements') ? 'flex' : 'none';
+    document.getElementById('navInbox').style.display = allowed.includes('inbox') ? 'flex' : 'none';
     document.getElementById('navNoticeBoard').style.display = allowed.includes('noticeboard') ? 'flex' : 'none';
     document.getElementById('navWebsiteInquiries').style.display = allowed.includes('websiteinquiries') ? 'flex' : 'none';
     document.getElementById('navWebsiteGallery').style.display = allowed.includes('websitegallery') ? 'flex' : 'none';
@@ -3221,6 +3234,7 @@
     document.getElementById('view-hostel').style.display = view === 'hostel' ? 'block' : 'none';
     document.getElementById('view-accounting').style.display = view === 'accounting' ? 'block' : 'none';
     document.getElementById('view-announcements').style.display = view === 'announcements' ? 'block' : 'none';
+    document.getElementById('view-inbox').style.display = view === 'inbox' ? 'block' : 'none';
     document.getElementById('view-noticeboard').style.display = view === 'noticeboard' ? 'block' : 'none';
     document.getElementById('view-websiteinquiries').style.display = view === 'websiteinquiries' ? 'block' : 'none';
     document.getElementById('view-websitegallery').style.display = view === 'websitegallery' ? 'block' : 'none';
@@ -3259,6 +3273,7 @@
     document.getElementById('navHostel').classList.toggle('active', view === 'hostel');
     document.getElementById('navAccounting').classList.toggle('active', view === 'accounting');
     document.getElementById('navAnnouncements').classList.toggle('active', view === 'announcements');
+    document.getElementById('navInbox').classList.toggle('active', view === 'inbox');
     document.getElementById('navNoticeBoard').classList.toggle('active', view === 'noticeboard');
     document.getElementById('navWebsiteInquiries').classList.toggle('active', view === 'websiteinquiries');
     document.getElementById('navWebsiteGallery').classList.toggle('active', view === 'websitegallery');
@@ -3291,6 +3306,7 @@
     if(view === 'hostel'){ initHostelView(); }
     if(view === 'accounting'){ initAccountingView(); }
     if(view === 'announcements'){ initCommsView(); }
+    if(view === 'inbox'){ initInboxView(); }
     if(view === 'noticeboard'){ initNoticeBoardView(); }
     if(view === 'websiteinquiries'){ initWebsiteInquiriesView(); }
     if(view === 'websitegallery'){ initWebsiteGalleryView(); }
@@ -16345,7 +16361,7 @@
   let myProfileTab = 'notifications';
   function switchMyProfileTab(tab){
     myProfileTab = tab;
-    ['notifications','profile','fees','marks','classinfo','syllabushw','notices'].forEach(t => {
+    ['notifications','profile','fees','marks','classinfo','syllabushw','contact','notices'].forEach(t => {
       const el = document.getElementById('mptab-'+t);
       if(el) el.classList.toggle('active', t===tab);
     });
@@ -16368,6 +16384,11 @@
     if(myProfileTab === 'marks') return renderMyMarksTab(body, s);
     if(myProfileTab === 'classinfo') return renderMyClassInfoTab(body, s);
     if(myProfileTab === 'syllabushw') return renderMySyllabusHomeworkTab(body, s);
+    if(myProfileTab === 'contact'){
+      body.innerHTML = '<div class="empty-state">Loading…</div>';
+      loadMyContactData().then(() => { if(myProfileTab === 'contact') renderMyContactTab(body, s); });
+      return;
+    }
     if(myProfileTab === 'notices') return renderMyNoticesTab(body);
   }
 
@@ -16588,6 +16609,341 @@
       <div class="dash-section-title" style="margin-top:24px;"><div><h3>Syllabus Progress</h3></div></div>
       ${syllabusHtml}
     `;
+  }
+
+  /* --- Contact & Submit tab: a Student/Parent reaching out to their Class
+     Teacher, a Subject Teacher, or Management with a concern, and/or
+     submitting completed homework or holiday work the same way. Recipients
+     are resolved from the same staffList/subjectsList data already used
+     elsewhere (classTeacherClass/classTeacherSection, subjectStaffForSection)
+     so this never needs its own separate assignment step. History for both
+     is loaded fresh from the server each time this tab is opened. --- */
+  let myConcerns = [];
+  let mySubmissions = [];
+  let submissionAttachmentData = '';
+  async function loadMyContactData(){
+    try{
+      const res = await throwIfNotOk(await fetch('/api/concerns/mine', { headers: actorHeaders() }));
+      myConcerns = await res.json();
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not load your concerns.');
+      myConcerns = [];
+    }
+    try{
+      const res = await throwIfNotOk(await fetch('/api/submissions/mine', { headers: actorHeaders() }));
+      mySubmissions = await res.json();
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not load your submissions.');
+      mySubmissions = [];
+    }
+  }
+  function recipientLabelFor(item){
+    if(item.recipientType === 'management') return 'Management';
+    if(item.recipientType === 'subject_teacher') return 'Subject Teacher' + (item.subjectName ? ' — '+item.subjectName : '');
+    return 'Class Teacher';
+  }
+  // Value shape: "<recipientType>::<staffId>::<subjectName>" — everything a
+  // single <select> option needs to carry, parsed back apart on submit.
+  function parseRecipientValue(v){
+    if(!v) return null;
+    const i1 = v.indexOf('::');
+    if(i1 === -1) return null;
+    const recipientType = v.slice(0, i1);
+    const rest = v.slice(i1 + 2);
+    const i2 = rest.indexOf('::');
+    const recipientStaffId = i2 === -1 ? rest : rest.slice(0, i2);
+    const subjectName = i2 === -1 ? '' : rest.slice(i2 + 2);
+    return { recipientType, recipientStaffId, subjectName };
+  }
+  function myContactRecipientOptionsHtml(s){
+    const classTeacher = staffList.find(st => st.classTeacherClass===s.className && st.classTeacherSection===s.section && staffIsActive(st));
+    const subjectOpts = [];
+    subjectsList.filter(sub => sub.className === s.className).forEach(sub => {
+      subjectStaffForSection(sub, s.section).forEach(staffId => {
+        const st = staffList.find(x => x.id === staffId && staffIsActive(x));
+        if(st) subjectOpts.push({ subjectName: sub.name, staffId: st.id, staffName: st.firstName+' '+st.lastName });
+      });
+    });
+    return `
+      <option value="">Select recipient</option>
+      <option value="class_teacher::${classTeacher ? classTeacher.id : ''}::" ${!classTeacher ? 'disabled' : ''}>Class Teacher${classTeacher ? ' — '+classTeacher.firstName+' '+classTeacher.lastName : ' (not assigned yet)'}</option>
+      ${subjectOpts.length ? `<optgroup label="Subject Teacher">${subjectOpts.map(o => `<option value="subject_teacher::${o.staffId}::${o.subjectName}">${o.subjectName} — ${o.staffName}</option>`).join('')}</optgroup>` : ''}
+      <option value="management::::">Management (Admin / Principal)</option>
+    `;
+  }
+  function renderMyContactTab(body, s){
+    const recipientOptionsHtml = myContactRecipientOptionsHtml(s);
+    const relevantHomework = homeworkItems.filter(h => h.className===s.className && (!h.section || h.section===s.section));
+    const homeworkOptionsHtml = relevantHomework.map(h => `<option value="${h.id}">${h.subject} — ${h.title}${h.dueDate ? ' (due '+h.dueDate+')' : ''}</option>`).join('');
+
+    const concernsSorted = [...myConcerns].sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
+    const concernsHistoryHtml = concernsSorted.length ? concernsSorted.map(c => `
+      <div class="profile-card" style="margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+          <div>
+            <span class="pill" style="font-size:0.6rem;">${recipientLabelFor(c)}</span>
+            <p style="font-size:0.85rem; white-space:pre-wrap; margin:6px 0 2px;">${c.message}</p>
+            <p style="font-size:0.7rem; color:var(--ink-soft); margin:0;">${c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</p>
+          </div>
+          <span class="pill" style="${c.status==='open' ? '' : 'background:rgba(19,145,127,0.15); color:var(--teal);'}">${c.status==='open' ? 'Awaiting reply' : 'Resolved'}</span>
+        </div>
+        ${c.replyMessage ? `<div style="margin-top:8px; padding:8px 10px; background:var(--cream); border-radius:8px; font-size:0.82rem; white-space:pre-wrap;"><b>${c.repliedBy||'Reply'}:</b> ${c.replyMessage}</div>` : ''}
+      </div>
+    `).join('') : `<div class="empty-state"><b>No concerns sent yet</b></div>`;
+
+    const submissionsSorted = [...mySubmissions].sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
+    const submissionsHistoryHtml = submissionsSorted.length ? submissionsSorted.map(sub => `
+      <div class="profile-card" style="margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+          <div>
+            <span class="pill" style="font-size:0.6rem;">${recipientLabelFor(sub)}</span>
+            <h4 style="margin:6px 0 2px;">${sub.title}</h4>
+            ${sub.description ? `<p style="font-size:0.82rem; white-space:pre-wrap; margin:2px 0;">${sub.description}</p>` : ''}
+            ${sub.attachment ? `<a href="${sub.attachment}" target="_blank" rel="noopener" class="pill" style="text-decoration:none;">📎 Attachment</a>` : ''}
+            <p style="font-size:0.7rem; color:var(--ink-soft); margin:6px 0 0;">${sub.createdAt ? new Date(sub.createdAt).toLocaleString() : ''}</p>
+          </div>
+          <span class="pill" style="${sub.status==='submitted' ? '' : 'background:rgba(19,145,127,0.15); color:var(--teal);'}">${sub.status==='submitted' ? 'Submitted' : 'Reviewed'}</span>
+        </div>
+        ${sub.feedback ? `<div style="margin-top:8px; padding:8px 10px; background:var(--cream); border-radius:8px; font-size:0.82rem; white-space:pre-wrap;"><b>${sub.reviewedBy||'Feedback'}:</b> ${sub.feedback}</div>` : ''}
+      </div>
+    `).join('') : `<div class="empty-state"><b>No work submitted yet</b></div>`;
+
+    submissionAttachmentData = '';
+    body.innerHTML = `
+      <div class="dash-section-title"><div><h3>Contact a Teacher or Management</h3></div></div>
+      <div class="profile-card" style="margin-bottom:20px;">
+        <div class="form-grid">
+          <div class="f-field full"><label>Send to</label><select id="concernRecipientSel">${recipientOptionsHtml}</select></div>
+          <div class="f-field full"><label>Your message *</label><textarea id="concernMessageInput" rows="4" placeholder="Describe your concern..."></textarea></div>
+        </div>
+        <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="submitConcern()">Send</button>
+      </div>
+      ${concernsHistoryHtml}
+
+      <div class="dash-section-title" style="margin-top:28px;"><div><h3>Submit Homework / Holiday Work</h3></div></div>
+      <div class="profile-card" style="margin-bottom:20px;">
+        <div class="form-grid">
+          <div class="f-field full"><label>Send to</label><select id="submissionRecipientSel">${recipientOptionsHtml}</select></div>
+          ${homeworkOptionsHtml ? `<div class="f-field full"><label>Which homework is this for? (optional)</label><select id="submissionHomeworkSel"><option value="">Not listed / holiday work</option>${homeworkOptionsHtml}</select></div>` : ''}
+          <div class="f-field full"><label>Title *</label><input type="text" id="submissionTitleInput" placeholder="e.g. Maths worksheet, Holiday project"></div>
+          <div class="f-field full"><label>Notes</label><textarea id="submissionDescInput" rows="3" placeholder="Anything you'd like to add..."></textarea></div>
+          <div class="f-field full">
+            <label>Attach a photo or file (optional, under 8MB)</label>
+            <input type="file" id="submissionAttachmentInput" accept="image/*,.pdf,.doc,.docx" onchange="previewSubmissionAttachment(event)">
+            <div id="submissionAttachmentPreview" style="margin-top:6px; font-size:0.78rem; color:var(--ink-soft);"></div>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="submitWork()">Submit</button>
+      </div>
+      ${submissionsHistoryHtml}
+    `;
+  }
+  function previewSubmissionAttachment(e){
+    const file = e.target.files[0];
+    const preview = document.getElementById('submissionAttachmentPreview');
+    if(!file){ submissionAttachmentData=''; if(preview) preview.textContent=''; return; }
+    if(file.size > 8*1024*1024){
+      showToast('Please choose a file under 8MB.');
+      e.target.value = '';
+      submissionAttachmentData = '';
+      if(preview) preview.textContent = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = evt => {
+      submissionAttachmentData = evt.target.result;
+      if(preview) preview.textContent = 'Selected: ' + file.name;
+    };
+    reader.readAsDataURL(file);
+  }
+  async function submitConcern(){
+    const sel = document.getElementById('concernRecipientSel');
+    const parsed = parseRecipientValue(sel ? sel.value : '');
+    if(!parsed){ showToast('Please choose who to send this to.'); return; }
+    const message = (document.getElementById('concernMessageInput').value || '').trim();
+    if(!message){ showToast('Please enter your message.'); return; }
+    const staff = parsed.recipientStaffId ? staffList.find(x => x.id === parsed.recipientStaffId) : null;
+    const recipientName = parsed.recipientType === 'management' ? 'Management' : (staff ? staff.firstName+' '+staff.lastName : '');
+    const btn = event && event.target;
+    if(btn) btn.disabled = true;
+    try{
+      await throwIfNotOk(await fetch('/api/concerns', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...actorHeaders() },
+        body: JSON.stringify({ recipientType: parsed.recipientType, recipientStaffId: parsed.recipientStaffId || null, recipientName, subjectName: parsed.subjectName, message }),
+      }));
+      showToast('Sent.');
+      await loadMyContactData();
+      const s = myProfileStudent();
+      if(s && myProfileTab === 'contact') renderMyContactTab(document.getElementById('myProfileBody'), s);
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not send your message.');
+    }finally{
+      if(btn) btn.disabled = false;
+    }
+  }
+  async function submitWork(){
+    const sel = document.getElementById('submissionRecipientSel');
+    const parsed = parseRecipientValue(sel ? sel.value : '');
+    if(!parsed){ showToast('Please choose who to send this to.'); return; }
+    const title = (document.getElementById('submissionTitleInput').value || '').trim();
+    if(!title){ showToast('Please enter a title.'); return; }
+    const description = (document.getElementById('submissionDescInput').value || '').trim();
+    const homeworkSel = document.getElementById('submissionHomeworkSel');
+    const homeworkId = homeworkSel ? homeworkSel.value : '';
+    const staff = parsed.recipientStaffId ? staffList.find(x => x.id === parsed.recipientStaffId) : null;
+    const recipientName = parsed.recipientType === 'management' ? 'Management' : (staff ? staff.firstName+' '+staff.lastName : '');
+    const btn = event && event.target;
+    if(btn) btn.disabled = true;
+    try{
+      await throwIfNotOk(await fetch('/api/submissions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...actorHeaders() },
+        body: JSON.stringify({
+          recipientType: parsed.recipientType, recipientStaffId: parsed.recipientStaffId || null, recipientName,
+          subjectName: parsed.subjectName, homeworkId: homeworkId || null, title, description, attachment: submissionAttachmentData || null,
+        }),
+      }));
+      showToast('Submitted.');
+      submissionAttachmentData = '';
+      await loadMyContactData();
+      const s = myProfileStudent();
+      if(s && myProfileTab === 'contact') renderMyContactTab(document.getElementById('myProfileBody'), s);
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not submit your work.');
+    }finally{
+      if(btn) btn.disabled = false;
+    }
+  }
+
+  /* --- Staff-side Inbox: whatever's addressed to my own staff record (Class
+     Teacher / Subject Teacher matches), plus anything addressed to
+     Management if I'm Admin/Principal — resolved server-side, see
+     /api/concerns/inbox and /api/submissions/inbox. --- */
+  let inboxTab = 'concerns';
+  let inboxConcerns = [];
+  let inboxSubmissions = [];
+  function initInboxView(){
+    loadInboxConcerns();
+    loadInboxSubmissions();
+    switchInboxTab(inboxTab);
+  }
+  function switchInboxTab(tab){
+    inboxTab = tab;
+    ['concerns','submissions'].forEach(t => {
+      const btn = document.getElementById('inboxtab-'+t);
+      if(btn) btn.classList.toggle('active', t===tab);
+    });
+    renderInboxBody();
+  }
+  async function loadInboxConcerns(){
+    try{
+      const res = await throwIfNotOk(await fetch('/api/concerns/inbox', { headers: actorHeaders() }));
+      inboxConcerns = await res.json();
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not load concerns.');
+      inboxConcerns = [];
+    }
+    if(inboxTab === 'concerns') renderInboxBody();
+  }
+  async function loadInboxSubmissions(){
+    try{
+      const res = await throwIfNotOk(await fetch('/api/submissions/inbox', { headers: actorHeaders() }));
+      inboxSubmissions = await res.json();
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not load submissions.');
+      inboxSubmissions = [];
+    }
+    if(inboxTab === 'submissions') renderInboxBody();
+  }
+  function renderInboxBody(){
+    const body = document.getElementById('inboxBody');
+    if(!body) return;
+    if(inboxTab === 'concerns') return renderInboxConcerns(body);
+    if(inboxTab === 'submissions') return renderInboxSubmissions(body);
+  }
+  function renderInboxConcerns(body){
+    const sorted = [...inboxConcerns].sort((a,b) => (a.status==='open'?0:1) - (b.status==='open'?0:1) || (b.createdAt||'').localeCompare(a.createdAt||''));
+    body.innerHTML = sorted.length ? sorted.map(c => `
+      <div class="profile-card" style="margin-bottom:12px; ${c.status==='open' ? 'border-left:4px solid var(--magenta);' : ''}">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+          <div>
+            <span class="pill" style="font-size:0.62rem;">${recipientLabelFor(c)}</span>
+            <h4 style="margin:6px 0 2px;">${c.studentName} — ${c.className}, Section ${c.section}</h4>
+            <p style="font-size:0.85rem; white-space:pre-wrap; margin:4px 0;">${c.message}</p>
+            <p style="font-size:0.72rem; color:var(--ink-soft); margin:0;">${c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</p>
+          </div>
+          <span class="pill" style="${c.status==='open' ? 'background:rgba(209,16,115,0.15); color:var(--magenta);' : ''}">${c.status==='open' ? 'Open' : 'Resolved'}</span>
+        </div>
+        ${c.replyMessage ? `
+          <div style="margin-top:10px; padding:10px; background:var(--cream); border-radius:8px;">
+            <div style="font-size:0.72rem; color:var(--ink-soft); margin-bottom:4px;">Reply — ${c.repliedBy||''} ${c.repliedAt ? 'on '+new Date(c.repliedAt).toLocaleString() : ''}</div>
+            <div style="font-size:0.85rem; white-space:pre-wrap;">${c.replyMessage}</div>
+          </div>
+        ` : `
+          <div style="margin-top:10px;">
+            <textarea id="concernReply-${c.id}" rows="2" placeholder="Type your reply..." style="width:100%;"></textarea>
+            <button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="sendConcernReply('${c.id}')">Send Reply</button>
+          </div>
+        `}
+      </div>
+    `).join('') : `<div class="empty-state"><b>Nothing here yet</b>Concerns addressed to you will show up here.</div>`;
+  }
+  async function sendConcernReply(id){
+    const ta = document.getElementById('concernReply-'+id);
+    const replyMessage = ((ta && ta.value) || '').trim();
+    if(!replyMessage){ showToast('Please type a reply.'); return; }
+    try{
+      await throwIfNotOk(await fetch('/api/concerns/'+encodeURIComponent(id)+'/reply', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', ...actorHeaders() },
+        body: JSON.stringify({ replyMessage }),
+      }));
+      showToast('Reply sent.');
+      await loadInboxConcerns();
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not send reply.');
+    }
+  }
+  function renderInboxSubmissions(body){
+    const sorted = [...inboxSubmissions].sort((a,b) => (a.status==='submitted'?0:1) - (b.status==='submitted'?0:1) || (b.createdAt||'').localeCompare(a.createdAt||''));
+    body.innerHTML = sorted.length ? sorted.map(s => `
+      <div class="profile-card" style="margin-bottom:12px; ${s.status==='submitted' ? 'border-left:4px solid var(--teal);' : ''}">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+          <div>
+            <span class="pill" style="font-size:0.62rem;">${recipientLabelFor(s)}</span>
+            <h4 style="margin:6px 0 2px;">${s.title}</h4>
+            <p style="font-size:0.78rem; color:var(--ink-soft); margin:0 0 4px;">${s.studentName} — ${s.className}, Section ${s.section}</p>
+            ${s.description ? `<p style="font-size:0.85rem; white-space:pre-wrap; margin:4px 0;">${s.description}</p>` : ''}
+            ${s.attachment ? `<a href="${s.attachment}" target="_blank" rel="noopener" class="pill" style="text-decoration:none;">📎 View Attachment</a>` : ''}
+            <p style="font-size:0.72rem; color:var(--ink-soft); margin:6px 0 0;">${s.createdAt ? new Date(s.createdAt).toLocaleString() : ''}</p>
+          </div>
+          <span class="pill" style="${s.status==='submitted' ? 'background:rgba(19,145,127,0.15); color:var(--teal);' : ''}">${s.status==='submitted' ? 'New' : 'Reviewed'}</span>
+        </div>
+        ${s.feedback ? `
+          <div style="margin-top:10px; padding:10px; background:var(--cream); border-radius:8px;">
+            <div style="font-size:0.72rem; color:var(--ink-soft); margin-bottom:4px;">Feedback — ${s.reviewedBy||''} ${s.reviewedAt ? 'on '+new Date(s.reviewedAt).toLocaleString() : ''}</div>
+            <div style="font-size:0.85rem; white-space:pre-wrap;">${s.feedback}</div>
+          </div>
+        ` : `
+          <div style="margin-top:10px;">
+            <textarea id="submissionFeedback-${s.id}" rows="2" placeholder="Optional feedback..." style="width:100%;"></textarea>
+            <button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="markSubmissionReviewed('${s.id}')">Mark Reviewed</button>
+          </div>
+        `}
+      </div>
+    `).join('') : `<div class="empty-state"><b>Nothing here yet</b>Homework and holiday-work submissions addressed to you will show up here.</div>`;
+  }
+  async function markSubmissionReviewed(id){
+    const ta = document.getElementById('submissionFeedback-'+id);
+    const feedback = ((ta && ta.value) || '').trim();
+    try{
+      await throwIfNotOk(await fetch('/api/submissions/'+encodeURIComponent(id)+'/review', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', ...actorHeaders() },
+        body: JSON.stringify({ feedback }),
+      }));
+      showToast('Marked reviewed.');
+      await loadInboxSubmissions();
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not update.');
+    }
   }
 
   /* --- Fees & Payments tab: read-only fee ledger (same numbers as the office
