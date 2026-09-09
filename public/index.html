@@ -16620,7 +16620,10 @@
      is loaded fresh from the server each time this tab is opened. --- */
   let myConcerns = [];
   let mySubmissions = [];
-  let submissionAttachmentData = '';
+  let submissionAttachments = []; // [{ name, dataUrl, size }]
+  const MAX_SUBMISSION_FILES = 5;
+  const MAX_SUBMISSION_FILE_BYTES = 5 * 1024 * 1024; // 5MB per file
+  const MAX_SUBMISSION_TOTAL_BYTES = 12 * 1024 * 1024; // combined, well under the app's 25mb request limit once base64-encoded
   async function loadMyContactData(){
     try{
       const res = await throwIfNotOk(await fetch('/api/concerns/mine', { headers: actorHeaders() }));
@@ -16685,7 +16688,7 @@
             <p style="font-size:0.85rem; white-space:pre-wrap; margin:6px 0 2px;">${c.message}</p>
             <p style="font-size:0.7rem; color:var(--ink-soft); margin:0;">${c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</p>
           </div>
-          <span class="pill" style="${c.status==='open' ? '' : 'background:rgba(19,145,127,0.15); color:var(--teal);'}">${c.status==='open' ? 'Awaiting reply' : 'Resolved'}</span>
+          <span class="pill" style="${c.status==='open' ? '' : 'background:rgba(19,145,127,0.15); color:var(--teal);'}">${c.status==='open' ? 'Awaiting reply' : 'Solved'+(c.resolvedAt ? ' on '+new Date(c.resolvedAt).toLocaleDateString() : '')}</span>
         </div>
         ${c.replyMessage ? `<div style="margin-top:8px; padding:8px 10px; background:var(--cream); border-radius:8px; font-size:0.82rem; white-space:pre-wrap;"><b>${c.repliedBy||'Reply'}:</b> ${c.replyMessage}</div>` : ''}
       </div>
@@ -16699,7 +16702,7 @@
             <span class="pill" style="font-size:0.6rem;">${recipientLabelFor(sub)}</span>
             <h4 style="margin:6px 0 2px;">${sub.title}</h4>
             ${sub.description ? `<p style="font-size:0.82rem; white-space:pre-wrap; margin:2px 0;">${sub.description}</p>` : ''}
-            ${sub.attachment ? `<a href="${sub.attachment}" target="_blank" rel="noopener" class="pill" style="text-decoration:none;">📎 Attachment</a>` : ''}
+            ${(sub.attachments||[]).map(a => `<a href="${a.dataUrl}" target="_blank" rel="noopener" class="pill" style="text-decoration:none; margin-right:4px;">📎 ${a.name}</a>`).join('')}
             <p style="font-size:0.7rem; color:var(--ink-soft); margin:6px 0 0;">${sub.createdAt ? new Date(sub.createdAt).toLocaleString() : ''}</p>
           </div>
           <span class="pill" style="${sub.status==='submitted' ? '' : 'background:rgba(19,145,127,0.15); color:var(--teal);'}">${sub.status==='submitted' ? 'Submitted' : 'Reviewed'}</span>
@@ -16708,7 +16711,7 @@
       </div>
     `).join('') : `<div class="empty-state"><b>No work submitted yet</b></div>`;
 
-    submissionAttachmentData = '';
+    submissionAttachments = [];
     body.innerHTML = `
       <div class="dash-section-title"><div><h3>Contact a Teacher or Management</h3></div></div>
       <div class="profile-card" style="margin-bottom:20px;">
@@ -16728,33 +16731,65 @@
           <div class="f-field full"><label>Title *</label><input type="text" id="submissionTitleInput" placeholder="e.g. Maths worksheet, Holiday project"></div>
           <div class="f-field full"><label>Notes</label><textarea id="submissionDescInput" rows="3" placeholder="Anything you'd like to add..."></textarea></div>
           <div class="f-field full">
-            <label>Attach a photo or file (optional, under 8MB)</label>
-            <input type="file" id="submissionAttachmentInput" accept="image/*,.pdf,.doc,.docx" onchange="previewSubmissionAttachment(event)">
-            <div id="submissionAttachmentPreview" style="margin-top:6px; font-size:0.78rem; color:var(--ink-soft);"></div>
+            <label>Attach photos, PDFs, Word or Excel files (optional — up to 5 files, 12MB combined)</label>
+            <input type="file" id="submissionAttachmentInput" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" multiple onchange="previewSubmissionAttachment(event)">
+            <div id="submissionAttachmentPreview" style="margin-top:6px;"></div>
           </div>
         </div>
         <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="submitWork()">Submit</button>
       </div>
       ${submissionsHistoryHtml}
     `;
+    renderSubmissionAttachmentPreview();
   }
   function previewSubmissionAttachment(e){
-    const file = e.target.files[0];
-    const preview = document.getElementById('submissionAttachmentPreview');
-    if(!file){ submissionAttachmentData=''; if(preview) preview.textContent=''; return; }
-    if(file.size > 8*1024*1024){
-      showToast('Please choose a file under 8MB.');
-      e.target.value = '';
-      submissionAttachmentData = '';
-      if(preview) preview.textContent = '';
-      return;
+    const files = Array.from(e.target.files || []);
+    e.target.value = ''; // let the same file be re-picked later without needing to be deselected first
+    if(!files.length) return;
+    const currentTotal = submissionAttachments.reduce((sum,a) => sum + (a.size||0), 0);
+    let runningTotal = currentTotal;
+    const toRead = [];
+    for(const file of files){
+      if(submissionAttachments.length + toRead.length >= MAX_SUBMISSION_FILES){
+        showToast('You can attach up to ' + MAX_SUBMISSION_FILES + ' files.');
+        break;
+      }
+      if(file.size > MAX_SUBMISSION_FILE_BYTES){
+        showToast(file.name + ' is over 5MB — please choose a smaller file.');
+        continue;
+      }
+      if(runningTotal + file.size > MAX_SUBMISSION_TOTAL_BYTES){
+        showToast('That would put your combined attachments over 12MB — please choose smaller or fewer files.');
+        break;
+      }
+      runningTotal += file.size;
+      toRead.push(file);
     }
-    const reader = new FileReader();
-    reader.onload = evt => {
-      submissionAttachmentData = evt.target.result;
-      if(preview) preview.textContent = 'Selected: ' + file.name;
-    };
-    reader.readAsDataURL(file);
+    if(!toRead.length) return;
+    let pending = toRead.length;
+    toRead.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = evt => {
+        submissionAttachments.push({ name: file.name, dataUrl: evt.target.result, size: file.size });
+        pending--;
+        if(pending === 0) renderSubmissionAttachmentPreview();
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  function renderSubmissionAttachmentPreview(){
+    const preview = document.getElementById('submissionAttachmentPreview');
+    if(!preview) return;
+    preview.innerHTML = submissionAttachments.map((a,i) => `
+      <span class="pill" style="margin:0 6px 6px 0; display:inline-flex; align-items:center; gap:6px;">
+        📎 ${a.name}
+        <a href="javascript:void(0)" onclick="removeSubmissionAttachment(${i})" style="color:var(--magenta); text-decoration:none; font-weight:700;">✕</a>
+      </span>
+    `).join('');
+  }
+  function removeSubmissionAttachment(i){
+    submissionAttachments.splice(i, 1);
+    renderSubmissionAttachmentPreview();
   }
   async function submitConcern(){
     const sel = document.getElementById('concernRecipientSel');
@@ -16799,11 +16834,12 @@
         method: 'POST', headers: { 'Content-Type': 'application/json', ...actorHeaders() },
         body: JSON.stringify({
           recipientType: parsed.recipientType, recipientStaffId: parsed.recipientStaffId || null, recipientName,
-          subjectName: parsed.subjectName, homeworkId: homeworkId || null, title, description, attachment: submissionAttachmentData || null,
+          subjectName: parsed.subjectName, homeworkId: homeworkId || null, title, description,
+          attachments: submissionAttachments.map(a => ({ name: a.name, dataUrl: a.dataUrl })),
         }),
       }));
       showToast('Submitted.');
-      submissionAttachmentData = '';
+      submissionAttachments = [];
       await loadMyContactData();
       const s = myProfileStudent();
       if(s && myProfileTab === 'contact') renderMyContactTab(document.getElementById('myProfileBody'), s);
@@ -16863,7 +16899,7 @@
   function renderInboxConcerns(body){
     const sorted = [...inboxConcerns].sort((a,b) => (a.status==='open'?0:1) - (b.status==='open'?0:1) || (b.createdAt||'').localeCompare(a.createdAt||''));
     body.innerHTML = sorted.length ? sorted.map(c => `
-      <div class="profile-card" style="margin-bottom:12px; ${c.status==='open' ? 'border-left:4px solid var(--magenta);' : ''}">
+      <div class="profile-card" style="margin-bottom:12px; ${c.status==='open' ? 'border-left:4px solid var(--magenta);' : 'border-left:4px solid var(--teal);'}">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
           <div>
             <span class="pill" style="font-size:0.62rem;">${recipientLabelFor(c)}</span>
@@ -16871,7 +16907,7 @@
             <p style="font-size:0.85rem; white-space:pre-wrap; margin:4px 0;">${c.message}</p>
             <p style="font-size:0.72rem; color:var(--ink-soft); margin:0;">${c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</p>
           </div>
-          <span class="pill" style="${c.status==='open' ? 'background:rgba(209,16,115,0.15); color:var(--magenta);' : ''}">${c.status==='open' ? 'Open' : 'Resolved'}</span>
+          <span class="pill" style="${c.status==='open' ? 'background:rgba(209,16,115,0.15); color:var(--magenta);' : 'background:rgba(19,145,127,0.15); color:var(--teal);'}">${c.status==='open' ? 'Open' : 'Solved'}</span>
         </div>
         ${c.replyMessage ? `
           <div style="margin-top:10px; padding:10px; background:var(--cream); border-radius:8px;">
@@ -16884,6 +16920,13 @@
             <button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="sendConcernReply('${c.id}')">Send Reply</button>
           </div>
         `}
+        <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border); display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          ${c.status==='resolved'
+            ? `<span style="font-size:0.76rem; color:var(--ink-soft);">✅ Marked solved${c.resolvedBy ? ' by '+c.resolvedBy : ''}${c.resolvedAt ? ' on '+new Date(c.resolvedAt).toLocaleDateString() : ''}</span>
+               <button class="btn btn-ghost btn-sm" onclick="setConcernResolved('${c.id}', false)">Reopen</button>`
+            : `<button class="btn btn-primary btn-sm" onclick="setConcernResolved('${c.id}', true)">Mark as Solved</button>`
+          }
+        </div>
       </div>
     `).join('') : `<div class="empty-state"><b>Nothing here yet</b>Concerns addressed to you will show up here.</div>`;
   }
@@ -16902,6 +16945,18 @@
       if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not send reply.');
     }
   }
+  async function setConcernResolved(id, resolved){
+    try{
+      await throwIfNotOk(await fetch('/api/concerns/'+encodeURIComponent(id)+'/status', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', ...actorHeaders() },
+        body: JSON.stringify({ resolved }),
+      }));
+      showToast(resolved ? 'Marked solved.' : 'Reopened.');
+      await loadInboxConcerns();
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not update.');
+    }
+  }
   function renderInboxSubmissions(body){
     const sorted = [...inboxSubmissions].sort((a,b) => (a.status==='submitted'?0:1) - (b.status==='submitted'?0:1) || (b.createdAt||'').localeCompare(a.createdAt||''));
     body.innerHTML = sorted.length ? sorted.map(s => `
@@ -16912,7 +16967,7 @@
             <h4 style="margin:6px 0 2px;">${s.title}</h4>
             <p style="font-size:0.78rem; color:var(--ink-soft); margin:0 0 4px;">${s.studentName} — ${s.className}, Section ${s.section}</p>
             ${s.description ? `<p style="font-size:0.85rem; white-space:pre-wrap; margin:4px 0;">${s.description}</p>` : ''}
-            ${s.attachment ? `<a href="${s.attachment}" target="_blank" rel="noopener" class="pill" style="text-decoration:none;">📎 View Attachment</a>` : ''}
+            ${(s.attachments||[]).map(a => `<a href="${a.dataUrl}" target="_blank" rel="noopener" class="pill" style="text-decoration:none; margin-right:4px;">📎 ${a.name}</a>`).join('')}
             <p style="font-size:0.72rem; color:var(--ink-soft); margin:6px 0 0;">${s.createdAt ? new Date(s.createdAt).toLocaleString() : ''}</p>
           </div>
           <span class="pill" style="${s.status==='submitted' ? 'background:rgba(19,145,127,0.15); color:var(--teal);' : ''}">${s.status==='submitted' ? 'New' : 'Reviewed'}</span>
