@@ -13,6 +13,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { neon } from '@neondatabase/serverless';
+import webpush from 'web-push';
 import { startVendorReporting, reportVendorError } from './vendor-reporting.js';
 import { handleVendorSupportLogin } from './vendor-support-login.js';
 
@@ -315,6 +316,33 @@ async function ensureSchema() {
     expires_at TIMESTAMPTZ NOT NULL
   )`;
 
+  // One row per browser/device a Parent or Student login has granted Web
+  // Push permission on (a login can have several — phone + laptop, say).
+  // endpoint is the unique push service URL the browser handed back from
+  // pushManager.subscribe(); p256dh/auth are that subscription's own
+  // encryption keys, both required to encrypt a push payload for it. See
+  // the "Notifications: Web Push + WhatsApp" section below for how these
+  // are written (POST /api/push/subscribe) and used (sendPushToUser).
+  await sql`CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id BIGSERIAL PRIMARY KEY, user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+
+  // Idempotency log for notifications that a repeated check could otherwise
+  // send more than once — right now just the fee-due reminders (the daily
+  // scheduler re-evaluates every active student every run) and "results
+  // published" (every individual mark save re-checks whether the student's
+  // full subject set is now complete). A payment or an attendance mark is
+  // its own one-off event and never re-fires, so those aren't logged here.
+  // (student_id, kind, ref_key) is unique so a second attempt at the same
+  // notification is a no-op via ON CONFLICT DO NOTHING, not a duplicate row.
+  await sql`CREATE TABLE IF NOT EXISTS notification_events (
+    id BIGSERIAL PRIMARY KEY, student_id TEXT NOT NULL, kind TEXT NOT NULL, ref_key TEXT NOT NULL,
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (student_id, kind, ref_key)
+  )`;
+
   // ---------- Indexes ----------
   // The tables above are all read by student_id / staff_id / username / date
   // lookups constantly (a student's fee history, a staff member's payroll
@@ -344,6 +372,7 @@ async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (created_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log (resource)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions (expires_at)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions (user_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_acct_income_date ON acct_income (date)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_acct_expenses_date ON acct_expenses (date)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_student_concerns_student_id ON student_concerns (student_id)`;
@@ -982,7 +1011,25 @@ function simpleToAppShape(row, fields) {
   });
   return out;
 }
-async function handleSimple(req, res, config) {
+// Fire-and-forget dispatch to the notify* functions defined in the
+// "Notifications" section further down (hoisted function declarations, so
+// the definition order here doesn't matter — these only ever actually run
+// once a real request comes in, long after the whole module has loaded).
+// Deliberately not awaited by any caller: a slow or failing push/WhatsApp
+// send must never add latency to — or fail — the write itself.
+function notifyAfterResourceWrite(resourceName, body) {
+  if (resourceName === 'payments') {
+    notifyFeePayment({ studentId: body.studentId, amount: body.amount, mode: body.mode, receiptNo: body.receiptNo })
+      .catch(err => console.error('fee payment notification failed:', err));
+  } else if (resourceName === 'attendance') {
+    notifyAttendanceEvent({ studentId: body.studentId, date: body.date, status: body.status })
+      .catch(err => console.error('attendance notification failed:', err));
+  } else if (resourceName === 'exam-results') {
+    notifyMarksIfComplete({ examId: body.examId, studentId: body.studentId })
+      .catch(err => console.error('marks notification failed:', err));
+  }
+}
+async function handleSimple(req, res, config, resourceName) {
   const { table, fields } = config;
   if (req.method === 'GET') {
     const rows = await sql.query(`SELECT * FROM ${table} ORDER BY created_at ASC NULLS LAST`);
@@ -996,11 +1043,13 @@ async function handleSimple(req, res, config) {
     if (req.method === 'POST') {
       const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
       await sql.query(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`, vals);
+      notifyAfterResourceWrite(resourceName, body);
       return res.status(201).json({ ok: true });
     } else {
       const setClause = cols.filter(c => c !== 'id').map((c, i) => `${c} = $${i + 2}`).join(', ');
       const updateVals = [body.id, ...fields.filter(f => f.col !== 'id').map(f => (body[f.app] === undefined ? null : body[f.app]))];
       await sql.query(`UPDATE ${table} SET ${setClause} WHERE id = $1`, updateVals);
+      notifyAfterResourceWrite(resourceName, body);
       return res.status(200).json({ ok: true });
     }
   }
@@ -1352,10 +1401,333 @@ app.post('/api/payments/verify', async (req, res) => {
         ${classAtPayment || ''}, ${extraFeeName || null}, ${extraFeeId || null}
       )
     `;
+    notifyFeePayment({ studentId, amount, category: category || 'fee', mode: 'Online', receiptNo: razorpay_payment_id })
+      .catch(err => console.error('fee payment notification failed:', err));
     return res.status(200).json({ ok: true, paymentId: id, receiptNo: razorpay_payment_id });
   } catch (err) {
     console.error('razorpay verify error:', err);
     return res.status(500).json({ error: 'Payment succeeded but we could not record it — please contact the school office with your payment ID.' });
+  }
+});
+
+// ---------- Notifications: Web Push (on by default) + WhatsApp (opt-in per school) ----------
+// Web Push needs no third-party account — just a VAPID key pair this
+// school generates once (see INSTALL notes) and sets as VAPID_PUBLIC_KEY /
+// VAPID_PRIVATE_KEY / VAPID_SUBJECT on Render → Environment, same pattern
+// as Razorpay above. Until those are set, webPushConfigured() is false and
+// every notify* function below silently no-ops on the push side — nothing
+// breaks, parents just don't get a browser/PWA notification yet.
+function webPushConfigured() {
+  return !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+}
+if (webPushConfigured()) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || 'mailto:admin@example.com',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+}
+// WhatsApp is a separate, explicitly opt-in integration — real money and a
+// real Meta Business + WhatsApp Business Account per school, unlike Web
+// Push. Until WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN are set on
+// Render, whatsappConfigured() is false and this school just keeps using
+// the existing manual "click to open WhatsApp" flow (Notify Parents /
+// Notify Below Threshold) — nothing here replaces that, it only adds an
+// automatic send on top once a school actually wants it. Message
+// *content* still has to be a template pre-approved in Meta Business
+// Manager (Meta requires that for any business-initiated message outside
+// a 24-hour customer reply window) — the env vars below let a school point
+// at whatever name they got approved, without a code change.
+function whatsappConfigured() {
+  return !!(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN);
+}
+const WHATSAPP_DEFAULT_TEMPLATES = {
+  FEE_PAYMENT: 'fee_payment_confirmation',
+  FEE_DUE_BEFORE: 'fee_due_reminder',
+  FEE_DUE_AFTER: 'fee_overdue_reminder',
+  MARKS_PUBLISHED: 'marks_published',
+  ATTENDANCE_ALERT: 'attendance_alert',
+};
+async function sendWhatsAppTemplate(toPhoneDigits, templateKind, params) {
+  if (!whatsappConfigured() || !toPhoneDigits) return;
+  // Meta wants the recipient in international format with no leading "+"
+  // or punctuation. A 10-digit number as stored by this app is assumed
+  // Indian and gets "91" prepended; anything else is trusted as already
+  // including its country code.
+  const to = toPhoneDigits.length === 10 ? '91' + toPhoneDigits : toPhoneDigits;
+  const templateName = process.env['WHATSAPP_TEMPLATE_' + templateKind] || WHATSAPP_DEFAULT_TEMPLATES[templateKind];
+  if (!templateName) return;
+  try {
+    const resp = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}` },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to,
+        type: 'template',
+        template: {
+          name: templateName,
+          language: { code: process.env.WHATSAPP_TEMPLATE_LANG || 'en' },
+          components: [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: String(p) })) }],
+        },
+      }),
+    });
+    if (!resp.ok) console.error('WhatsApp send failed:', resp.status, await resp.text());
+  } catch (err) {
+    console.error('WhatsApp send error:', err);
+  }
+}
+function fmtMoneyServer(n) {
+  return '₹' + Number(n || 0).toLocaleString('en-IN');
+}
+// A Parent AND a Student login can both be linked to the same child — push
+// every subscription belonging to every login linked to this student, not
+// just one.
+async function getStudentContactUserIds(studentId) {
+  const rows = await sql`SELECT id FROM users WHERE linked_student_id = ${studentId}`;
+  return rows.map(r => r.id);
+}
+function getStudentParentPhone(student) {
+  const extra = student.extra || {};
+  const raw = extra.fatherPhone || extra.motherPhone || extra.guardianPhone || '';
+  return String(raw).replace(/\D/g, '');
+}
+async function sendPushToUser(userId, payload) {
+  if (!webPushConfigured()) return;
+  const subs = await sql`SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ${userId}`;
+  for (const sub of subs) {
+    try {
+      await webpush.sendNotification(
+        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+        JSON.stringify(payload)
+      );
+    } catch (err) {
+      // 404/410 means the browser itself dropped this subscription (e.g.
+      // the PWA was uninstalled) — Web Push's own way of telling us to stop
+      // trying it, so clean it up instead of failing the same way forever.
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await sql`DELETE FROM push_subscriptions WHERE id = ${sub.id}`.catch(() => {});
+      } else {
+        console.error('push send failed for subscription', sub.id, err.statusCode || err.message);
+      }
+    }
+  }
+}
+async function sendPushToStudent(studentId, payload) {
+  if (!webPushConfigured()) return;
+  const userIds = await getStudentContactUserIds(studentId);
+  for (const userId of userIds) await sendPushToUser(userId, payload);
+}
+
+// ---------- Notification triggers: fee payment, attendance, marks ----------
+// Called (fire-and-forget — never awaited by the request that triggered
+// it, so a slow or failing push/WhatsApp send never adds latency to a
+// staff member recording a payment/attendance/mark) from handleSimple()
+// below for office-entered payments/attendance/marks, and directly from
+// the Razorpay verify route above for online payments.
+async function notifyFeePayment({ studentId, amount, mode, receiptNo }) {
+  if (!studentId) return;
+  const rows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
+  const student = rows[0];
+  if (!student) return;
+  const body = `${fmtMoneyServer(amount)} received for ${student.first_name} ${student.last_name}${mode ? ' via ' + mode : ''}${receiptNo ? ' · Receipt ' + receiptNo : ''}.`;
+  await sendPushToStudent(student.id, { title: 'Payment received', body, tag: 'fee-payment', url: '/' });
+  if (whatsappConfigured()) {
+    const phone = getStudentParentPhone(student);
+    if (phone) await sendWhatsAppTemplate(phone, 'FEE_PAYMENT', [`${student.first_name} ${student.last_name}`, fmtMoneyServer(amount), receiptNo || '—']);
+  }
+}
+// Only Absent/Late/Leave push — a "marked Present" push every school day
+// for every student would just be daily noise parents learn to ignore. See
+// the Attendance module's Teacher-scoping comments for the same
+// only-what-needs-attention principle applied to what a Teacher can see.
+async function notifyAttendanceEvent({ studentId, date, status }) {
+  if (!studentId || !['Absent', 'Late', 'Leave'].includes(status)) return;
+  const rows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
+  const student = rows[0];
+  if (!student) return;
+  const body = `${student.first_name} ${student.last_name} was marked ${status} on ${date}.`;
+  await sendPushToStudent(student.id, { title: `Marked ${status}`, body, tag: 'attendance', url: '/' });
+  if (whatsappConfigured()) {
+    const phone = getStudentParentPhone(student);
+    if (phone) await sendWhatsAppTemplate(phone, 'ATTENDANCE_ALERT', [`${student.first_name} ${student.last_name}`, status, date]);
+  }
+}
+// Fires once — the moment a student's mark set for an exam goes from
+// incomplete to complete, matching the "Results published" wording already
+// used in the in-app Notifications feed (computeMyNotifications) — never
+// once per individual subject saved, and never a second time if a mark is
+// later edited (notification_events makes that idempotent).
+async function notifyMarksIfComplete({ examId, studentId }) {
+  if (!examId || !studentId) return;
+  const examRows = await sql`SELECT * FROM exam_defs WHERE id = ${examId}`;
+  const exam = examRows[0];
+  if (!exam) return;
+  const classMap = await studentClassMap([studentId]);
+  const cls = classMap[studentId];
+  if (!cls) return;
+  const classSubjects = exam.class_subjects || {};
+  const subjects = classSubjects[cls.className + '||' + cls.section] || [];
+  if (!subjects.length) return;
+  const resultRows = await sql`SELECT DISTINCT subject FROM exam_results WHERE exam_id = ${examId} AND student_id = ${studentId}`;
+  const done = new Set(resultRows.map(r => r.subject));
+  if (!subjects.every(s => done.has(s.name))) return;
+  const inserted = await sql`
+    INSERT INTO notification_events (student_id, kind, ref_key) VALUES (${studentId}, 'marks_published', ${examId})
+    ON CONFLICT DO NOTHING RETURNING id
+  `;
+  if (!inserted.length) return; // already notified for this exam
+  const studentRows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
+  const student = studentRows[0];
+  if (!student) return;
+  const body = `${exam.name} results are now available for ${student.first_name} ${student.last_name}.`;
+  await sendPushToStudent(student.id, { title: 'Results published', body, tag: 'marks', url: '/' });
+  if (whatsappConfigured()) {
+    const phone = getStudentParentPhone(student);
+    if (phone) await sendWhatsAppTemplate(phone, 'MARKS_PUBLISHED', [`${student.first_name} ${student.last_name}`, exam.name]);
+  }
+}
+
+// ---------- Fee-due reminders: a server-side replica of computeDefaulters() ----------
+// computeDefaulters() (fee + bus outstanding balance) only exists client-side
+// today, computed from in-memory arrays the browser already has loaded — no
+// use to a scheduled job with no browser open. This mirrors it closely
+// enough for a reminder's purposes (tuition + bus only, same as the
+// Defaulters tab; hostel/stock aren't part of that tab either).
+async function computeStudentDueBalance(student) {
+  const [feeStructRows, discountRows, paymentRows, transportRows] = await Promise.all([
+    sql`SELECT fee, bus FROM fee_structure WHERE class_name = ${student.class_name}`,
+    sql`SELECT applies_to, mode, value FROM student_discounts WHERE student_id = ${student.id} AND status = 'Approved' AND applies_to IN ('fee','bus')`,
+    sql`SELECT category, amount, discount, class_at_payment FROM payments WHERE student_id = ${student.id} AND category IN ('fee','bus')`,
+    sql`SELECT value FROM kv_store WHERE key = 'transport-routes'`,
+  ]);
+  const struct = feeStructRows[0] || { fee: 0, bus: 0 };
+  const extra = student.extra || {};
+  let busExpected = Number(struct.bus) || 0;
+  if (extra.transportRouteId && extra.transportStopId) {
+    const routes = (transportRows[0] && transportRows[0].value) || [];
+    const route = routes.find(r => r.id === extra.transportRouteId);
+    const stop = route ? (route.stops || []).find(st => st.id === extra.transportStopId) : null;
+    if (stop) busExpected = Number(stop.fare) || 0;
+  }
+  const expected = { fee: Number(struct.fee) || 0, bus: busExpected };
+  const collected = { fee: 0, bus: 0 };
+  const discount = { fee: 0, bus: 0 };
+  paymentRows.forEach(p => {
+    if (expected[p.category] === undefined) return;
+    if (p.class_at_payment && p.class_at_payment !== student.class_name) return;
+    collected[p.category] += Number(p.amount) || 0;
+    discount[p.category] += Number(p.discount) || 0;
+  });
+  discountRows.forEach(d => {
+    if (expected[d.applies_to] === undefined) return;
+    discount[d.applies_to] += d.mode === 'percentage'
+      ? Math.round(expected[d.applies_to] * (Number(d.value) || 0) / 100)
+      : (Number(d.value) || 0);
+  });
+  let total = 0;
+  for (const cat of ['fee', 'bus']) {
+    const netPayable = Math.max(expected[cat] - discount[cat], 0);
+    total += Math.max(netPayable - collected[cat], 0);
+  }
+  return total;
+}
+// Exactly two reminders per due-date cycle, per the school's own
+// late-fee-settings.dueDate (the same single due-date concept the Late Fee
+// screen already uses — nothing new to configure): one FEE_REMINDER_LEAD_DAYS
+// before it, one the day it first becomes overdue. Both are idempotent via
+// notification_events keyed on the due date itself, so changing the due
+// date later naturally opens a fresh reminder cycle instead of silently
+// never firing again.
+const FEE_REMINDER_LEAD_DAYS = 3;
+async function runFeeDueReminders() {
+  const settingsRows = await sql`SELECT value FROM kv_store WHERE key = 'late-fee-settings'`;
+  const dueDate = settingsRows.length ? settingsRows[0].value.dueDate : '';
+  if (!dueDate) return; // school hasn't set a fee due date yet — nothing to remind about
+  const today = new Date().toISOString().slice(0, 10);
+  const before = new Date(dueDate);
+  before.setDate(before.getDate() - FEE_REMINDER_LEAD_DAYS);
+  const beforeStr = before.toISOString().slice(0, 10);
+  let kind = null;
+  if (today === beforeStr) kind = 'fee_due_before';
+  else if (today > dueDate) kind = 'fee_due_after';
+  if (!kind) return;
+  const students = await sql`SELECT * FROM students WHERE status IS NULL OR LOWER(status) = 'active'`;
+  for (const student of students) {
+    try {
+      const balance = await computeStudentDueBalance(student);
+      if (balance <= 0) continue;
+      const inserted = await sql`
+        INSERT INTO notification_events (student_id, kind, ref_key) VALUES (${student.id}, ${kind}, ${dueDate})
+        ON CONFLICT DO NOTHING RETURNING id
+      `;
+      if (!inserted.length) continue; // already sent for this due date
+      const title = kind === 'fee_due_before' ? 'Fee due soon' : 'Fee overdue';
+      const body = kind === 'fee_due_before'
+        ? `${student.first_name} ${student.last_name}'s fee of ${fmtMoneyServer(balance)} is due on ${dueDate}.`
+        : `${student.first_name} ${student.last_name}'s fee of ${fmtMoneyServer(balance)} was due on ${dueDate} and is now overdue.`;
+      await sendPushToStudent(student.id, { title, body, tag: 'fee-due', url: '/' });
+      if (whatsappConfigured()) {
+        const phone = getStudentParentPhone(student);
+        if (phone) {
+          await sendWhatsAppTemplate(phone, kind === 'fee_due_before' ? 'FEE_DUE_BEFORE' : 'FEE_DUE_AFTER',
+            [`${student.first_name} ${student.last_name}`, fmtMoneyServer(balance), dueDate]);
+        }
+      }
+    } catch (err) {
+      console.error('fee due reminder failed for student', student.id, err);
+    }
+  }
+}
+// In-process daily scheduler — no new Render service/cron needed. Checked
+// hourly but only actually runs the scan once per calendar day (tracked in
+// memory), plus once shortly after boot so a reminder due "today" isn't
+// missed just because the server happened to restart that morning.
+let lastFeeReminderRunDate = null;
+async function feeReminderTick() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (lastFeeReminderRunDate === today) return;
+  lastFeeReminderRunDate = today;
+  await runFeeDueReminders().catch(err => console.error('runFeeDueReminders failed:', err));
+}
+setInterval(feeReminderTick, 60 * 60 * 1000);
+setTimeout(feeReminderTick, 30 * 1000);
+
+// ---------- Push subscription endpoints ----------
+// Any signed-in login can call these (not just Parent/Student) so a Teacher
+// or Admin who wants their own notifications later isn't blocked by this
+// route itself — today only the Parent/Student client code actually
+// subscribes (see myTeacherScope()-adjacent client changes), matching the
+// four event types this session added, which are all parent-facing.
+app.get('/api/push/vapid-key', (req, res) => {
+  if (!webPushConfigured()) return res.status(501).json({ error: 'Push notifications are not set up yet.' });
+  return res.status(200).json({ publicKey: process.env.VAPID_PUBLIC_KEY });
+});
+app.post('/api/push/subscribe', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+    const { endpoint, keys } = req.body || {};
+    if (!endpoint || !keys || !keys.p256dh || !keys.auth) return res.status(400).json({ error: 'Invalid subscription.' });
+    await sql`
+      INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
+      VALUES (${req.authUser.id}, ${endpoint}, ${keys.p256dh}, ${keys.auth}, ${req.headers['user-agent'] || ''})
+      ON CONFLICT (endpoint) DO UPDATE SET user_id = EXCLUDED.user_id, p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth
+    `;
+    return res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error('push subscribe error:', err);
+    return res.status(500).json({ error: 'Could not save your subscription.' });
+  }
+});
+app.post('/api/push/unsubscribe', async (req, res) => {
+  try {
+    const { endpoint } = req.body || {};
+    if (!endpoint) return res.status(400).json({ error: 'Missing endpoint.' });
+    await sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('push unsubscribe error:', err);
+    return res.status(500).json({ error: 'Could not remove your subscription.' });
   }
 });
 
@@ -2311,7 +2683,7 @@ app.all('/api/:resource', async (req, res) => {
     // by handleUsers above), but takes its own dedicated handler instead of
     // the generic one because of the password rules described there.
     if (resource === 'users') return await handleUsers(req, res);
-    if (SIMPLE_RESOURCES[resource]) return await handleSimple(req, res, SIMPLE_RESOURCES[resource]);
+    if (SIMPLE_RESOURCES[resource]) return await handleSimple(req, res, SIMPLE_RESOURCES[resource], resource);
     if (HYBRID_RESOURCES[resource]) return await handleHybrid(req, res, HYBRID_RESOURCES[resource]);
     if (resource === 'subjects') return await handleSubjects(req, res);
     if (resource === 'exam-defs') return await handleExamDefs(req, res);
