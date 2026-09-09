@@ -2237,6 +2237,34 @@ app.all('/api/:resource', async (req, res) => {
         }
       }
     }
+    // A Teacher login has no 'staff' module access — that's the Staff
+    // directory, a separate concern — but the class/subject-teacher duty
+    // scoping just above (and myTeacherScope() on the client) both need
+    // every staff record's linkedUserId/classTeacherClass/classTeacherSection
+    // just to work at all: resolving "which staff record is me" and,
+    // elsewhere in the app, "who is the Class Teacher of this student's
+    // section." Without this, a Teacher's own classTeacherClass lookup
+    // silently comes back empty and their homeroom class never appears —
+    // which is exactly the bug this carve-out fixes. It exposes only that
+    // narrow, non-sensitive scheduling subset for every OTHER staff
+    // member — never a colleague's phone, address, salary, or any other
+    // personal field that might live in their `extra` — while the caller's
+    // own record still comes back in full (their own data, nothing to
+    // protect it from).
+    if (req.method === 'GET' && resource === 'staff' && req.authUser && req.authUser.role === 'Teacher') {
+      const rows = await sql`SELECT * FROM staff ORDER BY created_at ASC NULLS LAST`;
+      return res.status(200).json(rows.map(r => {
+        const shapedCore = {};
+        HYBRID_RESOURCES.staff.core.forEach(f => { shapedCore[f.app] = r[f.col]; });
+        const extra = r.extra || {};
+        if (extra.linkedUserId === req.authUser.id) return { ...shapedCore, ...extra };
+        const safeExtra = {};
+        if (extra.classTeacherClass !== undefined) safeExtra.classTeacherClass = extra.classTeacherClass;
+        if (extra.classTeacherSection !== undefined) safeExtra.classTeacherSection = extra.classTeacherSection;
+        if (extra.linkedUserId !== undefined) safeExtra.linkedUserId = extra.linkedUserId;
+        return { ...shapedCore, ...safeExtra };
+      }));
+    }
     // Roles & Permissions enforcement (see the block above HYBRID_RESOURCES):
     // a resource mapped here 403s for a role that the admin has explicitly
     // denied that module to; anything unmapped is unaffected. A
