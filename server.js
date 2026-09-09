@@ -573,6 +573,13 @@ app.use(async (req, res, next) => {
 
 async function handleKv(req, res, key) {
   if (!key) return res.status(400).json({ error: 'Missing key.' });
+  if (ADMIN_ONLY_KV_KEYS.includes(key) && (!req.authUser || req.authUser.role !== 'Admin')) {
+    return res.status(403).json({ error: 'Admin access required.' });
+  }
+  if (KV_KEY_TO_MODULE[key]) {
+    const allowed = await checkModuleAccess(req, res, KV_KEY_TO_MODULE[key]);
+    if (!allowed) return; // checkModuleAccess already sent the 403
+  }
   if (req.method === 'GET') {
     const rows = await sql`SELECT value FROM kv_store WHERE key = ${key}`;
     return res.status(200).json(rows.length ? rows[0].value : {});
@@ -792,6 +799,163 @@ const HYBRID_RESOURCES = {
     core: [{ app: 'id', col: 'id' }],
   },
 };
+
+// ---------- Server-side enforcement of Roles & Permissions ----------
+// Until now, the Roles & Permissions matrix (index.html: PERMISSION_MODULES /
+// ROLE_VIEWS / custom_roles) only ever controlled what the BROWSER shows —
+// hiding a sidebar button never stopped that same role from calling the API
+// underneath it directly. This closes that gap.
+//
+// Deliberately scoped, to keep this safe to ship on a live school database:
+//  - Enforcement happens only at the TOP-LEVEL module granularity that
+//    ROLE_VIEWS/the sidebar itself uses — never the finer per-action
+//    (view/create/edit/delete/print/approve) checks or the bespoke
+//    sub-module fallback helpers (getAccountingTabAccess, getResultTabAccess,
+//    etc.) the admin UI also exposes. A resource that really belongs to a
+//    sub-module is checked against that sub-module's PARENT module instead —
+//    the same coarse fallback those client helpers already use when no
+//    explicit override exists for the sub-module itself. Where one resource
+//    legitimately feeds more than one module's screen (e.g. exam-results
+//    backs both Manage Exams and Result), access to EITHER is enough.
+//  - A role with NO saved custom_roles override behaves EXACTLY as it does
+//    today (SERVER_ROLE_VIEWS defaults below, copied from ROLE_VIEWS) —
+//    enforcement only ever *tightens* access, and only once an admin has
+//    explicitly customized that role in Roles & Permissions. No school that
+//    hasn't touched that screen sees any behavior change.
+//  - "Fail open": a resource or kv key with no explicit entry in
+//    RESOURCE_TO_MODULE/KV_KEY_TO_MODULE below is left completely
+//    unrestricted, exactly as before this change, rather than guessed at.
+//  - 'users' and 'roles' are hard-locked to the built-in Admin role,
+//    unconditionally — mirroring LOCKED_ADMIN_ONLY_PAGES on the client,
+//    since these control who can log in and the permission system itself
+//    and must never be delegable through any override.
+
+// Mirrors ROLE_VIEWS in index.html — keep the two in sync. This is the
+// fallback used whenever a role has no saved override for a given module.
+const SERVER_ROLE_VIEWS = {
+  Admin: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','inbox','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
+  Principal: ['dashboard','admissions','managefee','attendance','exams','subjects','promotransfer','result','staff','accounting','announcements','inbox','noticeboard','websiteinquiries','websitegallery','contactvendor','reports','inventory','timetable','syllabus','transport','library','hostel','setup'],
+  Accountant: ['dashboard','admissions','managefee','accounting','reports','inventory','transport'],
+  'Office Assistant': ['admissions'],
+  Teacher: ['admissions','attendance','exams','subjects','result','timetable','syllabus','library','announcements','inbox'],
+  Staff: ['admissions','attendance','inbox'],
+  Student: ['myprofile'],
+  Parent: ['myprofile'],
+};
+
+// A role's saved override permissions object, straight from custom_roles —
+// undefined if none saved. Student/Parent never participate in overrides
+// (mirrors findRoleOverride() in index.html: their "My Portal" access isn't
+// expressible as a module grant, so a custom override never widens or
+// narrows it).
+async function getRoleOverride(role) {
+  if (role === 'Student' || role === 'Parent') return undefined;
+  const rows = await sql`SELECT permissions FROM custom_roles WHERE name = ${role} LIMIT 1`;
+  return rows.length ? rows[0].permissions : undefined;
+}
+
+// Every resource name (SIMPLE_RESOURCES / HYBRID_RESOURCES / the custom
+// handlers below) mapped to the top-level PERMISSION_MODULES key(s) that
+// gate it. Resources not listed here are unrestricted (fail open).
+const RESOURCE_TO_MODULE = {
+  // Finance
+  payments: ['managefee'],
+  discounts: ['managefee'],
+  'extra-fees': ['managefee'],
+  'fee-structure': ['managefee'],
+  'acct-income': ['accounting'],
+  'acct-expenses': ['accounting'],
+  // Academics
+  attendance: ['attendance'],
+  holidays: ['attendance'],
+  'attendance-settings': ['attendance'],
+  'staff-attendance': ['staff', 'attendance'],
+  'exam-results': ['exams', 'result'],
+  'exam-defs': ['exams'],
+  subjects: ['subjects'],
+  rooms: ['result'],
+  'exam-hall-tickets': ['result'],
+  'exam-room-config': ['result'],
+  // People
+  students: ['admissions'],
+  // Admission inquiries are the public website's "Admissions Inquiry Form"
+  // submissions, reviewed under Website Inquiries in the sidebar (see
+  // canDo('websiteinquiries', ...) in renderAdmissionInquiries) — NOT the
+  // Manage Student module, despite the resource's name.
+  'admission-inquiries': ['websiteinquiries'],
+  staff: ['staff'],
+  'staff-payroll': ['staff'],
+  // Communication
+  'comms-messages': ['announcements'],
+  'website-gallery': ['websitegallery'],
+  // Setup
+  'school-info': ['setup'],
+};
+
+// Same idea, for the generic /api/kv/:key store — every kv_store key that's
+// actually a school-data settings blob (as opposed to internal plumbing),
+// mapped to the module(s) whose screen reads/writes it.
+const KV_KEY_TO_MODULE = {
+  'finance-settings': ['managefee'],
+  'fee-types': ['managefee'],
+  'discount-types': ['managefee'],
+  'extra-fee-defs': ['managefee'],
+  'late-fee-settings': ['managefee'],
+  'receipt-settings': ['managefee'],
+  'grading-scale': ['exams', 'result'],
+  'exam-types': ['exams', 'result'],
+  'exam-groups': ['exams', 'result'],
+  'consolidation-scale': ['exams', 'result'],
+  'exam-holidays': ['exams', 'result'],
+  'report-templates': ['exams', 'result'],
+  'staff-departments': ['staff'],
+  'staff-designations': ['staff'],
+  'staff-job-types': ['staff'],
+  'inventory-items': ['inventory'],
+  'inventory-sales': ['inventory'],
+  'inventory-returns': ['inventory'],
+  'inventory-vendor-returns': ['inventory'],
+  'timetable-entries': ['timetable'],
+  'timetable-periods': ['timetable'],
+  'timetable-days': ['timetable'],
+  'syllabus-topics': ['syllabus'],
+  'homework-items': ['syllabus'],
+  'transport-routes': ['transport'],
+  'library-books': ['library'],
+  'library-issues': ['library'],
+  'library-settings': ['library'],
+  'hostel-rooms': ['hostel'],
+  'acct-expense-categories': ['accounting'],
+  'acct-income-categories': ['accounting'],
+  'acct-cost-centers': ['accounting'],
+  'notice-types': ['announcements'],
+  'academic-years': ['setup'],
+  'current-academic-year': ['setup'],
+  'class-levels': ['setup'],
+  'section-levels': ['setup'],
+  'class-section-overrides': ['setup'],
+  // Feeds both the Inventory "Approvals" tab and Promotion & Transfer's
+  // "Approve Requests" tab — either module's access is enough.
+  'pending-approvals': ['inventory', 'promotransfer'],
+  // 'admin-downloads' is deliberately absent here — that screen is
+  // hard-locked to Admin only (see adminOnlyPages/'admintools2' on the
+  // client), enforced directly in handleKv below, not through this table.
+};
+const ADMIN_ONLY_KV_KEYS = ['admin-downloads'];
+
+// Does `role` have "view" access to ANY of `moduleKeys`? Mirrors
+// getRoleViews()'s per-module test in index.html: an explicit saved choice
+// for that module wins, otherwise fall back to the role's built-in default.
+// Sends the 403 itself on failure so call sites can just `if (!ok) return;`.
+async function checkModuleAccess(req, res, moduleKeys) {
+  if (!req.authUser) return true; // unauthenticated (public) routes have nothing to check
+  if (req.authUser.role === 'Admin') return true; // Admin is always the ceiling — never restricted
+  const override = await getRoleOverride(req.authUser.role);
+  const defaults = SERVER_ROLE_VIEWS[req.authUser.role] || [];
+  const ok = moduleKeys.some(key => (override && override[key] !== undefined) ? !!override[key].view : defaults.includes(key));
+  if (!ok) res.status(403).json({ error: 'You do not have permission to access this.' });
+  return ok;
+}
 
 // ---------- Generic helpers for "simple" resources ----------
 // Postgres NUMERIC columns come back from this driver as strings, not JS
@@ -1539,6 +1703,11 @@ app.get('/api/concerns/inbox', async (req, res) => {
     if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
       return res.status(403).json({ error: 'Not available for this account.' });
     }
+    // Roles & Permissions enforcement: a staff role whose Inbox module
+    // access has been explicitly restricted by the admin can no longer read
+    // this by calling the API directly, even though it's not one of the
+    // generic SIMPLE_RESOURCES/HYBRID_RESOURCES/kv routes above.
+    if (!(await checkModuleAccess(req, res, ['inbox']))) return;
     const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
     // Admin/Principal get full oversight — every concern in the school,
     // whoever it's addressed to — not just ones sent to Management, so a
@@ -1564,6 +1733,7 @@ app.put('/api/concerns/:id/reply', async (req, res) => {
     if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
       return res.status(403).json({ error: 'Not available for this account.' });
     }
+    if (!(await checkModuleAccess(req, res, ['inbox']))) return;
     const rows = await sql`SELECT * FROM student_concerns WHERE id = ${req.params.id}`;
     if (!rows.length) return res.status(404).json({ error: 'Concern not found.' });
     const concern = rows[0];
@@ -1599,6 +1769,7 @@ app.put('/api/concerns/:id/status', async (req, res) => {
     if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
       return res.status(403).json({ error: 'Not available for this account.' });
     }
+    if (!(await checkModuleAccess(req, res, ['inbox']))) return;
     const rows = await sql`SELECT * FROM student_concerns WHERE id = ${req.params.id}`;
     if (!rows.length) return res.status(404).json({ error: 'Concern not found.' });
     const concern = rows[0];
@@ -1673,6 +1844,7 @@ app.get('/api/submissions/inbox', async (req, res) => {
     if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
       return res.status(403).json({ error: 'Not available for this account.' });
     }
+    if (!(await checkModuleAccess(req, res, ['inbox']))) return;
     const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
     // Same oversight reasoning as /api/concerns/inbox — Admin/Principal see
     // every submission, not just ones sent to Management, so a teacher
@@ -1696,6 +1868,7 @@ app.put('/api/submissions/:id/review', async (req, res) => {
     if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
       return res.status(403).json({ error: 'Not available for this account.' });
     }
+    if (!(await checkModuleAccess(req, res, ['inbox']))) return;
     const rows = await sql`SELECT * FROM student_submissions WHERE id = ${req.params.id}`;
     if (!rows.length) return res.status(404).json({ error: 'Submission not found.' });
     const submission = rows[0];
@@ -1876,6 +2049,20 @@ app.all('/api/:resource', async (req, res) => {
     if (resource === 'admission-inquiries' && (req.method === 'POST' || req.method === 'PUT')) {
       const validationError = validateAdmissionInquiry(req.body);
       if (validationError) return res.status(400).json({ error: validationError });
+    }
+    // 'users' and 'roles' control who can log in and the permission system
+    // itself — hard-locked to the built-in Admin role, unconditionally,
+    // mirroring LOCKED_ADMIN_ONLY_PAGES on the client. No override, saved or
+    // otherwise, can ever widen this.
+    if ((resource === 'users' || resource === 'roles') && (!req.authUser || req.authUser.role !== 'Admin')) {
+      return res.status(403).json({ error: 'Admin access required.' });
+    }
+    // Roles & Permissions enforcement (see the block above HYBRID_RESOURCES):
+    // a resource mapped here 403s for a role that the admin has explicitly
+    // denied that module to; anything unmapped is unaffected.
+    if (RESOURCE_TO_MODULE[resource]) {
+      const allowed = await checkModuleAccess(req, res, RESOURCE_TO_MODULE[resource]);
+      if (!allowed) return; // checkModuleAccess already sent the 403
     }
     // 'users' is also in SIMPLE_RESOURCES (its column/field list is reused
     // by handleUsers above), but takes its own dedicated handler instead of
