@@ -2703,6 +2703,30 @@
     if(!currentUser) return false;
     return getRolePermission(currentUser.role, moduleKey, action);
   }
+  // A Teacher login's real duties — enforced server-side too (see
+  // getTeacherScope in server.js) — are their homeroom class
+  // (classTeacherClass/classTeacherSection on their own staff record) and
+  // the subject+section combinations they're the assigned Subject Teacher
+  // for (subjectStaffForSection, the same lookup the Subjects screen
+  // itself uses). Mirrored here so Attendance and Marks Entry only ever
+  // show a Teacher their own classes/subjects to begin with, instead of
+  // showing every class and then failing silently to save.
+  function myTeacherScope(){
+    if(!currentUser || currentUser.role !== 'Teacher') return null;
+    const myStaff = staffList.find(st => st.linkedUserId === currentUser.id);
+    if(!myStaff) return { staffId: null, classTeacherOf: null, subjectSections: [] };
+    const classTeacherOf = (myStaff.classTeacherClass && myStaff.classTeacherSection)
+      ? { className: myStaff.classTeacherClass, section: myStaff.classTeacherSection } : null;
+    const subjectSections = [];
+    subjectsList.forEach(subj => {
+      (subj.sections||[]).forEach(sec => {
+        if(subjectStaffForSection(subj, sec).includes(myStaff.id)){
+          subjectSections.push({ subject: subj.name, className: subj.className, section: sec });
+        }
+      });
+    });
+    return { staffId: myStaff.id, classTeacherOf, subjectSections };
+  }
   function getReportCategoryAccess(role, moduleKey){
     const ov = findRoleOverride(role);
     if(ov && ov.permissions[moduleKey] !== undefined) return !!ov.permissions[moduleKey].view;
@@ -5343,12 +5367,27 @@
   function initAttendanceView(){
     document.getElementById('atAyBadge').textContent = 'AY ' + currentAcademicYearValue;
     const classSel = document.getElementById('atClassFilter');
-    if(classSel.options.length <= 1){
-      CLASS_LEVELS.forEach(c => { const o=document.createElement('option'); o.value=c; o.textContent=c; classSel.appendChild(o); });
-    }
     const secSel = document.getElementById('atSectionFilter');
-    if(secSel.options.length <= 1){
-      SECTIONS.forEach(s => { const o=document.createElement('option'); o.value=s; o.textContent='Section '+s; secSel.appendChild(o); });
+    const scope = myTeacherScope();
+    if(scope){
+      // A Teacher only ever sees attendance for the one class they're the
+      // Class Teacher of — never a school-wide class/section picker. See
+      // myTeacherScope() and the matching server-side enforcement.
+      classSel.innerHTML = '<option value="">All Classes</option>';
+      secSel.innerHTML = '<option value="">All Sections</option>';
+      if(scope.classTeacherOf){
+        classSel.innerHTML = `<option value="${scope.classTeacherOf.className}" selected>${scope.classTeacherOf.className}</option>`;
+        secSel.innerHTML = `<option value="${scope.classTeacherOf.section}" selected>Section ${scope.classTeacherOf.section}</option>`;
+      }
+      classSel.disabled = true; secSel.disabled = true;
+    } else {
+      classSel.disabled = false; secSel.disabled = false;
+      if(classSel.options.length <= 1){
+        CLASS_LEVELS.forEach(c => { const o=document.createElement('option'); o.value=c; o.textContent=c; classSel.appendChild(o); });
+      }
+      if(secSel.options.length <= 1){
+        SECTIONS.forEach(s => { const o=document.createElement('option'); o.value=s; o.textContent='Section '+s; secSel.appendChild(o); });
+      }
     }
     switchAttTab(attTab);
   }
@@ -5537,21 +5576,33 @@
   /* --- Mark Attendance --- */
   function renderAttClassGrid(body){
     const classF = document.getElementById('atClassFilter').value;
+    const scope = myTeacherScope();
+    if(scope && !scope.classTeacherOf){
+      body.innerHTML = `<div class="empty-state"><b>You're not set as a Class Teacher for any class yet</b>Attendance can only be marked by that class's Class Teacher — ask an admin to assign you one under Staff.</div>`;
+      return;
+    }
+    const isSectionAllowed = (cls, sec) => !scope || (scope.classTeacherOf.className===cls && scope.classTeacherOf.section===sec);
     const rows = CLASS_LEVELS.filter(c => !classF || c===classF).map(cls => {
-      const tiles = SECTIONS.map(sec => {
+      const tiles = SECTIONS.filter(sec => isSectionAllowed(cls, sec)).map(sec => {
         const count = students.filter(s => s.className===cls && s.section===sec && isActive(s)).length;
         return `<div class="class-tile" onclick="openAttRoster('${cls}','${sec}')"><h4>${cls} — ${sec}</h4><div class="ct-count">${count}</div><div class="ct-label">student${count===1?'':'s'}</div></div>`;
       }).join('');
+      if(!tiles) return '';
       return `
         <div class="class-group">
           <div class="class-group-title">${cls}</div>
           <div class="class-sections-row">${tiles}</div>
         </div>`;
     }).join('');
-    body.innerHTML = rows;
+    body.innerHTML = rows || `<div class="empty-state"><b>No classes to show</b></div>`;
   }
 
   function openAttRoster(cls, sec){
+    const scope = myTeacherScope();
+    if(scope && !(scope.classTeacherOf && scope.classTeacherOf.className===cls && scope.classTeacherOf.section===sec)){
+      showToast("You can only mark attendance for your own homeroom class.");
+      return;
+    }
     window.scrollTo({top:0,left:0,behavior:'instant'});
     attCurrentClass = cls; attCurrentSection = sec;
     attView = 'roster';
@@ -5751,7 +5802,12 @@
   let lowAttFilters = { className:'', section:'', name:'', phone:'' };
 
   function renderLowAttendanceTab(body){
-    let list = computeLowAttendance();
+    // Same Class-Teacher-only scoping as the rest of the Attendance module
+    // — see myTeacherScope() — so a Teacher can't browse low-attendance
+    // students outside their own homeroom class via this tab's own filter.
+    const scope = myTeacherScope();
+    if(scope && scope.classTeacherOf){ lowAttFilters.className = scope.classTeacherOf.className; lowAttFilters.section = scope.classTeacherOf.section; }
+    let list = scope && !scope.classTeacherOf ? [] : computeLowAttendance();
     if(lowAttFilters.className) list = list.filter(d => d.student.className===lowAttFilters.className);
     if(lowAttFilters.section) list = list.filter(d => d.student.section===lowAttFilters.section);
     if(lowAttFilters.name) list = list.filter(d => (d.student.firstName+' '+d.student.lastName).toLowerCase().includes(lowAttFilters.name.toLowerCase()));
@@ -5764,8 +5820,8 @@
       </div>
       <div class="ms-toolbar">
         <div class="ms-toolbar-left">
-          <select id="laClass" onchange="onLowAttFilterChange()"><option value="">All Classes</option>${CLASS_LEVELS.map(c=>`<option ${lowAttFilters.className===c?'selected':''}>${c}</option>`).join('')}</select>
-          <select id="laSection" onchange="onLowAttFilterChange()"><option value="">All Sections</option>${SECTIONS.map(s => `<option value="${s}" ${lowAttFilters.section===s?'selected':''}>Section ${s}</option>`).join('')}</select>
+          <select id="laClass" onchange="onLowAttFilterChange()" ${scope?'disabled':''}>${scope ? '' : '<option value="">All Classes</option>'}${CLASS_LEVELS.filter(c => !scope || c===lowAttFilters.className).map(c=>`<option ${lowAttFilters.className===c?'selected':''}>${c}</option>`).join('')}</select>
+          <select id="laSection" onchange="onLowAttFilterChange()" ${scope?'disabled':''}>${scope ? '' : '<option value="">All Sections</option>'}${SECTIONS.filter(s => !scope || s===lowAttFilters.section).map(s => `<option value="${s}" ${lowAttFilters.section===s?'selected':''}>Section ${s}</option>`).join('')}</select>
           <input class="input" id="laName" placeholder="Search name..." value="${lowAttFilters.name}" oninput="onLowAttFilterChange()">
           <input class="input" id="laPhone" placeholder="Parent phone..." value="${lowAttFilters.phone}" oninput="onLowAttFilterChange()">
         </div>
@@ -6005,10 +6061,16 @@
     if(!meStatusExamId || !examDefs.find(e => e.id === meStatusExamId)) meStatusExamId = examDefs[0].id;
     const exam = examDefs.find(e => e.id === meStatusExamId);
     const examOptions = examDefs.map(ex => `<option value="${ex.id}" ${meStatusExamId===ex.id?'selected':''}>${ex.name}</option>`).join('');
+    const scope = myTeacherScope();
     const rows = [];
     CLASS_LEVELS.forEach(cls => {
       SECTIONS.forEach(sec => {
-        const subjects = getExamSubjects(exam, cls, sec);
+        if(scope && !scope.subjectSections.some(ss => ss.className===cls && ss.section===sec)) return;
+        let subjects = getExamSubjects(exam, cls, sec);
+        if(scope){
+          const mySubjectNames = new Set(scope.subjectSections.filter(ss => ss.className===cls && ss.section===sec).map(ss => ss.subject));
+          subjects = subjects.filter(s => mySubjectNames.has(s.name));
+        }
         if(subjects.length === 0) return;
         const list = students.filter(s => s.className===cls && s.section===sec && isActive(s));
         if(list.length === 0) return;
@@ -6441,11 +6503,18 @@
     }
     if(!examCurrentExamId || !examDefs.find(e => e.id === examCurrentExamId)) examCurrentExamId = examDefs[0].id;
     const examOptions = examDefs.map(ex => `<option value="${ex.id}" ${examCurrentExamId===ex.id?'selected':''}>${ex.name}</option>`).join('');
+    const scope = myTeacherScope();
+    if(scope && !scope.subjectSections.length){
+      body.innerHTML = `<div class="empty-state"><b>You're not assigned as a Subject Teacher for any class yet</b>Marks can only be entered by that subject's assigned teacher — ask an admin to assign you one under Subjects.</div>`;
+      return;
+    }
+    const isSectionAllowed = (cls, sec) => !scope || scope.subjectSections.some(ss => ss.className===cls && ss.section===sec);
     const rows = CLASS_LEVELS.map(cls => {
-      const tiles = SECTIONS.map(sec => {
+      const tiles = SECTIONS.filter(sec => isSectionAllowed(cls, sec)).map(sec => {
         const count = students.filter(s => s.className===cls && s.section===sec && isActive(s)).length;
         return `<div class="class-tile" onclick="openMarksSection('${cls}','${sec}')"><h4>${cls} — ${sec}</h4><div class="ct-count">${count}</div><div class="ct-label">student${count===1?'':'s'}</div></div>`;
       }).join('');
+      if(!tiles) return '';
       return `
         <div class="class-group">
           <div class="class-group-title">${cls}</div>
@@ -6457,11 +6526,16 @@
         <label>Exam</label>
         <select id="marksExamSelect" onchange="examCurrentExamId=this.value;">${examOptions}</select>
       </div>
-      ${rows}
+      ${rows || `<div class="empty-state"><b>No classes to show</b></div>`}
     `;
   }
 
   function openMarksSection(cls, sec){
+    const scope = myTeacherScope();
+    if(scope && !scope.subjectSections.some(ss => ss.className===cls && ss.section===sec)){
+      showToast("You can only enter marks for a class/subject you are assigned to teach.");
+      return;
+    }
     window.scrollTo({top:0,left:0,behavior:'instant'});
     examCurrentClass = cls; examCurrentSection = sec;
     examMarksView = 'sheet';
@@ -6476,11 +6550,23 @@
   function renderMarksSheet(body){
     const exam = examDefs.find(e => e.id === examCurrentExamId);
     if(!exam){ examMarksView = 'grid'; return renderExamBody(); }
-    const subjects = getExamSubjects(exam, examCurrentClass, examCurrentSection);
+    let subjects = getExamSubjects(exam, examCurrentClass, examCurrentSection);
+    // A Teacher only ever sees/enters marks for the subject(s) they're the
+    // assigned Subject Teacher for in this class/section — never a
+    // colleague's subject, even within a class they otherwise have some
+    // access to. See myTeacherScope() and the matching server-side check.
+    const scope = myTeacherScope();
+    if(scope){
+      const mySubjectNames = new Set(scope.subjectSections.filter(ss => ss.className===examCurrentClass && ss.section===examCurrentSection).map(ss => ss.subject));
+      subjects = subjects.filter(s => mySubjectNames.has(s.name));
+    }
     if(subjects.length === 0){
+      const noneAssigned = scope && getExamSubjects(exam, examCurrentClass, examCurrentSection).length > 0;
       body.innerHTML = `
         <div class="breadcrumb"><a onclick="backToMarksGrid()">All Classes</a> &nbsp;/&nbsp; ${examCurrentClass} — Section ${examCurrentSection} &nbsp;/&nbsp; ${exam.name}</div>
-        <div class="empty-state"><b>No subjects configured yet</b>Go to the "Exams" tab → "Configure Subjects" for ${examCurrentClass} — Section ${examCurrentSection} before entering marks.</div>
+        ${noneAssigned
+          ? `<div class="empty-state"><b>None of these subjects are assigned to you</b>You're not the Subject Teacher for any subject in ${examCurrentClass} — Section ${examCurrentSection}.</div>`
+          : `<div class="empty-state"><b>No subjects configured yet</b>Go to the "Exams" tab → "Configure Subjects" for ${examCurrentClass} — Section ${examCurrentSection} before entering marks.</div>`}
       `;
       return;
     }
