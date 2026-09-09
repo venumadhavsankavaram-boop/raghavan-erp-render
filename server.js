@@ -2170,6 +2170,36 @@ app.all('/api/:resource', async (req, res) => {
       const rows = await sql.query(`SELECT * FROM ${table} WHERE student_id = $1 ORDER BY created_at ASC NULLS LAST`, [student.id]);
       return res.status(200).json(rows.map(r => simpleToAppShape(r, fields())));
     }
+    // A Teacher's access to the student roster ('admissions') can be turned
+    // off entirely by an admin via Roles & Permissions — and on this school
+    // it is (confirmed live: Teacher's 'admissions' view is off) — which
+    // otherwise 403s /api/students outright for every Teacher login and
+    // leaves Attendance and Marks Entry with an empty roster for EVERY
+    // class, including their own, since both screens resolve "who's in
+    // this class" from this same endpoint. That 'admissions' toggle is
+    // about the full roster-management screen (add/edit/delete any
+    // student) — a Teacher still needs to see the students in the specific
+    // classes they're allotted to, same as they can already see those
+    // classes' attendance and marks. So regardless of how 'admissions' is
+    // set, a GET here for a Teacher login always returns just the students
+    // in their homeroom class and/or the class/sections of the subjects
+    // they're assigned to teach — see getTeacherScope above — never the
+    // rest of the school's roster, and never a write (adding/editing a
+    // student still goes through the normal 'admissions' permission).
+    if (resource === 'students' && req.method === 'GET' && req.authUser && req.authUser.role === 'Teacher') {
+      const scope = await getTeacherScope(req.authUser.id);
+      const pairs = [];
+      if (scope.classTeacherOf) pairs.push(scope.classTeacherOf);
+      scope.subjectSections.forEach(ss => {
+        if (!pairs.some(p => p.className === ss.className && p.section === ss.section)) {
+          pairs.push({ className: ss.className, section: ss.section });
+        }
+      });
+      if (!pairs.length) return res.status(200).json([]);
+      const rows = await sql`SELECT * FROM students`;
+      const filtered = rows.filter(r => pairs.some(p => p.className === r.class_name && p.section === r.section));
+      return res.status(200).json(filtered.map(r => hybridToAppShape(r, HYBRID_RESOURCES.students.core)));
+    }
     // A Teacher login only ever gets to see or touch attendance for the one
     // class they're the Class Teacher of, and exam marks for the
     // subject+section combinations they're the assigned Subject Teacher
