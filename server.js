@@ -245,6 +245,16 @@ async function ensureSchema() {
     reply_message TEXT, replied_by TEXT, replied_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  // Whether a concern is actually solved is a separate decision from
+  // whether it's been replied to — a teacher might reply "will check and get
+  // back" without the matter being resolved yet, or resolve something over a
+  // phone call with no reply logged at all. resolved_at/resolved_by are
+  // reset to null on reopening rather than kept as history, so the badge
+  // shown always reflects the current solved state, not every past toggle.
+  // ADD COLUMN IF NOT EXISTS since student_concerns already existed in
+  // production before this pair of columns was added.
+  await sql`ALTER TABLE student_concerns ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE student_concerns ADD COLUMN IF NOT EXISTS resolved_by TEXT`;
   // A Student/Parent login submitting completed homework or holiday work to
   // their Class Teacher, a Subject Teacher, or Management. homework_id is an
   // optional link back to an existing kv_store homeworkItems entry (see
@@ -261,6 +271,14 @@ async function ensureSchema() {
     feedback TEXT, reviewed_by TEXT, reviewed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  // Widened from a single `attachment` to a JSONB array of {name, dataUrl}
+  // so a submission can carry more than one file (a scan of several
+  // worksheet pages, or a worksheet plus a cover note) — same base64
+  // data-URL convention as every other upload in this app, just several of
+  // them per row instead of one. `attachment` (singular) stays on the table
+  // for any row saved before this existed; the app reads `attachments` first
+  // and falls back to wrapping `attachment` for those older rows.
+  await sql`ALTER TABLE student_submissions ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb`;
   // The generic key/value table backs every module that doesn't need its own
   // dedicated table with real columns — Inventory, Timetable, Library, Transport,
   // Hostel, Accounting, Fee/Exam sub-settings, Report Template signatures, Class
@@ -1431,16 +1449,22 @@ function shapeConcern(r) {
     recipientName: r.recipient_name, subjectName: r.subject_name,
     message: r.message, status: r.status,
     replyMessage: r.reply_message, repliedBy: r.replied_by, repliedAt: r.replied_at,
+    resolvedAt: r.resolved_at, resolvedBy: r.resolved_by,
     createdAt: r.created_at,
   };
 }
 function shapeSubmission(r) {
+  // Older rows (saved before multi-attachment support) carry their one file
+  // in `attachment`; newer rows carry `attachments` and leave `attachment`
+  // null. Either way the client always gets an `attachments` array to render.
+  const attachments = (r.attachments && r.attachments.length) ? r.attachments
+    : (r.attachment ? [{ name: 'Attachment', dataUrl: r.attachment }] : []);
   return {
     id: r.id, studentId: r.student_id, studentName: r.student_name,
     className: r.class_name, section: r.section,
     recipientType: r.recipient_type, recipientStaffId: r.recipient_staff_id,
     recipientName: r.recipient_name, subjectName: r.subject_name,
-    homeworkId: r.homework_id, title: r.title, description: r.description, attachment: r.attachment,
+    homeworkId: r.homework_id, title: r.title, description: r.description, attachments,
     status: r.status, feedback: r.feedback, reviewedBy: r.reviewed_by, reviewedAt: r.reviewed_at,
     createdAt: r.created_at,
   };
@@ -1548,14 +1572,46 @@ app.put('/api/concerns/:id/reply', async (req, res) => {
     if (!canReply) return res.status(403).json({ error: 'This concern is not addressed to you.' });
     const replyMessage = req.body && req.body.replyMessage;
     if (!replyMessage || !String(replyMessage).trim()) return res.status(400).json({ error: 'Please enter a reply.' });
+    // Deliberately doesn't touch status/resolved_at — replying and marking a
+    // concern solved are two separate actions (see /api/concerns/:id/status
+    // below), since a reply doesn't always mean the matter is actually
+    // settled yet, and a concern can be resolved with no reply logged at all.
     await sql`
-      UPDATE student_concerns SET reply_message = ${String(replyMessage).trim().slice(0, 4000)}, status = 'resolved',
+      UPDATE student_concerns SET reply_message = ${String(replyMessage).trim().slice(0, 4000)},
         replied_by = ${req.authUser.name}, replied_at = now()
       WHERE id = ${req.params.id}
     `;
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('concerns reply error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// Marks a concern solved or reopens it — independent of replying (see
+// above). Reopening clears resolved_at/resolved_by rather than keeping them
+// as history, so what's shown always reflects the concern's current state.
+app.put('/api/concerns/:id/status', async (req, res) => {
+  try {
+    if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Not available for this account.' });
+    }
+    const rows = await sql`SELECT * FROM student_concerns WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Concern not found.' });
+    const concern = rows[0];
+    const myStaff = await getMyStaffRow(req.authUser.id);
+    const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
+    const canAct = (myStaff && concern.recipient_staff_id === myStaff.id) || (concern.recipient_type === 'management' && isManagement);
+    if (!canAct) return res.status(403).json({ error: 'This concern is not addressed to you.' });
+    const resolved = !!(req.body && req.body.resolved);
+    if (resolved) {
+      await sql`UPDATE student_concerns SET status = 'resolved', resolved_at = now(), resolved_by = ${req.authUser.name} WHERE id = ${req.params.id}`;
+    } else {
+      await sql`UPDATE student_concerns SET status = 'open', resolved_at = NULL, resolved_by = NULL WHERE id = ${req.params.id}`;
+    }
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('concerns status error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
@@ -1571,15 +1627,21 @@ app.post('/api/submissions', async (req, res) => {
     const recipientError = validateRecipient(b);
     if (recipientError) return res.status(400).json({ error: recipientError });
     if (!b.title || !String(b.title).trim()) return res.status(400).json({ error: 'Please enter a title.' });
+    // A submission can carry several files (see the ALTER TABLE above) — cap
+    // the count server-side too, not just in the UI, since this body still
+    // has to fit inside the app's global 25mb JSON limit either way.
+    const attachments = Array.isArray(b.attachments)
+      ? b.attachments.filter(a => a && a.dataUrl).slice(0, 5).map(a => ({ name: String(a.name || 'file').slice(0, 200), dataUrl: a.dataUrl }))
+      : [];
     const id = 'submission_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
     await sql`
-      INSERT INTO student_submissions (id, student_id, student_name, class_name, section, recipient_type, recipient_staff_id, recipient_name, subject_name, homework_id, title, description, attachment)
+      INSERT INTO student_submissions (id, student_id, student_name, class_name, section, recipient_type, recipient_staff_id, recipient_name, subject_name, homework_id, title, description, attachments)
       VALUES (${id}, ${student.id}, ${(student.first_name + ' ' + (student.last_name || '')).trim()}, ${student.class_name}, ${student.section},
               ${b.recipientType}, ${b.recipientType === 'management' ? null : b.recipientStaffId},
               ${b.recipientName || (b.recipientType === 'management' ? 'Management' : '')},
               ${b.recipientType === 'subject_teacher' ? (b.subjectName || '') : null},
               ${b.homeworkId || null}, ${String(b.title).trim().slice(0, 300)},
-              ${String(b.description || '').trim().slice(0, 4000)}, ${b.attachment || null})
+              ${String(b.description || '').trim().slice(0, 4000)}, ${JSON.stringify(attachments)}::jsonb)
     `;
     return res.status(201).json({ ok: true, id });
   } catch (err) {
