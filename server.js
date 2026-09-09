@@ -576,7 +576,12 @@ async function handleKv(req, res, key) {
   if (ADMIN_ONLY_KV_KEYS.includes(key) && (!req.authUser || req.authUser.role !== 'Admin')) {
     return res.status(403).json({ error: 'Admin access required.' });
   }
-  if (KV_KEY_TO_MODULE[key]) {
+  // See PARENT_SHARED_REFERENCE_KV_KEYS above — same reasoning as the main
+  // dispatcher's PARENT_SHARED_REFERENCE_RESOURCES: a Student/Parent login
+  // reading the late-fee policy isn't reading anything per-student, and
+  // without it Fees silently shows every family as owing no late fee at all.
+  const parentSharedKvBypass = req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_KV_KEYS.includes(key);
+  if (KV_KEY_TO_MODULE[key] && !parentSharedKvBypass) {
     const allowed = await checkModuleAccess(req, res, KV_KEY_TO_MODULE[key]);
     if (!allowed) return; // checkModuleAccess already sent the 403
   }
@@ -1438,6 +1443,41 @@ const PARENT_LOGIN_ROLES = ['Student', 'Parent'];
 // Principal as the two full-access staff roles.
 const MANAGEMENT_ROLES = ['Admin', 'Principal'];
 
+// The same self-service gap 'students' already had (see the dispatcher
+// below), for every other piece of data "My Portal" needs to render Fees,
+// Marks, and the Notifications feed correctly. Each of these is normally
+// gated to a staff module (managefee/attendance/exams/result) that a
+// Student/Parent role will never be granted — so every one of them silently
+// 403'd for that role, and the client's own fallback-to-empty-array
+// behavior on a fetch failure meant Fees computed "collected so far" as 0
+// for every category regardless of what had actually been paid — a family
+// that had paid in full still saw those fees as outstanding and payable,
+// on the one screen where getting that wrong matters most.
+//
+// Two different fixes, by data shape:
+//  - PARENT_OWN_RECORD_RESOURCES: a real per-student table (has a
+//    student_id column). Scoped to just that login's own linked student —
+//    never the whole school's rows — the same principle as the 'students'
+//    carve-out itself.
+//  - PARENT_SHARED_REFERENCE_RESOURCES: read-only reference data with no
+//    student_id at all (this year's fee schedule, exam definitions/dates,
+//    the subject list) — nothing in these is specific to any one student,
+//    so there's no "own record" to scope to; a Student/Parent login is
+//    simply allowed to read them like every other GET below, unchanged.
+const PARENT_OWN_RECORD_RESOURCES = {
+  payments: { table: 'payments', fields: () => SIMPLE_RESOURCES.payments.fields },
+  discounts: { table: 'student_discounts', fields: () => SIMPLE_RESOURCES.discounts.fields },
+  'extra-fees': { table: 'student_extra_fees', fields: () => SIMPLE_RESOURCES['extra-fees'].fields },
+  'exam-results': { table: 'exam_results', fields: () => SIMPLE_RESOURCES['exam-results'].fields },
+  attendance: { table: 'attendance_records', fields: () => SIMPLE_RESOURCES.attendance.fields },
+};
+const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjects'];
+// Same idea, one level down, for the generic /api/kv/:key store — right now
+// just the late-fee policy (rate/grace period), which Fees needs to show an
+// accurate "Outstanding" figure instead of silently treating every family
+// as having no late fee at all.
+const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings'];
+
 app.post('/api/login', async (req, res) => {
   try {
     const { username, password, audience } = req.body || {};
@@ -1648,6 +1688,51 @@ async function getLinkedStudent(userId) {
   if (!studentId) return null;
   const studentRows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
   return studentRows.length ? studentRows[0] : null;
+}
+// ---------- Teacher self-service scoping: homeroom attendance & assigned-subject marks ----------
+// A Teacher login's module access (SERVER_ROLE_VIEWS.Teacher includes
+// 'attendance' and 'exams'/'result') was letting any teacher mark
+// attendance or enter exam marks for ANY class in the school, not just the
+// ones they actually teach — the module system only answers "can this
+// role touch this module at all," not "can this specific person touch
+// this specific class." These helpers resolve a signed-in Teacher's real
+// duties — the homeroom class they're the Class Teacher of (set on their
+// staff record, same classTeacherClass/classTeacherSection index.html
+// already reads) and the subject+section combinations they're the
+// assigned Subject Teacher for (subjects.section_staff, the same
+// assignment subjectStaffForSection() reads client-side) — so attendance
+// and marks can be scoped to just that, the same way getLinkedStudent
+// scopes a Parent/Student login to just their own child.
+async function getMyStaffFull(userId) {
+  const rows = await sql`SELECT * FROM staff WHERE extra->>'linkedUserId' = ${userId} LIMIT 1`;
+  return rows.length ? rows[0] : null;
+}
+async function getTeacherScope(userId) {
+  const staff = await getMyStaffFull(userId);
+  if (!staff) return { staffId: null, classTeacherOf: null, subjectSections: [] };
+  const extra = staff.extra || {};
+  const classTeacherOf = (extra.classTeacherClass && extra.classTeacherSection)
+    ? { className: extra.classTeacherClass, section: extra.classTeacherSection }
+    : null;
+  const subjectRows = await sql`SELECT name, class_name, section_staff FROM subjects`;
+  const subjectSections = [];
+  for (const s of subjectRows) {
+    const sectionStaff = s.section_staff || {};
+    for (const [section, staffIds] of Object.entries(sectionStaff)) {
+      if (Array.isArray(staffIds) && staffIds.includes(staff.id)) {
+        subjectSections.push({ subject: s.name, className: s.class_name, section });
+      }
+    }
+  }
+  return { staffId: staff.id, classTeacherOf, subjectSections };
+}
+async function studentClassMap(studentIds) {
+  if (!studentIds.length) return {};
+  const placeholders = studentIds.map((_, i) => `$${i + 1}`).join(', ');
+  const rows = await sql.query(`SELECT id, class_name, section FROM students WHERE id IN (${placeholders})`, studentIds);
+  const map = {};
+  rows.forEach(r => { map[r.id] = { className: r.class_name, section: r.section }; });
+  return map;
 }
 function validateRecipient(b) {
   const recipientType = CONCERN_RECIPIENT_TYPES.includes(b.recipientType) ? b.recipientType : null;
@@ -2074,10 +2159,93 @@ app.all('/api/:resource', async (req, res) => {
       const student = await getLinkedStudent(req.authUser.id);
       return res.status(200).json(student ? [hybridToAppShape(student, HYBRID_RESOURCES.students.core)] : []);
     }
+    // See PARENT_OWN_RECORD_RESOURCES above — the same self-service carve-out
+    // as 'students', for every other per-student table "My Portal" reads
+    // (Fees and Marks). Scoped by student_id so this never returns anyone
+    // else's payments, discounts, extra fees, exam results, or attendance.
+    if (req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_OWN_RECORD_RESOURCES[resource]) {
+      const student = await getLinkedStudent(req.authUser.id);
+      if (!student) return res.status(200).json([]);
+      const { table, fields } = PARENT_OWN_RECORD_RESOURCES[resource];
+      const rows = await sql.query(`SELECT * FROM ${table} WHERE student_id = $1 ORDER BY created_at ASC NULLS LAST`, [student.id]);
+      return res.status(200).json(rows.map(r => simpleToAppShape(r, fields())));
+    }
+    // A Teacher login only ever gets to see or touch attendance for the one
+    // class they're the Class Teacher of, and exam marks for the
+    // subject+section combinations they're the assigned Subject Teacher
+    // for — see getTeacherScope above. Reads are scoped down to that (never
+    // a 403 — an empty result, same spirit as the Parent carve-outs above),
+    // writes are checked against the specific student/subject in the
+    // request and rejected outright if it falls outside their duties. This
+    // runs before the blanket 'attendance'/'exams'/'result' module check
+    // below because that check only knows the Teacher role can touch these
+    // modules at all, not which class/subject. Admin/Principal never hit
+    // this — MANAGEMENT_ROLES-only pages aside, checkModuleAccess already
+    // lets them through everything unconditionally.
+    if (req.authUser && req.authUser.role === 'Teacher' && (resource === 'attendance' || resource === 'exam-results')) {
+      const scope = await getTeacherScope(req.authUser.id);
+      if (resource === 'attendance') {
+        if (req.method === 'GET') {
+          if (!scope.classTeacherOf) return res.status(200).json([]);
+          const studentRows = await sql`SELECT id FROM students WHERE class_name = ${scope.classTeacherOf.className} AND section = ${scope.classTeacherOf.section}`;
+          const ids = studentRows.map(s => s.id);
+          if (!ids.length) return res.status(200).json([]);
+          const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
+          const rows = await sql.query(`SELECT * FROM attendance_records WHERE student_id IN (${placeholders}) ORDER BY created_at ASC NULLS LAST`, ids);
+          return res.status(200).json(rows.map(r => simpleToAppShape(r, SIMPLE_RESOURCES.attendance.fields)));
+        }
+        if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
+          let targetStudentId = (req.body || {}).studentId || null;
+          if (req.method === 'DELETE') {
+            const { id } = req.query;
+            const existing = id ? await sql`SELECT student_id FROM attendance_records WHERE id = ${id}` : [];
+            targetStudentId = existing.length ? existing[0].student_id : null;
+          }
+          const inScope = targetStudentId && scope.classTeacherOf &&
+            (await sql`SELECT 1 FROM students WHERE id = ${targetStudentId} AND class_name = ${scope.classTeacherOf.className} AND section = ${scope.classTeacherOf.section}`).length > 0;
+          if (!inScope) return res.status(403).json({ error: 'You can only manage attendance for your own homeroom class.' });
+        }
+      }
+      if (resource === 'exam-results') {
+        const isMySubjectSection = (subject, className, section) =>
+          scope.subjectSections.some(ss => ss.subject === subject && ss.className === className && ss.section === section);
+        if (req.method === 'GET') {
+          if (!scope.subjectSections.length) return res.status(200).json([]);
+          const allRows = await sql`SELECT * FROM exam_results ORDER BY created_at ASC NULLS LAST`;
+          const studentIds = [...new Set(allRows.map(r => r.student_id))];
+          const classMap = await studentClassMap(studentIds);
+          const filtered = allRows.filter(r => {
+            const cls = classMap[r.student_id];
+            return cls && isMySubjectSection(r.subject, cls.className, cls.section);
+          });
+          return res.status(200).json(filtered.map(r => simpleToAppShape(r, SIMPLE_RESOURCES['exam-results'].fields)));
+        }
+        if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
+          let targetStudentId, targetSubject;
+          if (req.method === 'DELETE') {
+            const { id } = req.query;
+            const existing = id ? await sql`SELECT student_id, subject FROM exam_results WHERE id = ${id}` : [];
+            targetStudentId = existing.length ? existing[0].student_id : null;
+            targetSubject = existing.length ? existing[0].subject : null;
+          } else {
+            targetStudentId = (req.body || {}).studentId || null;
+            targetSubject = (req.body || {}).subject || null;
+          }
+          const cls = targetStudentId ? (await studentClassMap([targetStudentId]))[targetStudentId] : null;
+          const inScope = cls && targetSubject && isMySubjectSection(targetSubject, cls.className, cls.section);
+          if (!inScope) return res.status(403).json({ error: 'You can only enter marks for a class/subject you are assigned to teach.' });
+        }
+      }
+    }
     // Roles & Permissions enforcement (see the block above HYBRID_RESOURCES):
     // a resource mapped here 403s for a role that the admin has explicitly
-    // denied that module to; anything unmapped is unaffected.
-    if (RESOURCE_TO_MODULE[resource]) {
+    // denied that module to; anything unmapped is unaffected. A
+    // Student/Parent login reading one of PARENT_SHARED_REFERENCE_RESOURCES
+    // (see above) skips this — there's nothing per-student to leak in a fee
+    // schedule, an exam's dates, or the subject list, and the self-service
+    // portal can't work correctly without being able to read them.
+    const parentSharedBypass = req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_RESOURCES.includes(resource);
+    if (RESOURCE_TO_MODULE[resource] && !parentSharedBypass) {
       const allowed = await checkModuleAccess(req, res, RESOURCE_TO_MODULE[resource]);
       if (!allowed) return; // checkModuleAccess already sent the 403
     }
