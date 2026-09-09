@@ -2057,6 +2057,8 @@ app.all('/api/:resource', async (req, res) => {
     if ((resource === 'users' || resource === 'roles') && (!req.authUser || req.authUser.role !== 'Admin')) {
       return res.status(403).json({ error: 'Admin access required.' });
     }
+      return res.status(403).json({ error: 'Admin access required.' });
+    }
     // Roles & Permissions enforcement (see the block above HYBRID_RESOURCES):
     // a resource mapped here 403s for a role that the admin has explicitly
     // denied that module to; anything unmapped is unaffected.
