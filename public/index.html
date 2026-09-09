@@ -16896,9 +16896,26 @@
     if(inboxTab === 'concerns') return renderInboxConcerns(body);
     if(inboxTab === 'submissions') return renderInboxSubmissions(body);
   }
+  // Rough "how many whole days ago" for flagging stale open items — not
+  // meant to be precise to the hour, just enough to catch something that's
+  // been sitting unanswered.
+  function daysAgo(dateStr){
+    if(!dateStr) return 0;
+    return Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000*60*60*24));
+  }
+  function isManagementUser(){
+    return !!currentUser && (currentUser.role === 'Admin' || currentUser.role === 'Principal');
+  }
   function renderInboxConcerns(body){
-    const sorted = [...inboxConcerns].sort((a,b) => (a.status==='open'?0:1) - (b.status==='open'?0:1) || (b.createdAt||'').localeCompare(a.createdAt||''));
-    body.innerHTML = sorted.length ? sorted.map(c => `
+    // Oldest-open-first, so anything that's been sitting unanswered the
+    // longest surfaces at the top rather than getting buried under newer
+    // ones — this matters most for Admin/Principal, who (see
+    // /api/concerns/inbox) see every concern school-wide, not just their own.
+    const sorted = [...inboxConcerns].sort((a,b) => (a.status==='open'?0:1) - (b.status==='open'?0:1) || (a.createdAt||'').localeCompare(b.createdAt||''));
+    const noteHtml = isManagementUser() ? `<p style="font-size:0.78rem; color:var(--ink-soft); margin:0 0 14px;">Showing every concern raised school-wide — including ones addressed to a Class or Subject Teacher — so you can step in if one's gone unanswered.</p>` : '';
+    body.innerHTML = noteHtml + (sorted.length ? sorted.map(c => {
+      const stale = c.status==='open' && daysAgo(c.createdAt) >= 2;
+      return `
       <div class="profile-card" style="margin-bottom:12px; ${c.status==='open' ? 'border-left:4px solid var(--magenta);' : 'border-left:4px solid var(--teal);'}">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
           <div>
@@ -16907,7 +16924,10 @@
             <p style="font-size:0.85rem; white-space:pre-wrap; margin:4px 0;">${c.message}</p>
             <p style="font-size:0.72rem; color:var(--ink-soft); margin:0;">${c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</p>
           </div>
-          <span class="pill" style="${c.status==='open' ? 'background:rgba(209,16,115,0.15); color:var(--magenta);' : 'background:rgba(19,145,127,0.15); color:var(--teal);'}">${c.status==='open' ? 'Open' : 'Solved'}</span>
+          <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+            <span class="pill" style="${c.status==='open' ? 'background:rgba(209,16,115,0.15); color:var(--magenta);' : 'background:rgba(19,145,127,0.15); color:var(--teal);'}">${c.status==='open' ? 'Open' : 'Solved'}</span>
+            ${stale ? `<span class="pill" style="background:rgba(209,16,115,0.15); color:var(--magenta); font-size:0.6rem;">⚠️ ${daysAgo(c.createdAt)} days, no action</span>` : ''}
+          </div>
         </div>
         ${c.replyMessage ? `
           <div style="margin-top:10px; padding:10px; background:var(--cream); border-radius:8px;">
@@ -16928,7 +16948,8 @@
           }
         </div>
       </div>
-    `).join('') : `<div class="empty-state"><b>Nothing here yet</b>Concerns addressed to you will show up here.</div>`;
+    `;
+    }).join('') : `<div class="empty-state"><b>Nothing here yet</b>Concerns addressed to you will show up here.</div>`);
   }
   async function sendConcernReply(id){
     const ta = document.getElementById('concernReply-'+id);
@@ -16958,8 +16979,9 @@
     }
   }
   function renderInboxSubmissions(body){
-    const sorted = [...inboxSubmissions].sort((a,b) => (a.status==='submitted'?0:1) - (b.status==='submitted'?0:1) || (b.createdAt||'').localeCompare(a.createdAt||''));
-    body.innerHTML = sorted.length ? sorted.map(s => `
+    const sorted = [...inboxSubmissions].sort((a,b) => (a.status==='submitted'?0:1) - (b.status==='submitted'?0:1) || (a.createdAt||'').localeCompare(b.createdAt||''));
+    const noteHtml = isManagementUser() ? `<p style="font-size:0.78rem; color:var(--ink-soft); margin:0 0 14px;">Showing every submission school-wide — including ones addressed to a Class or Subject Teacher — so you can step in if one's gone unreviewed.</p>` : '';
+    body.innerHTML = noteHtml + (sorted.length ? sorted.map(s => `
       <div class="profile-card" style="margin-bottom:12px; ${s.status==='submitted' ? 'border-left:4px solid var(--teal);' : ''}">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
           <div>
@@ -16984,7 +17006,7 @@
           </div>
         `}
       </div>
-    `).join('') : `<div class="empty-state"><b>Nothing here yet</b>Homework and holiday-work submissions addressed to you will show up here.</div>`;
+    `).join('') : `<div class="empty-state"><b>Nothing here yet</b>Homework and holiday-work submissions addressed to you will show up here.</div>`);
   }
   async function markSubmissionReviewed(id){
     const ta = document.getElementById('submissionFeedback-'+id);
