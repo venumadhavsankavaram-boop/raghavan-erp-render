@@ -1539,18 +1539,19 @@ app.get('/api/concerns/inbox', async (req, res) => {
     if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
       return res.status(403).json({ error: 'Not available for this account.' });
     }
-    const myStaff = await getMyStaffRow(req.authUser.id);
     const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
-    let rows;
-    if (myStaff && isManagement) {
-      rows = await sql`SELECT * FROM student_concerns WHERE recipient_staff_id = ${myStaff.id} OR recipient_type = 'management' ORDER BY created_at DESC`;
-    } else if (myStaff) {
-      rows = await sql`SELECT * FROM student_concerns WHERE recipient_staff_id = ${myStaff.id} ORDER BY created_at DESC`;
-    } else if (isManagement) {
-      rows = await sql`SELECT * FROM student_concerns WHERE recipient_type = 'management' ORDER BY created_at DESC`;
-    } else {
-      rows = [];
+    // Admin/Principal get full oversight — every concern in the school,
+    // whoever it's addressed to — not just ones sent to Management, so a
+    // Class/Subject Teacher sitting on a parent's concern doesn't go
+    // unnoticed. Every other staff role still only sees what's addressed to
+    // their own staff record.
+    if (isManagement) {
+      const rows = await sql`SELECT * FROM student_concerns ORDER BY created_at ASC`;
+      return res.status(200).json(rows.map(shapeConcern));
     }
+    const myStaff = await getMyStaffRow(req.authUser.id);
+    if (!myStaff) return res.status(200).json([]);
+    const rows = await sql`SELECT * FROM student_concerns WHERE recipient_staff_id = ${myStaff.id} ORDER BY created_at DESC`;
     return res.status(200).json(rows.map(shapeConcern));
   } catch (err) {
     console.error('concerns inbox error:', err);
@@ -1568,7 +1569,9 @@ app.put('/api/concerns/:id/reply', async (req, res) => {
     const concern = rows[0];
     const myStaff = await getMyStaffRow(req.authUser.id);
     const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
-    const canReply = (myStaff && concern.recipient_staff_id === myStaff.id) || (concern.recipient_type === 'management' && isManagement);
+    // Admin/Principal can act on any concern (same oversight reasoning as
+    // /api/concerns/inbox above) — not just ones addressed to Management.
+    const canReply = (myStaff && concern.recipient_staff_id === myStaff.id) || isManagement;
     if (!canReply) return res.status(403).json({ error: 'This concern is not addressed to you.' });
     const replyMessage = req.body && req.body.replyMessage;
     if (!replyMessage || !String(replyMessage).trim()) return res.status(400).json({ error: 'Please enter a reply.' });
@@ -1601,7 +1604,7 @@ app.put('/api/concerns/:id/status', async (req, res) => {
     const concern = rows[0];
     const myStaff = await getMyStaffRow(req.authUser.id);
     const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
-    const canAct = (myStaff && concern.recipient_staff_id === myStaff.id) || (concern.recipient_type === 'management' && isManagement);
+    const canAct = (myStaff && concern.recipient_staff_id === myStaff.id) || isManagement;
     if (!canAct) return res.status(403).json({ error: 'This concern is not addressed to you.' });
     const resolved = !!(req.body && req.body.resolved);
     if (resolved) {
@@ -1670,18 +1673,17 @@ app.get('/api/submissions/inbox', async (req, res) => {
     if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
       return res.status(403).json({ error: 'Not available for this account.' });
     }
-    const myStaff = await getMyStaffRow(req.authUser.id);
     const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
-    let rows;
-    if (myStaff && isManagement) {
-      rows = await sql`SELECT * FROM student_submissions WHERE recipient_staff_id = ${myStaff.id} OR recipient_type = 'management' ORDER BY created_at DESC`;
-    } else if (myStaff) {
-      rows = await sql`SELECT * FROM student_submissions WHERE recipient_staff_id = ${myStaff.id} ORDER BY created_at DESC`;
-    } else if (isManagement) {
-      rows = await sql`SELECT * FROM student_submissions WHERE recipient_type = 'management' ORDER BY created_at DESC`;
-    } else {
-      rows = [];
+    // Same oversight reasoning as /api/concerns/inbox — Admin/Principal see
+    // every submission, not just ones sent to Management, so a teacher
+    // ignoring submitted work doesn't go unnoticed.
+    if (isManagement) {
+      const rows = await sql`SELECT * FROM student_submissions ORDER BY created_at ASC`;
+      return res.status(200).json(rows.map(shapeSubmission));
     }
+    const myStaff = await getMyStaffRow(req.authUser.id);
+    if (!myStaff) return res.status(200).json([]);
+    const rows = await sql`SELECT * FROM student_submissions WHERE recipient_staff_id = ${myStaff.id} ORDER BY created_at DESC`;
     return res.status(200).json(rows.map(shapeSubmission));
   } catch (err) {
     console.error('submissions inbox error:', err);
@@ -1699,7 +1701,7 @@ app.put('/api/submissions/:id/review', async (req, res) => {
     const submission = rows[0];
     const myStaff = await getMyStaffRow(req.authUser.id);
     const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
-    const canReview = (myStaff && submission.recipient_staff_id === myStaff.id) || (submission.recipient_type === 'management' && isManagement);
+    const canReview = (myStaff && submission.recipient_staff_id === myStaff.id) || isManagement;
     if (!canReview) return res.status(403).json({ error: 'This submission is not addressed to you.' });
     const feedback = req.body && req.body.feedback;
     await sql`
