@@ -2318,6 +2318,29 @@
      reveals its links without actually un-collapsing it — moving away closes the preview
      again. A real click still toggles the permanent collapsed/expanded state as before. */
   const SB_SECTION_KEYS = ['overview','academics','communication','finance','staffsec','facilities','reportssec','configuration'];
+  // A role with no access to anything in a whole category (e.g. a Teacher whose
+  // custom role has Staff/Facilities/Reports/Configuration all switched off,
+  // or a Student/Parent login whose only allowed view is My Profile) used to
+  // still see that category's header sitting in the sidebar with nothing
+  // underneath it once expanded — which tells a restricted user exactly which
+  // modules exist in the app even though they can't open any of them. This
+  // hides the header (and its now-empty group) entirely whenever every link
+  // inside it has already been hidden by applyRolePermissions() above, so a
+  // restricted login sees only the categories that actually have something
+  // in them. Uses style.display = '' (not 'block'/'flex') to hide/reveal so
+  // the existing responsive mobile layout (which turns these into a flat
+  // horizontal bar via its own CSS) is left completely alone either way.
+  function updateSbSectionVisibility(){
+    SB_SECTION_KEYS.forEach(key => {
+      const toggle = document.getElementById('sbToggle-'+key);
+      const group = document.getElementById('sbGroup-'+key);
+      if(!toggle || !group) return;
+      const links = group.querySelectorAll('.sb-link');
+      const anyVisible = Array.from(links).some(el => el.style.display !== 'none');
+      toggle.style.display = anyVisible ? '' : 'none';
+      group.style.display = anyVisible ? '' : 'none';
+    });
+  }
   function initSidebarHoverPreview(){
     SB_SECTION_KEYS.forEach(key => {
       const toggle = document.getElementById('sbToggle-'+key);
@@ -3148,6 +3171,7 @@
     document.getElementById('sbUserRole').textContent = currentUser.role;
     updateSidebarAvatar();
     applyButtonLevelPermissions();
+    updateSbSectionVisibility();
   }
   // Gates the handful of "+ Add / Import / Export" buttons that live in a
   // view's static header (so they're not re-rendered per navigation the way
