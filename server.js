@@ -2057,7 +2057,22 @@ app.all('/api/:resource', async (req, res) => {
     if ((resource === 'users' || resource === 'roles') && (!req.authUser || req.authUser.role !== 'Admin')) {
       return res.status(403).json({ error: 'Admin access required.' });
     }
-      return res.status(403).json({ error: 'Admin access required.' });
+    // A Student/Parent self-service login has no reason to see the whole
+    // roster — and 'admissions' (below) is a staff module they'll never be
+    // granted — but the entire "My Portal" self-service view depends on
+    // fetching /api/students and finding its own linked record client-side
+    // (see myProfileStudent() in index.html). Without this carve-out, every
+    // Student/Parent login hit the 'admissions' check below, got a 403, and
+    // silently fell back to whatever this browser's own localStorage
+    // happened to have cached (empty on a fresh browser/device) — showing
+    // "No student linked to this login yet" even though the link is correct
+    // in the database. Scoped narrowly on purpose: only a GET, and only that
+    // login's own single linked record, never the full roster and never a
+    // write — everything else for 'students' still goes through the normal
+    // 'admissions' gate right below.
+    if (resource === 'students' && req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
+      const student = await getLinkedStudent(req.authUser.id);
+      return res.status(200).json(student ? [hybridToAppShape(student, HYBRID_RESOURCES.students.core)] : []);
     }
     // Roles & Permissions enforcement (see the block above HYBRID_RESOURCES):
     // a resource mapped here 403s for a role that the admin has explicitly
