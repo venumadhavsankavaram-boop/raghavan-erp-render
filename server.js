@@ -228,6 +228,39 @@ async function ensureSchema() {
     voided BOOLEAN NOT NULL DEFAULT false, void_reason TEXT, voided_by TEXT, voided_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  // A Student/Parent login reaching out to their Class Teacher, a specific
+  // Subject Teacher, or Management (Admin/Principal) with a concern.
+  // recipient_staff_id is the resolved staff.id for class_teacher/
+  // subject_teacher (resolved client-side, the same way the rest of the app
+  // already looks up a class/subject teacher — see classTeacherClass and
+  // subjectStaffForSection in index.html); it's left null for management,
+  // since that's a whole role rather than one specific person. subject_name
+  // is only meaningful for subject_teacher (a student may have several). A
+  // concern gets at most one reply — reply_* stays null until a staff member
+  // answers, at which point status flips from 'open' to 'resolved'.
+  await sql`CREATE TABLE IF NOT EXISTS student_concerns (
+    id TEXT PRIMARY KEY, student_id TEXT, student_name TEXT, class_name TEXT, section TEXT,
+    recipient_type TEXT, recipient_staff_id TEXT, recipient_name TEXT, subject_name TEXT,
+    message TEXT, status TEXT NOT NULL DEFAULT 'open',
+    reply_message TEXT, replied_by TEXT, replied_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  // A Student/Parent login submitting completed homework or holiday work to
+  // their Class Teacher, a Subject Teacher, or Management. homework_id is an
+  // optional link back to an existing kv_store homeworkItems entry (see
+  // index.html's HOMEWORK_KEY) — left blank for holiday/other work that was
+  // never listed as a homework item in the first place. attachment is an
+  // optional base64 data URL, same convention as every other file upload in
+  // this app (no separate object storage). status starts 'submitted' and
+  // becomes 'reviewed' once a staff member leaves feedback.
+  await sql`CREATE TABLE IF NOT EXISTS student_submissions (
+    id TEXT PRIMARY KEY, student_id TEXT, student_name TEXT, class_name TEXT, section TEXT,
+    recipient_type TEXT, recipient_staff_id TEXT, recipient_name TEXT, subject_name TEXT,
+    homework_id TEXT, title TEXT, description TEXT, attachment TEXT,
+    status TEXT NOT NULL DEFAULT 'submitted',
+    feedback TEXT, reviewed_by TEXT, reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
   // The generic key/value table backs every module that doesn't need its own
   // dedicated table with real columns — Inventory, Timetable, Library, Transport,
   // Hostel, Accounting, Fee/Exam sub-settings, Report Template signatures, Class
@@ -295,6 +328,12 @@ async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions (expires_at)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_acct_income_date ON acct_income (date)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_acct_expenses_date ON acct_expenses (date)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_student_concerns_student_id ON student_concerns (student_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_student_concerns_recipient_staff_id ON student_concerns (recipient_staff_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_student_concerns_recipient_type ON student_concerns (recipient_type)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_student_submissions_student_id ON student_submissions (student_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_student_submissions_recipient_staff_id ON student_submissions (recipient_staff_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_student_submissions_recipient_type ON student_submissions (recipient_type)`;
 }
 await ensureSchema();
 
@@ -1210,6 +1249,12 @@ setInterval(() => {
 // whatever a Teacher session normally gets, same as before this existed.
 const STAFF_LOGIN_ROLES = ['Admin', 'Principal', 'Accountant', 'Office Assistant', 'Teacher', 'Staff'];
 const PARENT_LOGIN_ROLES = ['Student', 'Parent'];
+// Who "Management" resolves to when a Student/Parent addresses a concern or
+// submission to Management rather than a specific teacher — both roles see
+// everything sent there (see /api/concerns/inbox and /api/submissions/inbox
+// below), matching how the rest of the app already treats Admin and
+// Principal as the two full-access staff roles.
+const MANAGEMENT_ROLES = ['Admin', 'Principal'];
 
 app.post('/api/login', async (req, res) => {
   try {
@@ -1363,6 +1408,247 @@ app.post('/api/contact-vendor', async (req, res) => {
   } catch (err) {
     console.error('contact-vendor error:', err);
     return res.status(502).json({ error: 'Could not reach the vendor dashboard — it may be offline. Please try again shortly.' });
+  }
+});
+
+// ---------- Student/Parent -> Staff: Concerns & Work Submissions ----------
+// Two small, related features, both reachable only from the Student/Parent
+// portal (myprofile view in index.html): sending a concern to the Class
+// Teacher / a Subject Teacher / Management, and submitting completed
+// homework or holiday work the same way. Both share the same "who is this
+// for" resolution (recipientType + recipientStaffId, decided client-side —
+// the client already has the exact same staffList/subjectsList lookups the
+// rest of the app uses for this, e.g. classTeacherClass and
+// subjectStaffForSection), the same student-identity rule (always the
+// caller's own linked student, never whatever a request body claims), and
+// the same staff-inbox shape (whatever's addressed to my own staff record,
+// plus anything addressed to Management if I'm Admin/Principal).
+function shapeConcern(r) {
+  return {
+    id: r.id, studentId: r.student_id, studentName: r.student_name,
+    className: r.class_name, section: r.section,
+    recipientType: r.recipient_type, recipientStaffId: r.recipient_staff_id,
+    recipientName: r.recipient_name, subjectName: r.subject_name,
+    message: r.message, status: r.status,
+    replyMessage: r.reply_message, repliedBy: r.replied_by, repliedAt: r.replied_at,
+    createdAt: r.created_at,
+  };
+}
+function shapeSubmission(r) {
+  return {
+    id: r.id, studentId: r.student_id, studentName: r.student_name,
+    className: r.class_name, section: r.section,
+    recipientType: r.recipient_type, recipientStaffId: r.recipient_staff_id,
+    recipientName: r.recipient_name, subjectName: r.subject_name,
+    homeworkId: r.homework_id, title: r.title, description: r.description, attachment: r.attachment,
+    status: r.status, feedback: r.feedback, reviewedBy: r.reviewed_by, reviewedAt: r.reviewed_at,
+    createdAt: r.created_at,
+  };
+}
+const CONCERN_RECIPIENT_TYPES = ['class_teacher', 'subject_teacher', 'management'];
+// A Teacher/Staff login has no direct column tying it to a staff record —
+// the same linkedUserId convention index.html already reads elsewhere
+// (see myStaffRecord in the Homework tab) is how "which staff member is
+// signed in right now" is worked out here too.
+async function getMyStaffRow(userId) {
+  const rows = await sql`SELECT id FROM staff WHERE extra->>'linkedUserId' = ${userId} LIMIT 1`;
+  return rows.length ? rows[0] : null;
+}
+async function getLinkedStudent(userId) {
+  const userRows = await sql`SELECT linked_student_id FROM users WHERE id = ${userId}`;
+  const studentId = userRows.length ? userRows[0].linked_student_id : '';
+  if (!studentId) return null;
+  const studentRows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
+  return studentRows.length ? studentRows[0] : null;
+}
+function validateRecipient(b) {
+  const recipientType = CONCERN_RECIPIENT_TYPES.includes(b.recipientType) ? b.recipientType : null;
+  if (!recipientType) return 'Please choose who this is for.';
+  if (recipientType !== 'management' && !b.recipientStaffId) return 'Could not identify the teacher to send this to.';
+  return null;
+}
+
+app.post('/api/concerns', async (req, res) => {
+  try {
+    if (!req.authUser || !PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Only a Student/Parent login can send a concern.' });
+    }
+    const student = await getLinkedStudent(req.authUser.id);
+    if (!student) return res.status(400).json({ error: 'This login is not linked to a student record yet — ask your Admin.' });
+    const b = req.body || {};
+    const recipientError = validateRecipient(b);
+    if (recipientError) return res.status(400).json({ error: recipientError });
+    if (!b.message || !String(b.message).trim()) return res.status(400).json({ error: 'Please enter your message.' });
+    const id = 'concern_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+    await sql`
+      INSERT INTO student_concerns (id, student_id, student_name, class_name, section, recipient_type, recipient_staff_id, recipient_name, subject_name, message)
+      VALUES (${id}, ${student.id}, ${(student.first_name + ' ' + (student.last_name || '')).trim()}, ${student.class_name}, ${student.section},
+              ${b.recipientType}, ${b.recipientType === 'management' ? null : b.recipientStaffId},
+              ${b.recipientName || (b.recipientType === 'management' ? 'Management' : '')},
+              ${b.recipientType === 'subject_teacher' ? (b.subjectName || '') : null},
+              ${String(b.message).trim().slice(0, 4000)})
+    `;
+    return res.status(201).json({ ok: true, id });
+  } catch (err) {
+    console.error('concerns create error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.get('/api/concerns/mine', async (req, res) => {
+  try {
+    if (!req.authUser || !PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Not available for this account.' });
+    }
+    const student = await getLinkedStudent(req.authUser.id);
+    if (!student) return res.status(200).json([]);
+    const rows = await sql`SELECT * FROM student_concerns WHERE student_id = ${student.id} ORDER BY created_at DESC`;
+    return res.status(200).json(rows.map(shapeConcern));
+  } catch (err) {
+    console.error('concerns mine error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.get('/api/concerns/inbox', async (req, res) => {
+  try {
+    if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Not available for this account.' });
+    }
+    const myStaff = await getMyStaffRow(req.authUser.id);
+    const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
+    let rows;
+    if (myStaff && isManagement) {
+      rows = await sql`SELECT * FROM student_concerns WHERE recipient_staff_id = ${myStaff.id} OR recipient_type = 'management' ORDER BY created_at DESC`;
+    } else if (myStaff) {
+      rows = await sql`SELECT * FROM student_concerns WHERE recipient_staff_id = ${myStaff.id} ORDER BY created_at DESC`;
+    } else if (isManagement) {
+      rows = await sql`SELECT * FROM student_concerns WHERE recipient_type = 'management' ORDER BY created_at DESC`;
+    } else {
+      rows = [];
+    }
+    return res.status(200).json(rows.map(shapeConcern));
+  } catch (err) {
+    console.error('concerns inbox error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.put('/api/concerns/:id/reply', async (req, res) => {
+  try {
+    if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Not available for this account.' });
+    }
+    const rows = await sql`SELECT * FROM student_concerns WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Concern not found.' });
+    const concern = rows[0];
+    const myStaff = await getMyStaffRow(req.authUser.id);
+    const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
+    const canReply = (myStaff && concern.recipient_staff_id === myStaff.id) || (concern.recipient_type === 'management' && isManagement);
+    if (!canReply) return res.status(403).json({ error: 'This concern is not addressed to you.' });
+    const replyMessage = req.body && req.body.replyMessage;
+    if (!replyMessage || !String(replyMessage).trim()) return res.status(400).json({ error: 'Please enter a reply.' });
+    await sql`
+      UPDATE student_concerns SET reply_message = ${String(replyMessage).trim().slice(0, 4000)}, status = 'resolved',
+        replied_by = ${req.authUser.name}, replied_at = now()
+      WHERE id = ${req.params.id}
+    `;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('concerns reply error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.post('/api/submissions', async (req, res) => {
+  try {
+    if (!req.authUser || !PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Only a Student/Parent login can submit work.' });
+    }
+    const student = await getLinkedStudent(req.authUser.id);
+    if (!student) return res.status(400).json({ error: 'This login is not linked to a student record yet — ask your Admin.' });
+    const b = req.body || {};
+    const recipientError = validateRecipient(b);
+    if (recipientError) return res.status(400).json({ error: recipientError });
+    if (!b.title || !String(b.title).trim()) return res.status(400).json({ error: 'Please enter a title.' });
+    const id = 'submission_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+    await sql`
+      INSERT INTO student_submissions (id, student_id, student_name, class_name, section, recipient_type, recipient_staff_id, recipient_name, subject_name, homework_id, title, description, attachment)
+      VALUES (${id}, ${student.id}, ${(student.first_name + ' ' + (student.last_name || '')).trim()}, ${student.class_name}, ${student.section},
+              ${b.recipientType}, ${b.recipientType === 'management' ? null : b.recipientStaffId},
+              ${b.recipientName || (b.recipientType === 'management' ? 'Management' : '')},
+              ${b.recipientType === 'subject_teacher' ? (b.subjectName || '') : null},
+              ${b.homeworkId || null}, ${String(b.title).trim().slice(0, 300)},
+              ${String(b.description || '').trim().slice(0, 4000)}, ${b.attachment || null})
+    `;
+    return res.status(201).json({ ok: true, id });
+  } catch (err) {
+    console.error('submissions create error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.get('/api/submissions/mine', async (req, res) => {
+  try {
+    if (!req.authUser || !PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Not available for this account.' });
+    }
+    const student = await getLinkedStudent(req.authUser.id);
+    if (!student) return res.status(200).json([]);
+    const rows = await sql`SELECT * FROM student_submissions WHERE student_id = ${student.id} ORDER BY created_at DESC`;
+    return res.status(200).json(rows.map(shapeSubmission));
+  } catch (err) {
+    console.error('submissions mine error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.get('/api/submissions/inbox', async (req, res) => {
+  try {
+    if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Not available for this account.' });
+    }
+    const myStaff = await getMyStaffRow(req.authUser.id);
+    const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
+    let rows;
+    if (myStaff && isManagement) {
+      rows = await sql`SELECT * FROM student_submissions WHERE recipient_staff_id = ${myStaff.id} OR recipient_type = 'management' ORDER BY created_at DESC`;
+    } else if (myStaff) {
+      rows = await sql`SELECT * FROM student_submissions WHERE recipient_staff_id = ${myStaff.id} ORDER BY created_at DESC`;
+    } else if (isManagement) {
+      rows = await sql`SELECT * FROM student_submissions WHERE recipient_type = 'management' ORDER BY created_at DESC`;
+    } else {
+      rows = [];
+    }
+    return res.status(200).json(rows.map(shapeSubmission));
+  } catch (err) {
+    console.error('submissions inbox error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.put('/api/submissions/:id/review', async (req, res) => {
+  try {
+    if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Not available for this account.' });
+    }
+    const rows = await sql`SELECT * FROM student_submissions WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Submission not found.' });
+    const submission = rows[0];
+    const myStaff = await getMyStaffRow(req.authUser.id);
+    const isManagement = MANAGEMENT_ROLES.includes(req.authUser.role);
+    const canReview = (myStaff && submission.recipient_staff_id === myStaff.id) || (submission.recipient_type === 'management' && isManagement);
+    if (!canReview) return res.status(403).json({ error: 'This submission is not addressed to you.' });
+    const feedback = req.body && req.body.feedback;
+    await sql`
+      UPDATE student_submissions SET feedback = ${feedback ? String(feedback).trim().slice(0, 4000) : null}, status = 'reviewed',
+        reviewed_by = ${req.authUser.name}, reviewed_at = now()
+      WHERE id = ${req.params.id}
+    `;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('submissions review error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
 
