@@ -2843,6 +2843,15 @@
 
   let users = [];
   let currentUser = null;
+  // Set from the login/`/api/me` response's `moduleAccess` field (see
+  // server.js) — mirrors the shape vendor-reporting.js's getModuleAccess()
+  // returns. Billing-driven, separate from the role-based ROLE_VIEWS system:
+  // `restricted: false` (the default) means every module is available,
+  // exactly as before this existed.
+  let moduleAccess = { restricted: false, enabledKeys: [] };
+  function isModuleEnabledByPlan(key){
+    return !moduleAccess.restricted || moduleAccess.enabledKeys.includes(key);
+  }
 
   // Headers the server's audit log reads to know who made a change — see
   // server.js's central logging hook on the /api/:resource dispatcher.
@@ -3004,6 +3013,7 @@
       const idx = users.findIndex(x => x.id === u.id);
       if(idx > -1) users[idx] = { ...users[idx], ...u }; else users.push(u);
       currentUser = u;
+      moduleAccess = u.moduleAccess || { restricted: false, enabledKeys: [] };
       sessionStorage.setItem('rgv_current_user', u.id);
       await loadAllAppData();
       hideLoginScreen();
@@ -3042,6 +3052,7 @@
   async function verifyLogin(username, password, audience){
     verifyLogin.lastError = '';
     verifyLogin.wrongAudience = false;
+    verifyLogin.accessSuspended = false;
     try{
       const res = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ username, password, audience }) });
       if(!res.ok){
@@ -3049,6 +3060,7 @@
           const body = await res.json();
           if(body && body.error) verifyLogin.lastError = body.error;
           if(body && body.wrongAudience) verifyLogin.wrongAudience = true;
+          if(body && body.accessSuspended) verifyLogin.accessSuspended = true;
         }catch(e){}
         return null;
       }
@@ -3062,7 +3074,11 @@
     const u = await verifyLogin(uname, pw, loginAudience);
     if(!u){
       const errEl = document.getElementById('loginError');
-      errEl.textContent = (verifyLogin.wrongAudience || /too many/i.test(verifyLogin.lastError || ''))
+      // A suspended-access or wrong-audience message is real, specific
+      // guidance the person needs to see verbatim — only the plain "wrong
+      // password" case gets the generic copy, so a mistyped password never
+      // leaks whether suspension/audience even applies to that account.
+      errEl.textContent = (verifyLogin.accessSuspended || verifyLogin.wrongAudience || /too many/i.test(verifyLogin.lastError || ''))
         ? verifyLogin.lastError
         : 'Incorrect username or password.';
       errEl.style.display = 'block';
@@ -3075,6 +3091,7 @@
     const idx = users.findIndex(x => x.id === u.id);
     if(idx > -1) users[idx] = { ...users[idx], ...u }; else users.push(u);
     currentUser = u;
+    moduleAccess = u.moduleAccess || { restricted: false, enabledKeys: [] };
     sessionStorage.setItem('rgv_current_user', u.id);
     _sessionExpiredHandled = false;
     // The app's very first data load (at page open, before this login)
@@ -3191,11 +3208,11 @@
     const allowed = getRoleViews(currentUser.role);
     document.getElementById('navDashboard').style.display = allowed.includes('dashboard') ? 'flex' : 'none';
     document.getElementById('navAdmissions').style.display = allowed.includes('admissions') ? 'flex' : 'none';
-    document.getElementById('navManageFee').style.display = allowed.includes('managefee') ? 'flex' : 'none';
-    document.getElementById('navAttendance').style.display = allowed.includes('attendance') ? 'flex' : 'none';
-    document.getElementById('navExams').style.display = allowed.includes('exams') ? 'flex' : 'none';
+    document.getElementById('navManageFee').style.display = (allowed.includes('managefee') && isModuleEnabledByPlan('managefee')) ? 'flex' : 'none';
+    document.getElementById('navAttendance').style.display = (allowed.includes('attendance') && isModuleEnabledByPlan('attendance')) ? 'flex' : 'none';
+    document.getElementById('navExams').style.display = (allowed.includes('exams') && isModuleEnabledByPlan('exams')) ? 'flex' : 'none';
     document.getElementById('navSubjects').style.display = allowed.includes('subjects') ? 'flex' : 'none';
-    document.getElementById('navResult').style.display = allowed.includes('result') ? 'flex' : 'none';
+    document.getElementById('navResult').style.display = (allowed.includes('result') && isModuleEnabledByPlan('result')) ? 'flex' : 'none';
     document.getElementById('navPromoTransfer').style.display = allowed.includes('promotransfer') ? 'flex' : 'none';
     document.getElementById('navReports').style.display = allowed.includes('reports') ? 'flex' : 'none';
     const staffFullAccess = getRolePermission(currentUser.role, 'staff', 'view');
@@ -3217,8 +3234,8 @@
     document.getElementById('navInventory').style.display = allowed.includes('inventory') ? 'flex' : 'none';
     document.getElementById('navTimetable').style.display = allowed.includes('timetable') ? 'flex' : 'none';
     document.getElementById('navSyllabus').style.display = allowed.includes('syllabus') ? 'flex' : 'none';
-    document.getElementById('navTransport').style.display = allowed.includes('transport') ? 'flex' : 'none';
-    document.getElementById('navLibrary').style.display = allowed.includes('library') ? 'flex' : 'none';
+    document.getElementById('navTransport').style.display = (allowed.includes('transport') && isModuleEnabledByPlan('transport')) ? 'flex' : 'none';
+    document.getElementById('navLibrary').style.display = (allowed.includes('library') && isModuleEnabledByPlan('library')) ? 'flex' : 'none';
     document.getElementById('navHostel').style.display = allowed.includes('hostel') ? 'flex' : 'none';
     document.getElementById('navAccounting').style.display = allowed.includes('accounting') ? 'flex' : 'none';
     document.getElementById('navAnnouncements').style.display = allowed.includes('announcements') ? 'flex' : 'none';
