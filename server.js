@@ -14,7 +14,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { neon } from '@neondatabase/serverless';
 import webpush from 'web-push';
-import { startVendorReporting, reportVendorError } from './vendor-reporting.js';
+import { startVendorReporting, reportVendorError, isAccessSuspended, getModuleAccess } from './vendor-reporting.js';
 import { handleVendorSupportLogin } from './vendor-support-login.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -610,6 +610,13 @@ async function handleKv(req, res, key) {
   // reading the late-fee policy isn't reading anything per-student, and
   // without it Fees silently shows every family as owing no late fee at all.
   const parentSharedKvBypass = req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_KV_KEYS.includes(key);
+  if (KV_KEY_TO_MODULE[key]) {
+    // Plan gating applies regardless of role (including Admin, and the
+    // parent/student shared-reference bypass below) — it's about what the
+    // school paid for, not who's asking.
+    const planOk = await checkPlanModuleAccess(req, res, KV_KEY_TO_MODULE[key]);
+    if (!planOk) return;
+  }
   if (KV_KEY_TO_MODULE[key] && !parentSharedKvBypass) {
     const allowed = await checkModuleAccess(req, res, KV_KEY_TO_MODULE[key]);
     if (!allowed) return; // checkModuleAccess already sent the 403
@@ -988,6 +995,40 @@ async function checkModuleAccess(req, res, moduleKeys) {
   const defaults = SERVER_ROLE_VIEWS[req.authUser.role] || [];
   const ok = moduleKeys.some(key => (override && override[key] !== undefined) ? !!override[key].view : defaults.includes(key));
   if (!ok) res.status(403).json({ error: 'You do not have permission to access this.' });
+  return ok;
+}
+
+// ---------- Plan/Modules gating (billing-driven — separate from Roles & Permissions above) ----------
+// The vendor dashboard's "Plan" field (Schools tab → edit a school → Plan)
+// lets the vendor sell a school only some modules — see vendor-reporting.js's
+// getModuleAccess() for how that's mapped down from the dashboard's 4
+// billing buckets to this ERP's own module keys. Only these 6 keys are ever
+// part of a Plan; anything else (dashboard, admissions, staff, accounting,
+// setup, announcements, etc.) is core and never gated by Plan, regardless of
+// which modules a school picked.
+const PLAN_GATED_MODULE_KEYS = ['managefee', 'attendance', 'exams', 'result', 'transport', 'library'];
+
+// Same call-site shape as checkModuleAccess (sends its own 403 and returns a
+// boolean) but a completely separate axis: this checks what the SCHOOL paid
+// for, not what the ROLE is allowed to see, so — unlike checkModuleAccess —
+// it applies to every role, Admin included (a school that didn't pay for
+// Exams doesn't get it back just because the person asking is the school's
+// own Admin). The one exception is a Vendor Support session (see
+// vendor-support-login.js) — that's the vendor's own troubleshooting login,
+// never the school's, and must never be blocked by the school's own plan.
+async function checkPlanModuleAccess(req, res, moduleKeys) {
+  if (!req.authUser || req.authUser.id === 'vendor-support') return true;
+  const gatedKeys = moduleKeys.filter(k => PLAN_GATED_MODULE_KEYS.includes(k));
+  if (!gatedKeys.length) return true; // not part of any Plan bucket — always included
+  const access = getModuleAccess();
+  if (!access.restricted) return true; // no Plan set, an "All Modules" Plan, or not yet confirmed by a heartbeat — fail open
+  const ok = gatedKeys.some(k => access.enabledKeys.includes(k));
+  if (!ok) {
+    res.status(403).json({
+      error: "This module isn't included in your school's current plan. Please contact SVM EdTech to add it.",
+      planRestricted: true,
+    });
+  }
   return ok;
 }
 
@@ -1870,6 +1911,23 @@ app.post('/api/login', async (req, res) => {
     // knowing its password — at that point they could just switch tabs
     // anyway. Treated as a successful login for rate-limiting purposes
     // (it's a real account with the real password, just the wrong tab).
+    // A manual, vendor-triggered access cutoff for non-payment (see
+    // vendor-reporting.js's isAccessSuspended) — never automatic, and Admin
+    // always stays able to sign in so the school can see why and reach the
+    // vendor. Checked after the password so this never leaks anything to a
+    // wrong guess; a correct one still counts as a successful attempt.
+    if (user.role !== 'Admin') {
+      const access = isAccessSuspended();
+      if (access.suspended) {
+        recordLoginSuccess(rateKey);
+        return res.status(403).json({
+          error: access.reason
+            ? `Access is temporarily suspended: ${access.reason} Please contact your school office.`
+            : 'Access to this ERP has been temporarily suspended due to a pending payment. Please contact your school office.',
+          accessSuspended: true,
+        });
+      }
+    }
     if (audience === 'staff' && !STAFF_LOGIN_ROLES.includes(user.role)) {
       recordLoginSuccess(rateKey);
       return res.status(403).json({ error: 'This is a Parent/Student account — switch to the "Parent & Student" tab to sign in.', wrongAudience: true });
@@ -1881,6 +1939,10 @@ app.post('/api/login', async (req, res) => {
     recordLoginSuccess(rateKey);
     const shaped = simpleToAppShape(user, SIMPLE_RESOURCES.users.fields);
     delete shaped.password;
+    // So the client can hide a nav item the school's Plan doesn't include —
+    // same idea as the ROLE_VIEWS shape it already gets, just billing-driven
+    // instead of role-driven. See checkPlanModuleAccess above for enforcement.
+    shaped.moduleAccess = getModuleAccess();
     await createSession(req, res, user);
     return res.status(200).json(shaped);
   } catch (err) {
@@ -2367,6 +2429,7 @@ app.get('/api/me', async (req, res) => {
     if (!rows.length) return res.status(401).json({ error: 'Account no longer exists.' });
     const shaped = simpleToAppShape(rows[0], SIMPLE_RESOURCES.users.fields);
     delete shaped.password;
+    shaped.moduleAccess = getModuleAccess();
     return res.status(200).json(shaped);
   } catch (err) {
     console.error('me error:', err);
@@ -2675,6 +2738,13 @@ app.all('/api/:resource', async (req, res) => {
     // schedule, an exam's dates, or the subject list, and the self-service
     // portal can't work correctly without being able to read them.
     const parentSharedBypass = req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_RESOURCES.includes(resource);
+    if (RESOURCE_TO_MODULE[resource]) {
+      // Plan gating (see checkPlanModuleAccess above) applies regardless of
+      // role — including Admin and the parent/student shared-reference
+      // bypass — since it's about what the school paid for, not who's asking.
+      const planOk = await checkPlanModuleAccess(req, res, RESOURCE_TO_MODULE[resource]);
+      if (!planOk) return;
+    }
     if (RESOURCE_TO_MODULE[resource] && !parentSharedBypass) {
       const allowed = await checkModuleAccess(req, res, RESOURCE_TO_MODULE[resource]);
       if (!allowed) return; // checkModuleAccess already sent the 403
