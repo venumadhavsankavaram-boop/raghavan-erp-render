@@ -56,39 +56,113 @@ const API_KEY = process.env.VENDOR_API_KEY;
 const ENABLED = Boolean(DASHBOARD_URL && SCHOOL_ID && API_KEY);
 
 const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
-const FETCH_TIMEOUT_MS = 8000;
+// A free-tier Render service (the vendor dashboard itself, most likely)
+// spins down after ~15 minutes idle and can take 30-50+ seconds to cold-start
+// on its next request. An 8-second timeout aborted that very first heartbeat
+// after every idle period, every time — not a real failure, just too
+// impatient for the hosting tier this was built against.
+const FETCH_TIMEOUT_MS = 45000;
 const ERROR_DEDUPE_WINDOW_MS = 5 * 60 * 1000; // don't spam the same error repeatedly
 
 let lastErrorSignatures = new Map(); // message -> last-sent timestamp
 
+// A manual, vendor-triggered access cutoff for non-payment — see the Vendor
+// Dashboard's Schools tab ("Suspend Access" / "Restore Access"). This is
+// NEVER set locally and never inferred from anything in this file; it only
+// ever reflects the last value the dashboard's own heartbeat response
+// confirmed. Starts (and, if reporting is disabled, stays) un-suspended —
+// this must fail OPEN: a school you haven't wired to the dashboard, or a
+// dashboard that's temporarily unreachable, must never lock its own users
+// out as a side effect. It only changes once a real heartbeat response says
+// so, and keeps the last confirmed value across failed heartbeats in
+// between (a blip in reaching the dashboard doesn't silently lift, or
+// silently impose, a suspension).
+let accessStatus = { suspended: false, reason: null };
+
+/** Read by server.js's login route. Safe to call even if reporting is disabled. */
+export function isAccessSuspended() {
+  return accessStatus;
+}
+
+// The vendor dashboard's "Plan" picker (Schools tab → edit a school → Plan)
+// bills at 4 module buckets — fees, attendance, exams, and a combined
+// transport+library — but this ERP's own Roles & Permissions system already
+// has finer-grained module keys (managefee, attendance, exams, result,
+// transport, library — see RESOURCE_TO_MODULE/SERVER_ROLE_VIEWS in
+// server.js). This maps one to the other so server.js never needs to know
+// the dashboard's own bucket names.
+const PLAN_MODULE_TO_ERP_KEYS = {
+  fees: ['managefee'],
+  attendance: ['attendance'],
+  exams: ['exams', 'result'],
+  transport_library: ['transport', 'library'],
+};
+
+// Mirrors accessStatus above in every way that matters: never set locally,
+// never inferred, only ever updated from a real successful heartbeat
+// response, and must fail OPEN — `restricted: false` (every module
+// available) is both the starting value and what a school with no Plan set,
+// an "All Modules" Plan, or an unreachable/not-yet-configured dashboard
+// gets. Only "ERP — Selected Modules" ever produces `restricted: true`.
+let moduleAccess = { restricted: false, enabledKeys: [] };
+
+/**
+ * Read by server.js (to gate the API) and forwarded to the client (to hide
+ * the corresponding nav items) via the login/session response. Safe to call
+ * even if reporting is disabled — returns the always-unrestricted default.
+ */
+export function getModuleAccess() {
+  return moduleAccess;
+}
+
 async function postToDashboard(path, body) {
-  if (!ENABLED) return;
+  if (!ENABLED) return null;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    await fetch(DASHBOARD_URL.replace(/\/$/, '') + path, {
+    const res = await fetch(DASHBOARD_URL.replace(/\/$/, '') + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(Object.assign({ schoolId: SCHOOL_ID, apiKey: API_KEY }, body)),
       signal: controller.signal,
     });
+    try { return await res.json(); } catch (e) { return null; }
   } catch (e) {
     // Deliberately silent — the vendor dashboard being unreachable must
     // never affect this school's own server. Nothing to log here that
     // the dashboard's own "offline" status won't already show you.
+    return null;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function sendHeartbeat() {
-  postToDashboard('/api/ingest/heartbeat', {
+async function sendHeartbeat() {
+  const result = await postToDashboard('/api/ingest/heartbeat', {
     meta: {
       uptimeSeconds: Math.round(process.uptime()),
       nodeVersion: process.version,
       reportedAt: new Date().toISOString(),
     },
   });
+  // Only ever updated from a real, successful response — see accessStatus's
+  // own comment above for why a failed/missing response leaves it as-is.
+  if (result && typeof result.accessSuspended === 'boolean') {
+    accessStatus = { suspended: result.accessSuspended, reason: result.accessSuspendedReason || null };
+  }
+  // Same rule for the Plan/Modules gate — see moduleAccess's own comment.
+  if (result && 'planType' in result) {
+    if (result.planType === 'erp_selected_modules') {
+      const enabledKeys = [];
+      (Array.isArray(result.planModules) ? result.planModules : []).forEach(m => {
+        if (PLAN_MODULE_TO_ERP_KEYS[m]) enabledKeys.push(...PLAN_MODULE_TO_ERP_KEYS[m]);
+      });
+      moduleAccess = { restricted: true, enabledKeys };
+    } else {
+      // null (no plan set yet), 'erp_all_modules', or 'erp_all_modules_website' — unrestricted.
+      moduleAccess = { restricted: false, enabledKeys: [] };
+    }
+  }
 }
 
 /** Call once, near the top of server.js, after the other imports. */
