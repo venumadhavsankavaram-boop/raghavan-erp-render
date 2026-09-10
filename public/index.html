@@ -95,7 +95,7 @@
   /* ===== APP SHELL ===== */
   .app{display:flex; height:100vh; overflow:hidden;}
   .sidebar{
-    width:230px; flex-shrink:0; background:linear-gradient(180deg,var(--brand-navy),var(--brand-navy-deep));
+    width:250px; flex-shrink:0; background:linear-gradient(180deg,var(--brand-navy),var(--brand-navy-deep));
     color:var(--white); padding:26px 18px; display:flex; flex-direction:column;
     height:100vh; overflow:hidden; box-shadow:4px 0 24px -8px rgba(0,0,0,0.35); position:relative; z-index:5;
   }
@@ -148,6 +148,29 @@
   .sb-link.disabled{opacity:0.35; cursor:default;}
   .sb-link:focus-visible{outline:2px solid var(--gold-soft); outline-offset:-2px;}
   .sb-link .dot{width:6px; height:6px; border-radius:50%; background:currentColor; flex-shrink:0; transition:background 0.18s ease, box-shadow 0.18s ease;}
+  .sb-icon-wrap{width:19px; height:19px; flex-shrink:0; display:flex; align-items:center; justify-content:center; opacity:0.88; transition:opacity 0.18s ease, transform 0.18s ease;}
+  .sb-icon{width:17px; height:17px;}
+  .sb-link:not(.active):not(.disabled):hover .sb-icon-wrap{opacity:1; transform:scale(1.08);}
+  .sb-link.active .sb-icon-wrap{opacity:1;}
+  .sb-section-group{ padding-bottom:2px; border-bottom:1px solid rgba(255,255,255,0.06); margin-bottom:2px; }
+  .sb-section-group:last-of-type{ border-bottom:none; }
+  .sb-search-wrap{ position:relative; margin:0 0 14px; }
+  .sb-search-icon{ position:absolute; left:10px; top:50%; transform:translateY(-50%); width:14px; height:14px; opacity:0.45; pointer-events:none; }
+  .sb-search-input{
+    width:100%; background:rgba(255,255,255,0.07); border:1.5px solid rgba(255,255,255,0.1); border-radius:10px;
+    padding:9px 30px 9px 30px; font-size:0.8rem; color:#fff; font-family:'Poppins',sans-serif; outline:none;
+    transition:background 0.16s ease, border-color 0.16s ease;
+  }
+  .sb-search-input::placeholder{ color:rgba(255,255,255,0.4); }
+  .sb-search-input:focus{ background:rgba(255,255,255,0.11); border-color:var(--gold-soft); }
+  .sb-search-clear{
+    position:absolute; right:6px; top:50%; transform:translateY(-50%); width:20px; height:20px; border-radius:50%;
+    background:none; border:none; color:rgba(255,255,255,0.5); font-size:1rem; line-height:1; cursor:pointer;
+  }
+  .sb-search-clear:hover{ color:#fff; background:rgba(255,255,255,0.12); }
+  .sb-search-empty{ font-size:0.76rem; color:rgba(255,255,255,0.45); padding:6px 8px 10px; }
+  .sb-link.sb-search-hidden, .sb-section-toggle.sb-search-hidden, .sb-section-group.sb-search-hidden{ display:none !important; }
+  .sb-link.sb-search-match{ background:rgba(232,200,116,0.14); box-shadow:inset 0 0 0 1px rgba(232,200,116,0.3); }
   .nb-badge{
     margin-left:auto; background:var(--magenta); color:#fff; font-size:0.65rem; font-weight:700;
     min-width:18px; height:18px; border-radius:999px; align-items:center; justify-content:center;
@@ -972,67 +995,74 @@
       <div id="sbBrandName">Your School<span>ERP Portal</span></div>
     </div>
     <div class="sb-nav-scroll">
+    <div class="sb-search-wrap">
+      <svg class="sb-icon sb-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.3" y1="15.3" x2="20" y2="20"/></svg>
+      <input type="text" id="sbModuleSearch" class="sb-search-input" placeholder="Jump to a module..." autocomplete="off"
+        oninput="sbFilterModules(this.value)" onkeydown="sbSearchKeydown(event)">
+      <button type="button" class="sb-search-clear" id="sbSearchClear" onclick="sbClearSearch()" style="display:none;" aria-label="Clear search">&times;</button>
+    </div>
+    <div class="sb-search-empty" id="sbSearchEmpty" style="display:none;">No module matches "<span id="sbSearchEmptyTerm"></span>"</div>
     <button type="button" class="sb-section-toggle" id="sbToggle-overview" onclick="toggleSbSection('overview')">Overview <span class="sb-chevron" id="sbChevron-overview">▾</span></button>
     <div class="sb-section-group" id="sbGroup-overview">
-      <button class="sb-link active" id="navDashboard" onclick="switchView('dashboard')"><span class="dot"></span> Dashboard</button>
+      <button class="sb-link active" id="navDashboard" onclick="switchView('dashboard')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11 L12 4 L20 11"/><path d="M6 10 V20 H18 V10"/><rect x="10" y="14" width="4" height="6"/></svg></span> Dashboard</button>
     </div>
     <button type="button" class="sb-section-toggle" id="sbToggle-academics" onclick="toggleSbSection('academics')">Academics <span class="sb-chevron" id="sbChevron-academics">▾</span></button>
     <div class="sb-section-group" id="sbGroup-academics">
-      <button class="sb-link" id="navAdmissions" onclick="switchView('admissions')"><span class="dot"></span> Manage Student</button>
-      <button class="sb-link" id="navAttendance" onclick="switchView('attendance')"><span class="dot"></span> Manage Attendance</button>
-      <button class="sb-link" id="navSubjects" onclick="switchView('subjects')"><span class="dot"></span> Manage Subjects</button>
-      <button class="sb-link" id="navExams" onclick="switchView('exams')"><span class="dot"></span> Manage Exams</button>
-      <button class="sb-link" id="navResult" onclick="switchView('result')"><span class="dot"></span> Result</button>
-      <button class="sb-link" id="navTimetable" onclick="switchView('timetable')"><span class="dot"></span> Timetable</button>
-      <button class="sb-link" id="navSyllabus" onclick="switchView('syllabus')"><span class="dot"></span> Syllabus &amp; Homework</button>
-      <button class="sb-link" id="navPromoTransfer" onclick="switchView('promotransfer')"><span class="dot"></span> Promotion &amp; Transfer</button>
-      <button class="sb-link" id="navMyProfile" onclick="switchView('myprofile')" style="display:none;"><span class="dot"></span> My Profile<span class="nb-badge" id="navMyProfileBadge" style="display:none;"></span></button>
+      <button class="sb-link" id="navAdmissions" onclick="switchView('admissions')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5 L21 9 L12 13 L3 9 Z"/><path d="M7 11 V16 C7 17.5 9.2 19 12 19 C14.8 19 17 17.5 17 16 V11"/></svg></span> Manage Student</button>
+      <button class="sb-link" id="navAttendance" onclick="switchView('attendance')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/><path d="M8.5 15 L11 17.5 L16 12.5"/></svg></span> Manage Attendance</button>
+      <button class="sb-link" id="navSubjects" onclick="switchView('subjects')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5 C4 4 5 3.5 7 3.5 C9.5 3.5 11 4.5 12 5.5 C13 4.5 14.5 3.5 17 3.5 C19 3.5 20 4 20 5 V18 C20 17 19 16.5 17 16.5 C14.5 16.5 13 17.5 12 18.5 C11 17.5 9.5 16.5 7 16.5 C5 16.5 4 17 4 18 Z"/><line x1="12" y1="5.5" x2="12" y2="18.5"/></svg></span> Manage Subjects</button>
+      <button class="sb-link" id="navExams" onclick="switchView('exams')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><rect x="9" y="2.5" width="6" height="3" rx="1"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="13.5" x2="16" y2="13.5"/><line x1="8" y1="17" x2="13" y2="17"/></svg></span> Manage Exams</button>
+      <button class="sb-link" id="navResult" onclick="switchView('result')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="9" r="5"/><path d="M9 13.5 L7 21 L12 18.5 L17 21 L15 13.5"/></svg></span> Result</button>
+      <button class="sb-link" id="navTimetable" onclick="switchView('timetable')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><line x1="12" y1="12" x2="12" y2="7.5"/><line x1="12" y1="12" x2="15.5" y2="13.5"/></svg></span> Timetable</button>
+      <button class="sb-link" id="navSyllabus" onclick="switchView('syllabus')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6 C10.5 4.8 8 4 4.5 4 V17.5 C8 17.5 10.5 18.3 12 19.5 C13.5 18.3 16 17.5 19.5 17.5 V4 C16 4 13.5 4.8 12 6 Z"/><line x1="12" y1="6" x2="12" y2="19.5"/></svg></span> Syllabus &amp; Homework</button>
+      <button class="sb-link" id="navPromoTransfer" onclick="switchView('promotransfer')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8 H17"/><path d="M13.5 4.5 L17 8 L13.5 11.5"/><path d="M20 16 H7"/><path d="M10.5 12.5 L7 16 L10.5 19.5"/></svg></span> Promotion &amp; Transfer</button>
+      <button class="sb-link" id="navMyProfile" onclick="switchView('myprofile')" style="display:none;"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 20 C4.5 15.5 7.8 13.5 12 13.5 C16.2 13.5 19.5 15.5 19.5 20"/></svg></span> My Profile<span class="nb-badge" id="navMyProfileBadge" style="display:none;"></span></button>
     </div>
     <button type="button" class="sb-section-toggle" id="sbToggle-communication" onclick="toggleSbSection('communication')">Communication <span class="sb-chevron" id="sbChevron-communication">▾</span></button>
     <div class="sb-section-group" id="sbGroup-communication">
-      <button class="sb-link" id="navAnnouncements" onclick="switchView('announcements')"><span class="dot"></span> Communications</button>
-      <button class="sb-link" id="navInbox" onclick="switchView('inbox')"><span class="dot"></span> Inbox</button>
-      <button class="sb-link" id="navNoticeBoard" onclick="switchView('noticeboard')"><span class="dot"></span> Notice Board</button>
-      <button class="sb-link" id="navWebsiteInquiries" onclick="switchView('websiteinquiries')"><span class="dot"></span> Website Inquiries</button>
-      <button class="sb-link" id="navWebsiteGallery" onclick="switchView('websitegallery')"><span class="dot"></span> Website Gallery</button>
-      <button class="sb-link" id="navContactVendor" onclick="switchView('contactvendor')"><span class="dot"></span> Contact Vendor</button>
+      <button class="sb-link" id="navAnnouncements" onclick="switchView('announcements')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10 V14 H6 L14 18 V6 L6 10 Z"/><path d="M17 9 C18.2 10 18.2 14 17 15"/></svg></span> Communications</button>
+      <button class="sb-link" id="navInbox" onclick="switchView('inbox')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M4 6.5 L12 13 L20 6.5"/></svg></span> Inbox</button>
+      <button class="sb-link" id="navNoticeBoard" onclick="switchView('noticeboard')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 C8.5 2 6 4.6 6 8.2 C6 12.8 12 21 12 21 C12 21 18 12.8 18 8.2 C18 4.6 15.5 2 12 2 Z"/><circle cx="12" cy="8.2" r="2.6"/></svg></span> Notice Board</button>
+      <button class="sb-link" id="navWebsiteInquiries" onclick="switchView('websiteinquiries')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12 C4 7.5 7.8 4 12.5 4 C17.2 4 21 7.5 21 12 C21 16.5 17.2 20 12.5 20 C11 20 9.6 19.7 8.4 19.1 L4 20.5 L5.4 16.6 C4.5 15.3 4 13.7 4 12 Z"/></svg></span> Website Inquiries</button>
+      <button class="sb-link" id="navWebsiteGallery" onclick="switchView('websitegallery')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M4 18 L9.5 12.5 L13.5 16.5 L16.5 13.5 L20 17"/></svg></span> Website Gallery</button>
+      <button class="sb-link" id="navContactVendor" onclick="switchView('contactvendor')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13 V12 C4 7.5 7.5 4 12 4 C16.5 4 20 7.5 20 12 V13"/><rect x="3.2" y="13" width="4" height="6" rx="1.5"/><rect x="16.8" y="13" width="4" height="6" rx="1.5"/></svg></span> Contact Vendor</button>
     </div>
     <button type="button" class="sb-section-toggle" id="sbToggle-finance" onclick="toggleSbSection('finance')">Finance <span class="sb-chevron" id="sbChevron-finance">▾</span></button>
     <div class="sb-section-group" id="sbGroup-finance">
-      <button class="sb-link" id="navManageFee" onclick="switchView('managefee')"><span class="dot"></span> Manage Fee</button>
-      <button class="sb-link" id="navAccounting" onclick="switchView('accounting')"><span class="dot"></span> Accounting</button>
+      <button class="sb-link" id="navManageFee" onclick="switchView('managefee')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="6.5" y1="14.5" x2="10.5" y2="14.5"/></svg></span> Manage Fee</button>
+      <button class="sb-link" id="navAccounting" onclick="switchView('accounting')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><rect x="7.5" y="5.5" width="9" height="4" rx="0.5"/><circle cx="8.3" cy="13" r="1"/><circle cx="12" cy="13" r="1"/><circle cx="15.7" cy="13" r="1"/><circle cx="8.3" cy="17" r="1"/><circle cx="12" cy="17" r="1"/><circle cx="15.7" cy="17" r="1"/></svg></span> Accounting</button>
     </div>
     <button type="button" class="sb-section-toggle" id="sbToggle-staffsec" onclick="toggleSbSection('staffsec')">Staff <span class="sb-chevron" id="sbChevron-staffsec">▾</span></button>
     <div class="sb-section-group" id="sbGroup-staffsec">
-      <button class="sb-link" id="navStaffDirectory" onclick="switchView('staffdirectory')"><span class="dot"></span> Staff Directory</button>
-      <button class="sb-link" id="navStaffDepts" onclick="switchView('staffdepts')"><span class="dot"></span> Departments &amp; Designations</button>
-      <button class="sb-link" id="navStaffIdcards" onclick="switchView('staffidcards')"><span class="dot"></span> ID Cards</button>
-      <button class="sb-link" id="navStaffPayroll" onclick="switchView('staffpayroll')"><span class="dot"></span> Payroll</button>
-      <button class="sb-link" id="navStaffAttendance" onclick="switchView('staffattendance')"><span class="dot"></span> Attendance</button>
-      <button class="sb-link" id="navStaffReports" onclick="switchView('staffreports')"><span class="dot"></span> Reports</button>
+      <button class="sb-link" id="navStaffDirectory" onclick="switchView('staffdirectory')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19 C3.5 15.2 6 13.3 9 13.3 C12 13.3 14.5 15.2 14.5 19"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 13.5 C18 13.7 20.5 15.3 20.5 19"/></svg></span> Staff Directory</button>
+      <button class="sb-link" id="navStaffDepts" onclick="switchView('staffdepts')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M8.5 8 V6 C8.5 4.9 9.4 4 10.5 4 H13.5 C14.6 4 15.5 4.9 15.5 6 V8"/><line x1="3" y1="13" x2="21" y2="13"/></svg></span> Departments &amp; Designations</button>
+      <button class="sb-link" id="navStaffIdcards" onclick="switchView('staffidcards')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="11" r="2.3"/><path d="M5.5 16 C5.5 14 6.8 13 8.5 13 C10.2 13 11.5 14 11.5 16"/><line x1="14" y1="9.5" x2="18.5" y2="9.5"/><line x1="14" y1="13" x2="18.5" y2="13"/></svg></span> ID Cards</button>
+      <button class="sb-link" id="navStaffPayroll" onclick="switchView('staffpayroll')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6.5" width="19" height="11" rx="2"/><circle cx="12" cy="12" r="2.6"/><line x1="6" y1="9" x2="6" y2="9"/><line x1="18" y1="15" x2="18" y2="15"/></svg></span> Payroll</button>
+      <button class="sb-link" id="navStaffAttendance" onclick="switchView('staffattendance')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/><path d="M8.5 15 L11 17.5 L16 12.5"/></svg></span> Attendance</button>
+      <button class="sb-link" id="navStaffReports" onclick="switchView('staffreports')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="20" x2="5" y2="12"/><line x1="12" y1="20" x2="12" y2="7"/><line x1="19" y1="20" x2="19" y2="15"/><line x1="3" y1="20" x2="21" y2="20"/></svg></span> Reports</button>
     </div>
     <button type="button" class="sb-section-toggle" id="sbToggle-facilities" onclick="toggleSbSection('facilities')">Facilities <span class="sb-chevron" id="sbChevron-facilities">▾</span></button>
     <div class="sb-section-group" id="sbGroup-facilities">
-      <button class="sb-link" id="navInventory" onclick="switchView('inventory')"><span class="dot"></span> Inventory</button>
-      <button class="sb-link" id="navTransport" onclick="switchView('transport')"><span class="dot"></span> Transport</button>
-      <button class="sb-link" id="navLibrary" onclick="switchView('library')"><span class="dot"></span> Library</button>
-      <button class="sb-link" id="navHostel" onclick="switchView('hostel')"><span class="dot"></span> Hostel</button>
+      <button class="sb-link" id="navInventory" onclick="switchView('inventory')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L20 7.5 V16.5 L12 21 L4 16.5 V7.5 Z"/><path d="M4 7.5 L12 12 L20 7.5"/><line x1="12" y1="12" x2="12" y2="21"/></svg></span> Inventory</button>
+      <button class="sb-link" id="navTransport" onclick="switchView('transport')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="11" rx="2"/><line x1="3.5" y1="10" x2="20.5" y2="10"/><circle cx="7.5" cy="18.3" r="1.6"/><circle cx="16.5" cy="18.3" r="1.6"/><line x1="7" y1="7.5" x2="7" y2="10"/><line x1="12" y1="7.5" x2="12" y2="10"/><line x1="17" y1="7.5" x2="17" y2="10"/></svg></span> Transport</button>
+      <button class="sb-link" id="navLibrary" onclick="switchView('library')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="4" height="15"/><rect x="10" y="3" width="4" height="17"/><rect x="16" y="7" width="4" height="13"/></svg></span> Library</button>
+      <button class="sb-link" id="navHostel" onclick="switchView('hostel')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="1"/><line x1="8" y1="7" x2="8" y2="7"/><line x1="12" y1="7" x2="12" y2="7"/><line x1="16" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="8" y2="11"/><line x1="12" y1="11" x2="12" y2="11"/><line x1="16" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="8" y2="15"/><line x1="12" y1="15" x2="12" y2="15"/><line x1="16" y1="15" x2="16" y2="15"/></svg></span> Hostel</button>
     </div>
     <button type="button" class="sb-section-toggle" id="sbToggle-reportssec" onclick="toggleSbSection('reportssec')">Reports <span class="sb-chevron" id="sbChevron-reportssec">▾</span></button>
     <div class="sb-section-group" id="sbGroup-reportssec">
-      <button class="sb-link" id="navReports" onclick="switchView('reports')"><span class="dot"></span> Reports</button>
+      <button class="sb-link" id="navReports" onclick="switchView('reports')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="20" x2="5" y2="12"/><line x1="12" y1="20" x2="12" y2="7"/><line x1="19" y1="20" x2="19" y2="15"/><line x1="3" y1="20" x2="21" y2="20"/></svg></span> Reports</button>
     </div>
     <button type="button" class="sb-section-toggle" id="sbToggle-configuration" onclick="toggleSbSection('configuration')">Configuration <span class="sb-chevron" id="sbChevron-configuration">▾</span></button>
     <div class="sb-section-group" id="sbGroup-configuration">
-      <button class="sb-link" id="navSchoolProfile" onclick="switchView('schoolprofile')"><span class="dot"></span> School Profile</button>
-      <button class="sb-link" id="navClassesSetup" onclick="switchView('classessetup')"><span class="dot"></span> Classes</button>
-      <button class="sb-link" id="navAcademicYear" onclick="switchView('academicyear')"><span class="dot"></span> Academic Year</button>
-      <button class="sb-link" id="navFeeStructureSetup" onclick="switchView('feestructuresetup')"><span class="dot"></span> Fee Structure</button>
-      <button class="sb-link" id="navPromotions" onclick="switchView('promotions')"><span class="dot"></span> Promotions</button>
-      <button class="sb-link" id="navUsersRoles" onclick="switchView('usersroles')" style="display:none;"><span class="dot"></span> Users &amp; Roles</button>
-      <button class="sb-link" id="navStudentParentLogins" onclick="switchView('studentparentlogins')" style="display:none;"><span class="dot"></span> Student/Parent Logins</button>
-      <button class="sb-link" id="navRolesPermissions" onclick="switchView('rolespermissions')" style="display:none;"><span class="dot"></span> Roles &amp; Permissions</button>
-      <button class="sb-link" id="navAdminTools2" onclick="switchView('admintools2')" style="display:none;"><span class="dot"></span> 🔒 Admin Tools</button>
+      <button class="sb-link" id="navSchoolProfile" onclick="switchView('schoolprofile')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="1"/><line x1="8" y1="7" x2="8" y2="7"/><line x1="12" y1="7" x2="12" y2="7"/><line x1="16" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="8" y2="11"/><line x1="12" y1="11" x2="12" y2="11"/><line x1="16" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="8" y2="15"/><line x1="12" y1="15" x2="12" y2="15"/><line x1="16" y1="15" x2="16" y2="15"/></svg></span> School Profile</button>
+      <button class="sb-link" id="navClassesSetup" onclick="switchView('classessetup')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 L21 8 L12 13 L3 8 Z"/><path d="M3 12 L12 17 L21 12"/><path d="M3 16 L12 21 L21 16"/></svg></span> Classes</button>
+      <button class="sb-link" id="navAcademicYear" onclick="switchView('academicyear')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg></span> Academic Year</button>
+      <button class="sb-link" id="navFeeStructureSetup" onclick="switchView('feestructuresetup')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="18" x2="20" y2="18"/><line x1="4" y1="6" x2="4" y2="6"/><line x1="4" y1="12" x2="4" y2="12"/><line x1="4" y1="18" x2="4" y2="18"/></svg></span> Fee Structure</button>
+      <button class="sb-link" id="navPromotions" onclick="switchView('promotions')"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3,17 9,11 13,15 21,6"/><polyline points="15,6 21,6 21,12"/></svg></span> Promotions</button>
+      <button class="sb-link" id="navUsersRoles" onclick="switchView('usersroles')" style="display:none;"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 L20 6 V12 C20 17 16.5 20.5 12 22 C7.5 20.5 4 17 4 12 V6 Z"/></svg></span> Users &amp; Roles</button>
+      <button class="sb-link" id="navStudentParentLogins" onclick="switchView('studentparentlogins')" style="display:none;"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="14.5" r="3.5"/><path d="M10.5 12 L20 2.5"/><path d="M16.5 6 L19 8.5"/><path d="M13.5 9 L16 11.5"/></svg></span> Student/Parent Logins</button>
+      <button class="sb-link" id="navRolesPermissions" onclick="switchView('rolespermissions')" style="display:none;"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11 V7.5 C8 5 9.8 3 12 3 C14.2 3 16 5 16 7.5 V11"/></svg></span> Roles &amp; Permissions</button>
+      <button class="sb-link" id="navAdminTools2" onclick="switchView('admintools2')" style="display:none;"><span class="sb-icon-wrap"><svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><line x1="12" y1="3" x2="12" y2="5.5"/><line x1="12" y1="18.5" x2="12" y2="21"/><line x1="3" y1="12" x2="5.5" y2="12"/><line x1="18.5" y1="12" x2="21" y2="12"/><line x1="5.6" y1="5.6" x2="7.4" y2="7.4"/><line x1="16.6" y1="16.6" x2="18.4" y2="18.4"/><line x1="5.6" y1="18.4" x2="7.4" y2="16.6"/><line x1="16.6" y1="7.4" x2="18.4" y2="5.6"/></svg></span> 🔒 Admin Tools</button>
     </div>
     </div>
     <div class="sb-user-footer">
@@ -2281,6 +2311,88 @@
   // Each Staff sidebar page is its own view key, but they all share the one view-staff
   // container/content pieces internally — this maps the view key to the internal staff tab.
   const STAFF_SUBVIEWS = { staffdirectory:'directory', staffdepts:'depts', staffidcards:'idcards', staffpayroll:'payroll', staffattendance:'attendance', staffreports:'reports' };
+  /* ===== SIDEBAR: quick-jump module search =====
+     Filters every .sb-link by its visible label text as you type, expanding
+     any section that has a match and collapsing (not deleting) everything
+     else so results are never ambiguous. Clearing the box restores whatever
+     collapse state was active before the search started. */
+  let sbPreSearchCollapse = null;
+  function sbFilterModules(term){
+    const q = (term || '').trim().toLowerCase();
+    const clearBtn = document.getElementById('sbSearchClear');
+    const emptyMsg = document.getElementById('sbSearchEmpty');
+    if(clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+    if(!q){
+      if(sbPreSearchCollapse){
+        SB_SECTION_KEYS.forEach(key => {
+          const group = document.getElementById('sbGroup-'+key);
+          const toggle = document.getElementById('sbToggle-'+key);
+          const chevron = document.getElementById('sbChevron-'+key);
+          if(group) group.classList.remove('sb-search-hidden');
+          if(toggle) toggle.classList.remove('sb-search-hidden');
+          if(group) group.classList.toggle('collapsed', !!sbPreSearchCollapse[key]);
+          if(chevron) chevron.classList.toggle('collapsed', !!sbPreSearchCollapse[key]);
+        });
+        sbPreSearchCollapse = null;
+      }
+      document.querySelectorAll('.sb-link.sb-search-match').forEach(el => el.classList.remove('sb-search-match'));
+      document.querySelectorAll('.sb-link.sb-search-hidden').forEach(el => el.classList.remove('sb-search-hidden'));
+      if(emptyMsg) emptyMsg.style.display = 'none';
+      return;
+    }
+    if(!sbPreSearchCollapse){
+      sbPreSearchCollapse = {};
+      SB_SECTION_KEYS.forEach(key => {
+        const group = document.getElementById('sbGroup-'+key);
+        sbPreSearchCollapse[key] = group ? group.classList.contains('collapsed') : false;
+      });
+    }
+    let anyMatch = false;
+    SB_SECTION_KEYS.forEach(key => {
+      const group = document.getElementById('sbGroup-'+key);
+      const toggle = document.getElementById('sbToggle-'+key);
+      const chevron = document.getElementById('sbChevron-'+key);
+      if(!group) return;
+      let sectionHasMatch = false;
+      let sectionHasVisibleLink = false;
+      group.querySelectorAll('.sb-link').forEach(link => {
+        if(link.style.display === 'none'){ link.classList.add('sb-search-hidden'); return; }
+        sectionHasVisibleLink = true;
+        const label = (link.textContent || '').toLowerCase();
+        const match = label.includes(q);
+        link.classList.toggle('sb-search-hidden', !match);
+        link.classList.toggle('sb-search-match', match);
+        if(match) sectionHasMatch = true;
+      });
+      const showSection = sectionHasMatch && sectionHasVisibleLink;
+      if(toggle) toggle.classList.toggle('sb-search-hidden', !showSection);
+      group.classList.toggle('sb-search-hidden', !showSection);
+      if(showSection){
+        group.classList.remove('collapsed');
+        if(chevron) chevron.classList.remove('collapsed');
+        anyMatch = true;
+      }
+    });
+    if(emptyMsg){
+      emptyMsg.style.display = anyMatch ? 'none' : 'block';
+      const termSpan = document.getElementById('sbSearchEmptyTerm');
+      if(termSpan) termSpan.textContent = term;
+    }
+  }
+  function sbClearSearch(){
+    const input = document.getElementById('sbModuleSearch');
+    if(input) input.value = '';
+    sbFilterModules('');
+    if(input) input.focus();
+  }
+  function sbSearchKeydown(e){
+    if(e.key === 'Escape'){ sbClearSearch(); return; }
+    if(e.key === 'Enter'){
+      const firstMatch = document.querySelector('.sb-link.sb-search-match');
+      if(firstMatch) firstMatch.click();
+    }
+  }
+
   function toggleSbSection(key){
     const group = document.getElementById('sbGroup-'+key);
     const chevron = document.getElementById('sbChevron-'+key);
@@ -2303,14 +2415,23 @@
   }
   function initSbSectionsCollapseState(){
     let state = {};
-    try{ state = JSON.parse(localStorage.getItem('sb-collapsed-sections') || '{}'); }catch(e){}
-    Object.keys(state).forEach(key => {
-      if(state[key]){
-        const group = document.getElementById('sbGroup-'+key);
-        const chevron = document.getElementById('sbChevron-'+key);
-        if(group) group.classList.add('collapsed');
-        if(chevron) chevron.classList.add('collapsed');
-      }
+    let hasSaved = false;
+    try{
+      const raw = localStorage.getItem('sb-collapsed-sections');
+      hasSaved = !!raw;
+      state = JSON.parse(raw || '{}');
+    }catch(e){}
+    // First-ever visit: start with every section collapsed except Overview, so
+    // the sidebar opens as a short, scannable list of categories rather than a
+    // 35-button wall. switchView() below still auto-opens whichever section the
+    // signed-in role actually lands on. Once someone has clicked a section
+    // header themselves, their saved choices (per key, above) take over.
+    SB_SECTION_KEYS.forEach(key => {
+      const collapsed = hasSaved ? !!state[key] : (key !== 'overview');
+      const group = document.getElementById('sbGroup-'+key);
+      const chevron = document.getElementById('sbChevron-'+key);
+      if(group) group.classList.toggle('collapsed', collapsed);
+      if(chevron) chevron.classList.toggle('collapsed', collapsed);
     });
   }
 
