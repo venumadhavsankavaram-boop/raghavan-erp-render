@@ -14,14 +14,19 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { neon } from '@neondatabase/serverless';
 import webpush from 'web-push';
+// Fleet reporting + support-login — see ../reporting-client/ for the
+// canonical copies and full wiring docs (also README.md, "Reporting
+// Client"). Both are opt-in and fail silent: with VENDOR_DASHBOARD_URL /
+// VENDOR_SCHOOL_ID / VENDOR_API_KEY unset (the default for a school not
+// yet added to the vendor dashboard), this does nothing at all.
 import { startVendorReporting, reportVendorError, isAccessSuspended, getModuleAccess } from './vendor-reporting.js';
 import { handleVendorSupportLogin } from './vendor-support-login.js';
+startVendorReporting();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-startVendorReporting();
 // Default body-size limit (100kb) is far too small the moment any record
 // carries a photo or document as a base64 data URL (website gallery photos,
 // student/staff photos, ID card photos, admit-card signatures, admin
@@ -144,6 +149,17 @@ async function ensureSchema() {
   await sql`CREATE TABLE IF NOT EXISTS staff_attendance_records (
     id TEXT PRIMARY KEY, staff_id TEXT, date TEXT, status TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  // Raw log of every punch the on-site biometric bridge has ever forwarded
+  // (see the "Biometric attendance" section below) — kept even for
+  // unmatched device user IDs so the Admin's Biometric Sync tab can show
+  // them and prompt a mapping fix, and even for matched ones that didn't
+  // end up changing staff_attendance_records (e.g. a second punch the same
+  // day). id is deterministic (device serial + device user id + timestamp)
+  // so the bridge can safely resend the same punch without double-logging.
+  await sql`CREATE TABLE IF NOT EXISTS biometric_punches (
+    id TEXT PRIMARY KEY, device_serial TEXT, device_user_id TEXT, punched_at TIMESTAMPTZ,
+    staff_id TEXT, staff_name TEXT, matched BOOLEAN DEFAULT false, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
   await sql`CREATE TABLE IF NOT EXISTS admission_inquiries (
     id TEXT PRIMARY KEY, parent_name TEXT, parent_email TEXT, parent_phone TEXT, student_name TEXT,
     applying_grade TEXT, notes TEXT, submitted_date TEXT, status TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -159,6 +175,36 @@ async function ensureSchema() {
   // Same soft-delete treatment as users — see the ALTER TABLE users comment
   // above and HYBRID_RESOURCES.students' softDelete flag below.
   await sql`ALTER TABLE students ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
+  // A student record is never deleted on a single click — see
+  // HYBRID_RESOURCES.students' deleteViaApprovalOnly flag and
+  // handleDeletionRequests below. Getting from "requested" to "actually
+  // deleted" takes THREE different people's say-so: whoever files the
+  // request, then a first Admin/Principal approval, then a second
+  // Admin/Principal approval — no one may fill more than one of those
+  // three roles for the same request, Admin included. Nothing here is
+  // erased until both approvals land — the actual removal still lands on
+  // the same reversible deleted_at soft-delete above, never a hard DELETE.
+  await sql`CREATE TABLE IF NOT EXISTS deletion_requests (
+    id TEXT PRIMARY KEY, resource TEXT NOT NULL, record_id TEXT NOT NULL, record_label TEXT, reason TEXT,
+    requested_by TEXT, requested_by_name TEXT, requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    status TEXT NOT NULL DEFAULT 'Pending',
+    first_approved_by TEXT, first_approved_by_name TEXT, first_approved_at TIMESTAMPTZ,
+    decided_by TEXT, decided_by_name TEXT, decided_at TIMESTAMPTZ, decision_note TEXT
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_deletion_requests_status ON deletion_requests (status)`;
+  // Certificate register — every Study/Transfer Certificate issued is logged
+  // here with a snapshot of the student's details at the moment of issue
+  // (so a later data correction never rewrites what an already-printed
+  // certificate said) and a sequential per-type, per-year serial number.
+  // This is what makes "we can still prove what we issued and when" true
+  // even long after a student has left — see handleCertificates below.
+  await sql`CREATE TABLE IF NOT EXISTS certificates_issued (
+    id TEXT PRIMARY KEY, type TEXT NOT NULL, serial_no TEXT NOT NULL,
+    resource TEXT NOT NULL, record_id TEXT NOT NULL, snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    conduct TEXT, purpose TEXT, academic_year TEXT,
+    issued_by TEXT, issued_by_name TEXT, issued_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_certificates_issued_record ON certificates_issued (resource, record_id)`;
   await sql`CREATE TABLE IF NOT EXISTS staff (
     id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, department TEXT, designation TEXT, status TEXT,
     staff_id TEXT, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -367,6 +413,7 @@ async function ensureSchema() {
   // change behavior) if any duplicate usernames already exist in the live
   // data, which is a separate decision from "make lookups fast."
   await sql`CREATE INDEX IF NOT EXISTS idx_users_username ON users (LOWER(username))`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions (user_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_payments_student_id ON payments (student_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_payments_date ON payments (date)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_student_discounts_student_id ON student_discounts (student_id)`;
@@ -378,6 +425,7 @@ async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_exam_results_student_id ON exam_results (student_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_staff_attendance_records_staff_id ON staff_attendance_records (staff_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_staff_attendance_records_date ON staff_attendance_records (date)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_biometric_punches_punched_at ON biometric_punches (punched_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_staff_payroll_staff_id ON staff_payroll (staff_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_admission_inquiries_status ON admission_inquiries (status)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_website_gallery_category ON website_gallery (category)`;
@@ -387,7 +435,6 @@ async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users (deleted_at)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_students_deleted_at ON students (deleted_at)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions (user_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_acct_income_date ON acct_income (date)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_acct_expenses_date ON acct_expenses (date)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_student_concerns_student_id ON student_concerns (student_id)`;
@@ -582,6 +629,10 @@ const PUBLIC_API_ROUTES = [
   { path: '/api/comms-messages', methods: ['GET'] },
   { path: '/api/website-gallery', methods: ['GET'] },
   { path: '/api/school-info', methods: ['GET'] },
+  // Called by the on-site biometric bridge (a machine, not a logged-in
+  // person) — authenticated by its own BIOMETRIC_API_KEY header check
+  // inside the route, same pattern as /api/vendor/admission-inquiries above.
+  { path: '/api/biometric/punches', methods: ['POST'] },
 ];
 function isPublicApiRoute(req) {
   return PUBLIC_API_ROUTES.some(r => r.path === req.path && r.methods.includes(req.method));
@@ -622,8 +673,8 @@ async function handleKv(req, res, key) {
   }
   // See PARENT_SHARED_REFERENCE_KV_KEYS above — same reasoning as the main
   // dispatcher's PARENT_SHARED_REFERENCE_RESOURCES: a Student/Parent login
-  // reading the late-fee policy isn't reading anything per-student, and
-  // without it Fees silently shows every family as owing no late fee at all.
+  // reading shared reference data (right now, the late-fee policy) needs no
+  // staff module permission — there's nothing per-student here to leak.
   const parentSharedKvBypass = req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_KV_KEYS.includes(key);
   if (KV_KEY_TO_MODULE[key]) {
     // Plan gating applies regardless of role (including Admin, and the
@@ -815,6 +866,13 @@ const HYBRID_RESOURCES = {
     // unchanged, since this fix is scoped to the two record types a real
     // incident actually happened to (students, and users just below).
     softDelete: true,
+    // A direct DELETE to /api/students is refused unconditionally (see the
+    // DELETE branch of handleHybrid below) — even for Admin. The only way
+    // deleted_at ever gets set on a student is handleDeletionRequests
+    // approving a pending request from a second person. This is separate
+    // from softDelete above: softDelete governs what a successful deletion
+    // *does* (soft, reversible); this governs who may *trigger* one at all.
+    deleteViaApprovalOnly: true,
     core: [
       { app: 'id', col: 'id' }, { app: 'firstName', col: 'first_name' }, { app: 'lastName', col: 'last_name' },
       { app: 'className', col: 'class_name' }, { app: 'section', col: 'section' }, { app: 'status', col: 'status' },
@@ -939,6 +997,8 @@ const RESOURCE_TO_MODULE = {
   'exam-room-config': ['result'],
   // People
   students: ['admissions'],
+  'deletion-requests': ['admissions'],
+  certificates: ['admissions'],
   // Admission inquiries are the public website's "Admissions Inquiry Form"
   // submissions, reviewed under Website Inquiries in the sidebar (see
   // canDo('websiteinquiries', ...) in renderAdmissionInquiries) — NOT the
@@ -1235,7 +1295,7 @@ function splitCoreExtra(body, core) {
   return { coreVals, extra };
 }
 async function handleHybrid(req, res, config) {
-  const { table, core, softDelete } = config;
+  const { table, core, softDelete, deleteViaApprovalOnly } = config;
   if (req.method === 'GET') {
     // ?trash=1 (Admin/Principal only) lists soft-deleted records for the
     // Recently Deleted view — only meaningful for a resource that opted
@@ -1283,6 +1343,16 @@ async function handleHybrid(req, res, config) {
     }
   }
   if (req.method === 'DELETE') {
+    // See HYBRID_RESOURCES.students' deleteViaApprovalOnly comment — this
+    // path is refused unconditionally, Admin included, no matter who or
+    // what is calling it (the UI's own request-a-deletion flow, an old
+    // cached client, or a direct API call). The only way in is
+    // handleDeletionRequests recording two separate Admin/Principal
+    // approvals on a pending request, which updates deleted_at itself and
+    // never routes back through here.
+    if (deleteViaApprovalOnly) {
+      return res.status(403).json({ error: 'This record can only be deleted through a deletion request approved twice, by two different Admins/Principals — see Recently Deleted / Pending Deletion Requests.' });
+    }
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: 'Missing id.' });
     if (softDelete) {
@@ -1291,6 +1361,195 @@ async function handleHybrid(req, res, config) {
       await sql.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
     }
     return res.status(200).json({ ok: true });
+  }
+  return res.status(405).json({ error: 'Method not allowed.' });
+}
+
+// ---------- Deletion requests (two-person approval for deleteViaApprovalOnly resources) ----------
+// A student record is never removed on one person's say-so, and never on
+// just ONE other person's say-so either: requesting, the first approval,
+// and the final approval must be three different people, and only
+// Admin/Principal may approve at either stage (see MANAGEMENT_ROLES below)
+// — Admin included, no exceptions. A request moves
+// Pending -> "Pending Final Approval" (after the first approval) ->
+// Approved (after a second, different Admin/Principal approves again) or
+// Rejected (at either stage). Approval performs the same reversible
+// soft-delete handleHybrid always did — nothing about *what* a deletion
+// does has changed, only how many people, and who, may set it off.
+const DELETION_REQUEST_TARGETS = {
+  students: {
+    table: 'students',
+    label: row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
+  },
+};
+function shapeDeletionRequest(r) {
+  return {
+    id: r.id, resource: r.resource, recordId: r.record_id, recordLabel: r.record_label, reason: r.reason,
+    requestedBy: r.requested_by, requestedByName: r.requested_by_name, requestedAt: r.requested_at,
+    status: r.status,
+    firstApprovedBy: r.first_approved_by, firstApprovedByName: r.first_approved_by_name, firstApprovedAt: r.first_approved_at,
+    decidedBy: r.decided_by, decidedByName: r.decided_by_name, decidedAt: r.decided_at,
+    decisionNote: r.decision_note,
+  };
+}
+async function handleDeletionRequests(req, res) {
+  if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+  if (req.method === 'GET') {
+    // Admin/Principal see every request (they're the ones who act on them);
+    // anyone else sees only the requests they personally filed, so they can
+    // check whether theirs was approved/rejected without seeing the rest
+    // of the school's queue.
+    const rows = MANAGEMENT_ROLES.includes(req.authUser.role)
+      ? await sql`SELECT * FROM deletion_requests ORDER BY requested_at DESC LIMIT 200`
+      : await sql`SELECT * FROM deletion_requests WHERE requested_by = ${req.authUser.id} ORDER BY requested_at DESC LIMIT 200`;
+    return res.status(200).json(rows.map(shapeDeletionRequest));
+  }
+  if (req.method === 'POST') {
+    const { resource: targetResource, recordId, reason } = req.body || {};
+    const target = DELETION_REQUEST_TARGETS[targetResource];
+    if (!target) return res.status(400).json({ error: 'Unsupported record type for a deletion request.' });
+    if (!recordId) return res.status(400).json({ error: 'Missing recordId.' });
+    if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'A reason is required.' });
+    const already = await sql`SELECT id FROM deletion_requests WHERE resource = ${targetResource} AND record_id = ${String(recordId)} AND status IN ('Pending', 'Pending Final Approval')`;
+    if (already.length) return res.status(409).json({ error: 'A deletion request for this record is already pending approval.' });
+    const rows = await sql.query(`SELECT * FROM ${target.table} WHERE id = $1 AND deleted_at IS NULL`, [recordId]);
+    if (!rows.length) return res.status(404).json({ error: 'Record not found — it may already be deleted.' });
+    const id = 'delreq_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+    await sql`
+      INSERT INTO deletion_requests (id, resource, record_id, record_label, reason, requested_by, requested_by_name)
+      VALUES (${id}, ${targetResource}, ${String(recordId)}, ${target.label(rows[0])}, ${String(reason).trim()}, ${req.authUser.id}, ${req.authUser.name})
+    `;
+    return res.status(201).json({ ok: true, id });
+  }
+  if (req.method === 'PUT') {
+    if (!MANAGEMENT_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Admin or Principal access required to decide a deletion request.' });
+    }
+    const { id } = req.query;
+    if (!id) return res.status(400).json({ error: 'Missing id.' });
+    const { decision, note } = req.body || {};
+    if (decision !== 'Approve' && decision !== 'Reject') return res.status(400).json({ error: 'decision must be "Approve" or "Reject".' });
+    const rows = await sql`SELECT * FROM deletion_requests WHERE id = ${id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Request not found.' });
+    const reqRow = rows[0];
+    if (reqRow.status === 'Approved' || reqRow.status === 'Rejected') {
+      return res.status(409).json({ error: `This request was already ${reqRow.status.toLowerCase()}.` });
+    }
+    // No single person may fill more than one of the three roles on the
+    // same request — this is what actually stops a unilateral deletion,
+    // Admin included:
+    //  1. the requester can never also approve their own request, at
+    //     either stage;
+    //  2. whoever gave the first approval can never also give the final,
+    //     second approval on that same request.
+    if (reqRow.requested_by === req.authUser.id) {
+      return res.status(403).json({ error: 'You requested this deletion — a different Admin or Principal must review it.' });
+    }
+    if (reqRow.status === 'Pending Final Approval' && reqRow.first_approved_by === req.authUser.id) {
+      return res.status(403).json({ error: 'You already gave the first approval on this request — a different Admin or Principal must give the final approval.' });
+    }
+    if (decision === 'Reject') {
+      await sql`
+        UPDATE deletion_requests SET status = 'Rejected',
+          decided_by = ${req.authUser.id}, decided_by_name = ${req.authUser.name}, decided_at = now(),
+          decision_note = ${note ? String(note).trim() : null}
+        WHERE id = ${id}
+      `;
+      return res.status(200).json({ ok: true, status: 'Rejected' });
+    }
+    // decision === 'Approve'
+    if (reqRow.status === 'Pending') {
+      // First approval only — nothing is deleted yet. A second, different
+      // Admin/Principal must approve again before this actually happens.
+      await sql`
+        UPDATE deletion_requests SET status = 'Pending Final Approval',
+          first_approved_by = ${req.authUser.id}, first_approved_by_name = ${req.authUser.name}, first_approved_at = now()
+        WHERE id = ${id}
+      `;
+      return res.status(200).json({ ok: true, status: 'Pending Final Approval' });
+    }
+    // reqRow.status === 'Pending Final Approval' — this is the second,
+    // final approval, so this is the only branch that actually deletes.
+    const target = DELETION_REQUEST_TARGETS[reqRow.resource];
+    if (target) await sql.query(`UPDATE ${target.table} SET deleted_at = now() WHERE id = $1`, [reqRow.record_id]);
+    await sql`
+      UPDATE deletion_requests SET status = 'Approved',
+        decided_by = ${req.authUser.id}, decided_by_name = ${req.authUser.name}, decided_at = now(),
+        decision_note = ${note ? String(note).trim() : null}
+      WHERE id = ${id}
+    `;
+    return res.status(200).json({ ok: true, status: 'Approved' });
+  }
+  return res.status(405).json({ error: 'Method not allowed.' });
+}
+
+// ---------- Certificate register (Study / Transfer / Bonafide certificates) ----------
+// Every certificate issued for a student is logged here with a snapshot of
+// their details at the moment of issue (so a later correction to the live
+// record never rewrites what an already-printed certificate said) and a
+// sequential, per-type, per-calendar-year serial number. This is what lets
+// the school prove what was issued, to whom, and when — including long
+// after a student has gone Inactive, since Inactive students are never
+// removed from the roster (only an approved deletion request removes a
+// record, and that's a separate, rare, two-approval action).
+const CERTIFICATE_TARGETS = {
+  students: {
+    table: 'students',
+    label: row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
+    buildSnapshot: row => {
+      const extra = row.extra || {};
+      return {
+        firstName: row.first_name || '', lastName: row.last_name || '', admissionNo: row.admission_no || '',
+        className: row.class_name || '', section: row.section || '', status: row.status || '',
+        fatherName: extra.fatherName || '', motherName: extra.motherName || '',
+        dob: extra.dob || '', admDate: extra.admDate || '', gender: extra.gender || '',
+      };
+    },
+  },
+};
+function shapeCertificate(r) {
+  return {
+    id: r.id, type: r.type, serialNo: r.serial_no, resource: r.resource, recordId: r.record_id,
+    snapshot: r.snapshot || {}, conduct: r.conduct, purpose: r.purpose, academicYear: r.academic_year,
+    issuedBy: r.issued_by, issuedByName: r.issued_by_name, issuedAt: r.issued_at,
+  };
+}
+async function nextCertificateSerial(type) {
+  const year = new Date().getFullYear();
+  const rows = await sql`SELECT COUNT(*)::int AS n FROM certificates_issued WHERE type = ${type} AND EXTRACT(YEAR FROM issued_at) = ${year}`;
+  const seq = (rows[0] && rows[0].n ? rows[0].n : 0) + 1;
+  const prefix = type === 'Transfer' ? 'TC' : type === 'Bonafide' ? 'BC' : 'SC';
+  return `${prefix}/${year}/${String(seq).padStart(4, '0')}`;
+}
+async function handleCertificates(req, res) {
+  if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+  if (req.method === 'GET') {
+    const { resource: filterResource, recordId: filterRecordId } = req.query;
+    const rows = (filterResource && filterRecordId)
+      ? await sql`SELECT * FROM certificates_issued WHERE resource = ${filterResource} AND record_id = ${String(filterRecordId)} ORDER BY issued_at DESC LIMIT 200`
+      : await sql`SELECT * FROM certificates_issued ORDER BY issued_at DESC LIMIT 200`;
+    return res.status(200).json(rows.map(shapeCertificate));
+  }
+  if (req.method === 'POST') {
+    const { type, resource: targetResource, recordId, conduct, purpose, academicYear } = req.body || {};
+    const target = CERTIFICATE_TARGETS[targetResource];
+    if (!target) return res.status(400).json({ error: 'Unsupported record type for a certificate.' });
+    if (!recordId) return res.status(400).json({ error: 'Missing recordId.' });
+    const certType = (type && String(type).trim()) || 'Study';
+    // Deliberately not filtered by deleted_at — a certificate can still be
+    // produced for a record that was later (properly, two-approval) removed,
+    // since the row itself is only ever soft-deleted, never erased.
+    const rows = await sql.query(`SELECT * FROM ${target.table} WHERE id = $1`, [recordId]);
+    if (!rows.length) return res.status(404).json({ error: 'Record not found.' });
+    const row = rows[0];
+    const id = 'cert_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+    const serialNo = await nextCertificateSerial(certType);
+    const snapshot = target.buildSnapshot(row);
+    await sql`
+      INSERT INTO certificates_issued (id, type, serial_no, resource, record_id, snapshot, conduct, purpose, academic_year, issued_by, issued_by_name)
+      VALUES (${id}, ${certType}, ${serialNo}, ${targetResource}, ${String(recordId)}, ${JSON.stringify(snapshot)}::jsonb, ${conduct ? String(conduct).trim() : null}, ${purpose ? String(purpose).trim() : null}, ${academicYear ? String(academicYear).trim() : null}, ${req.authUser.id}, ${req.authUser.name})
+    `;
+    return res.status(201).json({ ok: true, id, serialNo, snapshot });
   }
   return res.status(405).json({ error: 'Method not allowed.' });
 }
@@ -1534,6 +1793,19 @@ app.post('/api/payments/verify', async (req, res) => {
     console.error('razorpay verify error:', err);
     return res.status(500).json({ error: 'Payment succeeded but we could not record it — please contact the school office with your payment ID.' });
   }
+});
+
+// Whether this school has online fee payment turned on at all — the deploy-
+// time choice this template is built around. A school that doesn't want to
+// offer it (or hasn't signed up for Razorpay yet) is simply never given
+// RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET when this service is set up; every
+// other route above already refuses to work without them, but until now the
+// Student/Parent "Pay Online" button still showed up and only failed once
+// clicked. The Fees tab calls this first so it can hide the button entirely
+// for a school that hasn't integrated the feature, instead of offering a
+// dead end. Deliberately just a boolean — never leaks which keys are set.
+app.get('/api/payments/status', (req, res) => {
+  return res.status(200).json({ enabled: razorpayConfigured() });
 });
 
 // ---------- Notifications: Web Push (on by default) + WhatsApp (opt-in per school) ----------
@@ -1823,8 +2095,8 @@ setTimeout(feeReminderTick, 30 * 1000);
 // Any signed-in login can call these (not just Parent/Student) so a Teacher
 // or Admin who wants their own notifications later isn't blocked by this
 // route itself — today only the Parent/Student client code actually
-// subscribes (see myTeacherScope()-adjacent client changes), matching the
-// four event types this session added, which are all parent-facing.
+// subscribes, matching the four event types this session added, which are
+// all parent-facing.
 app.get('/api/push/vapid-key', (req, res) => {
   if (!webPushConfigured()) return res.status(501).json({ error: 'Push notifications are not set up yet.' });
   return res.status(200).json({ publicKey: process.env.VAPID_PUBLIC_KEY });
@@ -1854,6 +2126,119 @@ app.post('/api/push/unsubscribe', async (req, res) => {
   } catch (err) {
     console.error('push unsubscribe error:', err);
     return res.status(500).json({ error: 'Could not remove your subscription.' });
+  }
+});
+
+// ---------- Biometric device attendance (optional, per-school integration) ----------
+// Every biometric attendance device brand (eSSL, ZKTeco, Realtime, Mantra,
+// ...) speaks its own protocol, and network biometric devices live on the
+// school's own LAN, not the public internet — this cloud-hosted ERP has no
+// way to dial into a school's private network to pull logs itself. So the
+// integration point is the other direction: a small on-site "bridge"
+// program (see ../biometric-bridge/ next to this file) runs on any PC on
+// the SAME network as the device(s), polls them using their own SDK, and
+// PUSHES new punches up to this endpoint over the internet — a direction
+// that always works with no port-forwarding or firewall change needed.
+//
+// This is exactly as optional as the Razorpay integration above and follows
+// the same pattern: a school that doesn't have a biometric device (or
+// doesn't want to wire it up yet) simply never gets a BIOMETRIC_API_KEY
+// and never runs the bridge, and every trace of this feature — the Staff
+// form's Biometric ID field, the Staff Attendance "Biometric Sync" tab —
+// stays hidden from that school's app entirely (see GET .../status below).
+//
+// Reads BIOMETRIC_API_KEY from Render's environment — set it on a school's
+// service only once you're actually setting up their device bridge, and
+// give the bridge the same value in its own .env.
+function biometricConfigured() {
+  return !!process.env.BIOMETRIC_API_KEY;
+}
+// Whether this school has biometric attendance turned on at all — checked
+// by the app at boot (loadBiometricStatus in index.html) so it can hide
+// every trace of the feature for a school that hasn't set it up. Requires
+// a real login (unlike the ingestion endpoint below, which the bridge
+// calls with its own API key, not a user session) since this is only ever
+// read by the already-logged-in app itself.
+app.get('/api/biometric/status', async (req, res) => {
+  return res.status(200).json({ enabled: biometricConfigured() });
+});
+// Recent punches, for the Admin's Biometric Sync tab — who's mapped,
+// who isn't, and confirmation the bridge is actually reaching this ERP.
+app.get('/api/biometric/punches', async (req, res) => {
+  try {
+    if (!(await checkModuleAccess(req, res, ['staff', 'attendance']))) return;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+    const rows = await sql`SELECT * FROM biometric_punches ORDER BY punched_at DESC LIMIT ${limit}`;
+    return res.status(200).json(rows.map(r => ({
+      id: r.id, deviceSerial: r.device_serial, deviceUserId: r.device_user_id,
+      punchedAt: r.punched_at, staffId: r.staff_id, staffName: r.staff_name, matched: r.matched,
+    })));
+  } catch (err) {
+    console.error('biometric punches list error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+// The bridge's ingestion call. Authenticated by BIOMETRIC_API_KEY, sent as
+// a plain header exactly like the vendor-dashboard's own server-to-server
+// calls above (x-vendor-api-key) — this is a machine calling in from the
+// school's own network, not a person with a login session, so it's listed
+// in PUBLIC_API_ROUTES (POST only) to skip the session-cookie check, and
+// checks this key by hand instead.
+//
+// Body: { deviceSerial, punches: [{ deviceUserId, timestamp }, ...] }.
+// For each punch: matched to a staff member by their Biometric ID (set on
+// the Staff form, stored in staff.extra.biometricId), logged either way,
+// and — only when matched — used to mark that staff member Present for
+// that calendar day, but ONLY if no attendance record already exists for
+// them that day. This is deliberately insert-only, never an overwrite: if
+// the office has already marked (or corrected) that day by hand, biometric
+// sync never silently replaces it. The id scheme (statt_<staffId>_<date>)
+// is shared with the Staff Attendance "Mark" screen's own manual saves
+// (see saveStaffAttendance in index.html), so whichever one gets there
+// first simply wins and the other becomes a no-op.
+app.post('/api/biometric/punches', async (req, res) => {
+  try {
+    if (!biometricConfigured()) {
+      return res.status(501).json({ error: 'Biometric attendance is not set up for this school yet.' });
+    }
+    const key = req.headers['x-biometric-api-key'];
+    if (!key || key !== process.env.BIOMETRIC_API_KEY) {
+      return res.status(401).json({ error: 'Invalid or missing biometric API key.' });
+    }
+    const deviceSerial = String((req.body && req.body.deviceSerial) || 'unknown').slice(0, 100);
+    const punches = Array.isArray(req.body && req.body.punches) ? req.body.punches.slice(0, 2000) : [];
+    let matchedCount = 0;
+    for (const p of punches) {
+      const deviceUserId = p && p.deviceUserId !== undefined && p.deviceUserId !== null ? String(p.deviceUserId).trim() : '';
+      const punchedAt = p && p.timestamp ? new Date(p.timestamp) : null;
+      if (!deviceUserId || !punchedAt || isNaN(punchedAt.getTime())) continue; // skip anything malformed rather than fail the whole batch
+      let staffId = null, staffName = null;
+      const staffRows = await sql`SELECT id, first_name, last_name FROM staff WHERE extra ->> 'biometricId' = ${deviceUserId} LIMIT 1`;
+      if (staffRows.length) {
+        staffId = staffRows[0].id;
+        staffName = `${staffRows[0].first_name || ''} ${staffRows[0].last_name || ''}`.trim();
+        matchedCount++;
+      }
+      const punchId = 'biop_' + deviceSerial + '_' + deviceUserId + '_' + punchedAt.toISOString();
+      await sql`
+        INSERT INTO biometric_punches (id, device_serial, device_user_id, punched_at, staff_id, staff_name, matched)
+        VALUES (${punchId}, ${deviceSerial}, ${deviceUserId}, ${punchedAt.toISOString()}, ${staffId}, ${staffName}, ${!!staffId})
+        ON CONFLICT (id) DO NOTHING
+      `;
+      if (staffId) {
+        const dateStr = punchedAt.toISOString().slice(0, 10);
+        const attId = 'statt_' + staffId + '_' + dateStr;
+        await sql`
+          INSERT INTO staff_attendance_records (id, staff_id, date, status)
+          VALUES (${attId}, ${staffId}, ${dateStr}, 'Present')
+          ON CONFLICT (id) DO NOTHING
+        `;
+      }
+    }
+    return res.status(200).json({ ok: true, received: punches.length, matched: matchedCount, unmatched: punches.length - matchedCount });
+  } catch (err) {
+    console.error('biometric punches ingest error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
 
@@ -1941,16 +2326,17 @@ const PARENT_LOGIN_ROLES = ['Student', 'Parent'];
 // Principal as the two full-access staff roles.
 const MANAGEMENT_ROLES = ['Admin', 'Principal'];
 
-// The same self-service gap 'students' already had (see the dispatcher
-// below), for every other piece of data "My Portal" needs to render Fees,
-// Marks, and the Notifications feed correctly. Each of these is normally
-// gated to a staff module (managefee/attendance/exams/result) that a
-// Student/Parent role will never be granted — so every one of them silently
-// 403'd for that role, and the client's own fallback-to-empty-array
-// behavior on a fetch failure meant Fees computed "collected so far" as 0
-// for every category regardless of what had actually been paid — a family
-// that had paid in full still saw those fees as outstanding and payable,
-// on the one screen where getting that wrong matters most.
+// ---------- Student/Parent self-service: "My Portal" reads ----------
+// The generic staff-module permission gate below (RESOURCE_TO_MODULE +
+// checkModuleAccess) is designed to control what STAFF roles can browse —
+// but a Student/Parent self-service login structurally never has any of
+// those staff modules (managefee, exams/result, attendance, ...), so every
+// fetch these read-only "My Portal" screens make was silently 403ing and
+// falling back to whatever this browser's own localStorage happened to
+// have cached — showing fees/marks/attendance as empty or "still due" even
+// when the real data says otherwise. See the two carve-outs below and the
+// PARENT_SHARED_REFERENCE_RESOURCES/PARENT_SHARED_REFERENCE_KV_KEYS bypass
+// further down in the main dispatcher.
 //
 // Two different fixes, by data shape:
 //  - PARENT_OWN_RECORD_RESOURCES: a real per-student table (has a
@@ -2046,6 +2432,12 @@ app.post('/api/logout', async (req, res) => {
   }
 });
 
+// Accepts a short-lived, signed troubleshooting link from the Vendor
+// Dashboard (Schools tab → Support Login) — see vendor-support-login.js's
+// own header comment and README.md's "Support Login" section. The token
+// itself is the only thing that authorizes this; there's no password
+// involved on either side. Named distinctly ("Vendor Support") in the
+// session/audit trail so it's never mistaken for a real staff login.
 app.get('/api/vendor-support-login', (req, res) => {
   handleVendorSupportLogin(req.query.token, {
     onValid: async (payload) => {
@@ -2695,10 +3087,9 @@ app.all('/api/:resource', async (req, res) => {
       return res.status(200).json(rows.map(r => simpleToAppShape(r, fields())));
     }
     // A Teacher's access to the student roster ('admissions') can be turned
-    // off entirely by an admin via Roles & Permissions — and on this school
-    // it is (confirmed live: Teacher's 'admissions' view is off) — which
-    // otherwise 403s /api/students outright for every Teacher login and
-    // leaves Attendance and Marks Entry with an empty roster for EVERY
+    // off entirely by an admin via Roles & Permissions — and when it is,
+    // that otherwise 403s /api/students outright for every Teacher login
+    // and leaves Attendance and Marks Entry with an empty roster for EVERY
     // class, including their own, since both screens resolve "who's in
     // this class" from this same endpoint. That 'admissions' toggle is
     // about the full roster-management screen (add/edit/delete any
@@ -2842,6 +3233,8 @@ app.all('/api/:resource', async (req, res) => {
     // by handleUsers above), but takes its own dedicated handler instead of
     // the generic one because of the password rules described there.
     if (resource === 'users') return await handleUsers(req, res);
+    if (resource === 'deletion-requests') return await handleDeletionRequests(req, res);
+    if (resource === 'certificates') return await handleCertificates(req, res);
     if (SIMPLE_RESOURCES[resource]) return await handleSimple(req, res, SIMPLE_RESOURCES[resource], resource);
     if (HYBRID_RESOURCES[resource]) return await handleHybrid(req, res, HYBRID_RESOURCES[resource]);
     if (resource === 'subjects') return await handleSubjects(req, res);
