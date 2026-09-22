@@ -12,7 +12,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { neon } from '@neondatabase/serverless';
+import { sql, nextDocSeq, insertNotificationEventIfNew, addColumnIfMissing, createIndexIfMissing } from './db.js';
 import webpush from 'web-push';
 // Fleet reporting + support-login — see ../reporting-client/ for the
 // canonical copies and full wiring docs (also README.md, "Reporting
@@ -83,7 +83,9 @@ app.use((req, res, next) => {
   next();
 });
 
-const sql = neon(process.env.DATABASE_URL);
+// sql (tagged-template and sql.query(text, params) forms) now comes from
+// ./db.js, a MySQL-backed shim written for the GoDaddy hosting migration —
+// see that file's header comment for what it does and doesn't paper over.
 
 // A request header value that came from decodeURIComponent-encoded text
 // (see the client's actorHeaders() helper) — falls back to the raw value
@@ -108,10 +110,23 @@ function decodeHeaderValue(v) {
 // for date-shaped fields, since a couple of them are legitimately sent as an
 // empty string before they're filled in, e.g. a discount's approval date
 // before it's approved).
+// ---------- MySQL migration notes ----------
+// Converted from the original Postgres/Neon schema for the GoDaddy MySQL
+// migration: TEXT id/foreign-key-ish columns that are a PRIMARY KEY, part of
+// a UNIQUE constraint, or indexed below became VARCHAR(191) (MySQL can't key
+// a plain TEXT column without an explicit prefix length; 191 is the standard
+// safe max under utf8mb4's 767-byte default index-key limit) — every other
+// TEXT column (free text, base64 photos/attachments, etc.) is untouched.
+// JSONB -> JSON, TIMESTAMPTZ -> DATETIME, NUMERIC -> DECIMAL(14,2),
+// BIGSERIAL -> BIGINT AUTO_INCREMENT, now() -> CURRENT_TIMESTAMP. MySQL has
+// no `IF NOT EXISTS` for ADD COLUMN / CREATE INDEX it's safe to rely on
+// across versions, so those went through addColumnIfMissing()/
+// createIndexIfMissing() (see db.js) instead, which swallow the
+// "already exists" error the same IF NOT EXISTS was there to avoid.
 async function ensureSchema() {
   await sql`CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY, name TEXT, username TEXT, password TEXT, role TEXT,
-    linked_student_id TEXT, recovery_code TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, name TEXT, username VARCHAR(191), password TEXT, role TEXT,
+    linked_student_id TEXT, recovery_code TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   // Soft delete: a deleted user's row stays put with deleted_at set, instead
   // of being erased outright. This closes two real gaps found after an
@@ -121,13 +136,13 @@ async function ensureSchema() {
   // re-checked the user still existed mid-session. See handleUsers below
   // for the restore path, the self-delete/last-admin guards, and the
   // immediate session wipe that now comes with every delete.
-  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
+  await addColumnIfMissing('users', 'deleted_at DATETIME');
   // Who actually pulled the trigger on the soft delete, for the audit trail
   // shown in Recently Deleted and carried into purge_log if it's ever
   // permanently removed (see purgeExpiredTrash / the PUT ?purge=1 branch
   // below). Null for rows soft-deleted before this column existed.
-  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_by TEXT`;
-  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_by_name TEXT`;
+  await addColumnIfMissing('users', 'deleted_by TEXT');
+  await addColumnIfMissing('users', 'deleted_by_name TEXT');
   // A user's own "My Account" profile photo (base64 data URL, capped at 2MB
   // client-side — see PHOTO_UPLOAD_MAX_BYTES in index.html, well under this
   // server's 25mb JSON body limit). This column didn't exist before, so the
@@ -135,33 +150,33 @@ async function ensureSchema() {
   // silently dropped — SIMPLE_RESOURCES.users.fields didn't know about it
   // either, so it was never even in the SQL column list — meaning it never
   // persisted and vanished on the very next login/page load.
-  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS photo TEXT`;
+  await addColumnIfMissing('users', 'photo LONGTEXT');
   await sql`CREATE TABLE IF NOT EXISTS payments (
-    id TEXT PRIMARY KEY, receipt_no TEXT, student_id TEXT, student_name TEXT, category TEXT, mode TEXT,
-    amount NUMERIC DEFAULT 0, discount NUMERIC DEFAULT 0, instalment TEXT, date TEXT, note TEXT,
-    class_at_payment TEXT, extra_fee_name TEXT, extra_fee_id TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, receipt_no TEXT, student_id VARCHAR(191), student_name TEXT, category TEXT, mode TEXT,
+    amount DECIMAL(14,2) DEFAULT 0, discount DECIMAL(14,2) DEFAULT 0, instalment TEXT, date VARCHAR(32), note TEXT,
+    class_at_payment TEXT, extra_fee_name TEXT, extra_fee_id TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS student_discounts (
-    id TEXT PRIMARY KEY, batch_id TEXT, student_id TEXT, type TEXT, applies_to TEXT, mode TEXT,
-    value NUMERIC DEFAULT 0, note TEXT, status TEXT, requested_by TEXT, requested_role TEXT, requested_date TEXT,
-    approver_id TEXT, approver_name TEXT, approved_by TEXT, approved_date TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, batch_id VARCHAR(191), student_id VARCHAR(191), type TEXT, applies_to TEXT, mode TEXT,
+    value DECIMAL(14,2) DEFAULT 0, note TEXT, status TEXT, requested_by TEXT, requested_role TEXT, requested_date TEXT,
+    approver_id TEXT, approver_name TEXT, approved_by TEXT, approved_date TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS student_extra_fees (
-    id TEXT PRIMARY KEY, student_id TEXT, name TEXT, amount NUMERIC DEFAULT 0, paid BOOLEAN DEFAULT false,
-    paid_amount NUMERIC DEFAULT 0, date TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), name TEXT, amount DECIMAL(14,2) DEFAULT 0, paid BOOLEAN DEFAULT false,
+    paid_amount DECIMAL(14,2) DEFAULT 0, date TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS attendance_records (
-    id TEXT PRIMARY KEY, student_id TEXT, date TEXT, status TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), date VARCHAR(32), status TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS holidays (
-    id TEXT PRIMARY KEY, date TEXT, name TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, date TEXT, name TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS exam_results (
-    id TEXT PRIMARY KEY, exam_id TEXT, student_id TEXT, subject TEXT, marks NUMERIC, absent BOOLEAN DEFAULT false,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, exam_id VARCHAR(191), student_id VARCHAR(191), subject TEXT, marks DECIMAL(10,2), absent BOOLEAN DEFAULT false,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS staff_attendance_records (
-    id TEXT PRIMARY KEY, staff_id TEXT, date TEXT, status TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, staff_id VARCHAR(191), date VARCHAR(32), status TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   // Raw log of every punch the on-site biometric bridge has ever forwarded
   // (see the "Biometric attendance" section below) — kept even for
@@ -171,30 +186,30 @@ async function ensureSchema() {
   // day). id is deterministic (device serial + device user id + timestamp)
   // so the bridge can safely resend the same punch without double-logging.
   await sql`CREATE TABLE IF NOT EXISTS biometric_punches (
-    id TEXT PRIMARY KEY, device_serial TEXT, device_user_id TEXT, punched_at TIMESTAMPTZ,
-    staff_id TEXT, staff_name TEXT, matched BOOLEAN DEFAULT false, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, device_serial TEXT, device_user_id TEXT, punched_at DATETIME,
+    staff_id TEXT, staff_name TEXT, matched BOOLEAN DEFAULT false, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS admission_inquiries (
-    id TEXT PRIMARY KEY, parent_name TEXT, parent_email TEXT, parent_phone TEXT, student_name TEXT,
-    applying_grade TEXT, notes TEXT, submitted_date TEXT, status TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, parent_name TEXT, parent_email TEXT, parent_phone TEXT, student_name TEXT,
+    applying_grade TEXT, notes TEXT, submitted_date TEXT, status VARCHAR(191), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS website_gallery (
-    id TEXT PRIMARY KEY, data_url TEXT, category TEXT, caption TEXT, uploaded_date TEXT, uploaded_by TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, data_url LONGTEXT, category VARCHAR(191), caption TEXT, uploaded_date TEXT, uploaded_by TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS students (
-    id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, class_name TEXT, section TEXT, status TEXT,
-    admission_no TEXT, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, first_name TEXT, last_name TEXT, class_name TEXT, section TEXT, status TEXT,
+    admission_no TEXT, extra JSON NOT NULL DEFAULT ('{}'), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   // Same soft-delete treatment as users — see the ALTER TABLE users comment
   // above and HYBRID_RESOURCES.students' softDelete flag below.
-  await sql`ALTER TABLE students ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
+  await addColumnIfMissing('students', 'deleted_at DATETIME');
   // Same audit-trail columns as users above — recorded by
   // handleDeletionRequests' final-approval branch (the only place
   // deleted_at is ever set on a student), so Recently Deleted can show who
   // actually gave that final approval, and purge_log can carry it forward.
-  await sql`ALTER TABLE students ADD COLUMN IF NOT EXISTS deleted_by TEXT`;
-  await sql`ALTER TABLE students ADD COLUMN IF NOT EXISTS deleted_by_name TEXT`;
+  await addColumnIfMissing('students', 'deleted_by TEXT');
+  await addColumnIfMissing('students', 'deleted_by_name TEXT');
   // A student record is never deleted on a single click — see
   // HYBRID_RESOURCES.students' deleteViaApprovalOnly flag and
   // handleDeletionRequests below. Getting from "requested" to "actually
@@ -205,13 +220,13 @@ async function ensureSchema() {
   // erased until both approvals land — the actual removal still lands on
   // the same reversible deleted_at soft-delete above, never a hard DELETE.
   await sql`CREATE TABLE IF NOT EXISTS deletion_requests (
-    id TEXT PRIMARY KEY, resource TEXT NOT NULL, record_id TEXT NOT NULL, record_label TEXT, reason TEXT,
-    requested_by TEXT, requested_by_name TEXT, requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    status TEXT NOT NULL DEFAULT 'Pending',
-    first_approved_by TEXT, first_approved_by_name TEXT, first_approved_at TIMESTAMPTZ,
-    decided_by TEXT, decided_by_name TEXT, decided_at TIMESTAMPTZ, decision_note TEXT
+    id VARCHAR(191) PRIMARY KEY, resource TEXT NOT NULL, record_id TEXT NOT NULL, record_label TEXT, reason TEXT,
+    requested_by TEXT, requested_by_name TEXT, requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(191) NOT NULL DEFAULT 'Pending',
+    first_approved_by TEXT, first_approved_by_name TEXT, first_approved_at DATETIME,
+    decided_by TEXT, decided_by_name TEXT, decided_at DATETIME, decision_note TEXT
   )`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_deletion_requests_status ON deletion_requests (status)`;
+  await createIndexIfMissing('idx_deletion_requests_status', 'deletion_requests', 'status');
   // Certificate register — every Study/Transfer Certificate issued is logged
   // here with a snapshot of the student's details at the moment of issue
   // (so a later data correction never rewrites what an already-printed
@@ -219,18 +234,18 @@ async function ensureSchema() {
   // This is what makes "we can still prove what we issued and when" true
   // even long after a student has left — see handleCertificates below.
   await sql`CREATE TABLE IF NOT EXISTS certificates_issued (
-    id TEXT PRIMARY KEY, type TEXT NOT NULL, serial_no TEXT NOT NULL,
-    resource TEXT NOT NULL, record_id TEXT NOT NULL, snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    id VARCHAR(191) PRIMARY KEY, type TEXT NOT NULL, serial_no TEXT NOT NULL,
+    resource VARCHAR(191) NOT NULL, record_id VARCHAR(191) NOT NULL, snapshot JSON NOT NULL DEFAULT ('{}'),
     conduct TEXT, purpose TEXT, academic_year TEXT,
-    issued_by TEXT, issued_by_name TEXT, issued_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    issued_by TEXT, issued_by_name TEXT, issued_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   // details: a free-form JSONB bag for fields specific to newer certificate
   // types (Transfer's date-of-leaving/reason/promotion/working-days/dues,
   // Character's remarks, Migration's destination board, etc.) — added this
   // way rather than a dedicated column per field so a future certificate
   // type never needs its own migration.
-  await sql`ALTER TABLE certificates_issued ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_certificates_issued_record ON certificates_issued (resource, record_id)`;
+  await addColumnIfMissing('certificates_issued', "details JSON NOT NULL DEFAULT ('{}')");
+  await createIndexIfMissing('idx_certificates_issued_record', 'certificates_issued', 'resource, record_id');
   // Recycle-bin retention: a soft-deleted row (students/users — see
   // PURGEABLE_RESOURCES below) doesn't sit in Recently Deleted forever.
   // purgeExpiredTrash() removes it for good once it's older than
@@ -243,12 +258,12 @@ async function ensureSchema() {
   // window all work: soft-delete now, hard-delete later on a timer, with a
   // paper trail either way.
   await sql`CREATE TABLE IF NOT EXISTS purge_log (
-    id TEXT PRIMARY KEY, resource TEXT NOT NULL, record_id TEXT NOT NULL, record_label TEXT,
-    deleted_at TIMESTAMPTZ, deleted_by_name TEXT,
+    id VARCHAR(191) PRIMARY KEY, resource VARCHAR(191) NOT NULL, record_id VARCHAR(191) NOT NULL, record_label TEXT,
+    deleted_at DATETIME, deleted_by_name TEXT,
     purge_reason TEXT NOT NULL DEFAULT 'manual',
-    purged_by TEXT, purged_by_name TEXT, purged_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    purged_by TEXT, purged_by_name TEXT, purged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_purge_log_resource ON purge_log (resource, record_id)`;
+  await createIndexIfMissing('idx_purge_log_resource', 'purge_log', 'resource, record_id');
   // One row per "Reset School Data" hard wipe (see WIPE_TABLES / the
   // /api/vendor/wipe-data route far below) — this table is itself never
   // wiped, so the fact that a wipe happened, when, by whom, and how many
@@ -257,64 +272,66 @@ async function ensureSchema() {
   // records themselves (those exist only in the one-time backup handed
   // back to the vendor dashboard at wipe time).
   await sql`CREATE TABLE IF NOT EXISTS wipe_log (
-    id TEXT PRIMARY KEY, wiped_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    vendor_admin_name TEXT, counts JSONB NOT NULL DEFAULT '{}'::jsonb
+    id VARCHAR(191) PRIMARY KEY, wiped_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    vendor_admin_name TEXT, counts JSON NOT NULL DEFAULT ('{}')
   )`;
   await sql`CREATE TABLE IF NOT EXISTS staff (
-    id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, department TEXT, designation TEXT, status TEXT,
-    staff_id TEXT, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, first_name TEXT, last_name TEXT, department TEXT, designation TEXT, status TEXT,
+    staff_id TEXT, extra JSON NOT NULL DEFAULT ('{}'), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS staff_payroll (
-    id TEXT PRIMARY KEY, staff_id TEXT, month TEXT, status TEXT,
-    extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, staff_id VARCHAR(191), month TEXT, status TEXT,
+    extra JSON NOT NULL DEFAULT ('{}'), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS comms_messages (
-    id TEXT PRIMARY KEY, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, extra JSON NOT NULL DEFAULT ('{}'), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS rooms (
-    id TEXT PRIMARY KEY, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, extra JSON NOT NULL DEFAULT ('{}'), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS exam_hall_tickets (
-    id TEXT PRIMARY KEY, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, extra JSON NOT NULL DEFAULT ('{}'), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS exam_room_config (
-    id TEXT PRIMARY KEY, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, extra JSON NOT NULL DEFAULT ('{}'), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS subjects (
-    id TEXT PRIMARY KEY, name TEXT, code TEXT, class_name TEXT,
-    sections JSONB NOT NULL DEFAULT '[]'::jsonb, section_staff JSONB NOT NULL DEFAULT '{}'::jsonb,
-    staff_ids JSONB NOT NULL DEFAULT '[]'::jsonb, countable BOOLEAN DEFAULT true, elective BOOLEAN DEFAULT false,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, name TEXT, code TEXT, class_name TEXT,
+    sections JSON NOT NULL DEFAULT ('[]'), section_staff JSON NOT NULL DEFAULT ('{}'),
+    staff_ids JSON NOT NULL DEFAULT ('[]'), countable BOOLEAN DEFAULT true, elective BOOLEAN DEFAULT false,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS exam_defs (
-    id TEXT PRIMARY KEY, name TEXT, exam_type TEXT, start_date TEXT, end_date TEXT,
-    class_subjects JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, name TEXT, exam_type TEXT, start_date TEXT, end_date TEXT,
+    class_subjects JSON NOT NULL DEFAULT ('{}'), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS custom_roles (
-    id TEXT PRIMARY KEY, name TEXT, permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id VARCHAR(191) PRIMARY KEY, name TEXT, permissions JSON NOT NULL DEFAULT ('{}'),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS fee_structure (
-    class_name TEXT PRIMARY KEY, admission NUMERIC DEFAULT 0, fee NUMERIC DEFAULT 0,
-    bus NUMERIC DEFAULT 0, stock NUMERIC DEFAULT 0
+    class_name VARCHAR(191) PRIMARY KEY, admission DECIMAL(14,2) DEFAULT 0, fee DECIMAL(14,2) DEFAULT 0,
+    bus DECIMAL(14,2) DEFAULT 0, stock DECIMAL(14,2) DEFAULT 0
   )`;
   await sql`CREATE TABLE IF NOT EXISTS attendance_settings (
-    id INTEGER PRIMARY KEY, threshold NUMERIC DEFAULT 75, working_days JSONB NOT NULL DEFAULT '[1,2,3,4,5,6]'::jsonb
+    id INT PRIMARY KEY, threshold DECIMAL(6,2) DEFAULT 75, working_days JSON NOT NULL DEFAULT ('[1,2,3,4,5,6]')
   )`;
   await sql`CREATE TABLE IF NOT EXISTS school_info (
-    id INTEGER PRIMARY KEY, data JSONB NOT NULL DEFAULT '{}'::jsonb
+    id INT PRIMARY KEY, data JSON NOT NULL DEFAULT ('{}')
   )`;
   // One row per numbering series per period (e.g. series='income_voucher',
   // period='26-27') — see the "Document numbering" section below for how
   // this is used. Deliberately its own tiny table (not a kv_store entry):
-  // issuing a number is a single atomic UPDATE...RETURNING against one row
-  // here, which Postgres serializes correctly under concurrent requests.
-  // kv_store's whole-value PUT (see handleKv below) has no such guarantee —
-  // two staff saving a voucher at the same moment could both compute the
-  // same "next" number and silently overwrite each other, which is exactly
-  // the bug this table exists to close.
+  // issuing a number is a single atomic operation against one row here
+  // (see db.js's nextDocSeq — a MySQL LAST_INSERT_ID(expr) trick replacing
+  // Postgres's UPDATE...RETURNING, since MySQL has no RETURNING), which
+  // serializes correctly under concurrent requests. kv_store's whole-value
+  // PUT (see handleKv below) has no such guarantee — two staff saving a
+  // voucher at the same moment could both compute the same "next" number
+  // and silently overwrite each other, which is exactly the bug this table
+  // exists to close.
   await sql`CREATE TABLE IF NOT EXISTS doc_counters (
-    series TEXT NOT NULL, period TEXT NOT NULL, next_seq INTEGER NOT NULL DEFAULT 1,
+    series VARCHAR(191) NOT NULL, period VARCHAR(191) NOT NULL, next_seq INT NOT NULL DEFAULT 1,
     PRIMARY KEY (series, period)
   )`;
   // Accounting: Income (Receipt) and Payment vouchers. These used to live as
@@ -331,16 +348,16 @@ async function ensureSchema() {
   // running the bus profitable") independently of what account head it's
   // filed under.
   await sql`CREATE TABLE IF NOT EXISTS acct_income (
-    id TEXT PRIMARY KEY, voucher_no TEXT UNIQUE, date TEXT, category TEXT, cost_center TEXT, amount NUMERIC DEFAULT 0,
+    id VARCHAR(191) PRIMARY KEY, voucher_no VARCHAR(191) UNIQUE, date VARCHAR(32), category TEXT, cost_center TEXT, amount DECIMAL(14,2) DEFAULT 0,
     party TEXT, mode TEXT, reference_no TEXT, description TEXT, added_by TEXT,
-    voided BOOLEAN NOT NULL DEFAULT false, void_reason TEXT, voided_by TEXT, voided_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    voided BOOLEAN NOT NULL DEFAULT false, void_reason TEXT, voided_by TEXT, voided_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS acct_expenses (
-    id TEXT PRIMARY KEY, voucher_no TEXT UNIQUE, date TEXT, category TEXT, cost_center TEXT, amount NUMERIC DEFAULT 0,
+    id VARCHAR(191) PRIMARY KEY, voucher_no VARCHAR(191) UNIQUE, date VARCHAR(32), category TEXT, cost_center TEXT, amount DECIMAL(14,2) DEFAULT 0,
     party TEXT, mode TEXT, reference_no TEXT, description TEXT, added_by TEXT,
-    voided BOOLEAN NOT NULL DEFAULT false, void_reason TEXT, voided_by TEXT, voided_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    voided BOOLEAN NOT NULL DEFAULT false, void_reason TEXT, voided_by TEXT, voided_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   // A Student/Parent login reaching out to their Class Teacher, a specific
   // Subject Teacher, or Management (Admin/Principal) with a concern.
@@ -353,11 +370,11 @@ async function ensureSchema() {
   // concern gets at most one reply — reply_* stays null until a staff member
   // answers, at which point status flips from 'open' to 'resolved'.
   await sql`CREATE TABLE IF NOT EXISTS student_concerns (
-    id TEXT PRIMARY KEY, student_id TEXT, student_name TEXT, class_name TEXT, section TEXT,
-    recipient_type TEXT, recipient_staff_id TEXT, recipient_name TEXT, subject_name TEXT,
+    id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), student_name TEXT, class_name TEXT, section TEXT,
+    recipient_type VARCHAR(191), recipient_staff_id VARCHAR(191), recipient_name TEXT, subject_name TEXT,
     message TEXT, status TEXT NOT NULL DEFAULT 'open',
-    reply_message TEXT, replied_by TEXT, replied_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    reply_message TEXT, replied_by TEXT, replied_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   // Whether a concern is actually solved is a separate decision from
   // whether it's been replied to — a teacher might reply "will check and get
@@ -365,10 +382,10 @@ async function ensureSchema() {
   // phone call with no reply logged at all. resolved_at/resolved_by are
   // reset to null on reopening rather than kept as history, so the badge
   // shown always reflects the current solved state, not every past toggle.
-  // ADD COLUMN IF NOT EXISTS since student_concerns already existed in
+  // Uses addColumnIfMissing since student_concerns already existed in
   // production before this pair of columns was added.
-  await sql`ALTER TABLE student_concerns ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE student_concerns ADD COLUMN IF NOT EXISTS resolved_by TEXT`;
+  await addColumnIfMissing('student_concerns', 'resolved_at DATETIME');
+  await addColumnIfMissing('student_concerns', 'resolved_by TEXT');
   // A Student/Parent login submitting completed homework or holiday work to
   // their Class Teacher, a Subject Teacher, or Management. homework_id is an
   // optional link back to an existing kv_store homeworkItems entry (see
@@ -378,12 +395,12 @@ async function ensureSchema() {
   // this app (no separate object storage). status starts 'submitted' and
   // becomes 'reviewed' once a staff member leaves feedback.
   await sql`CREATE TABLE IF NOT EXISTS student_submissions (
-    id TEXT PRIMARY KEY, student_id TEXT, student_name TEXT, class_name TEXT, section TEXT,
-    recipient_type TEXT, recipient_staff_id TEXT, recipient_name TEXT, subject_name TEXT,
-    homework_id TEXT, title TEXT, description TEXT, attachment TEXT,
+    id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), student_name TEXT, class_name TEXT, section TEXT,
+    recipient_type VARCHAR(191), recipient_staff_id VARCHAR(191), recipient_name TEXT, subject_name TEXT,
+    homework_id TEXT, title TEXT, description TEXT, attachment LONGTEXT,
     status TEXT NOT NULL DEFAULT 'submitted',
-    feedback TEXT, reviewed_by TEXT, reviewed_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    feedback TEXT, reviewed_by TEXT, reviewed_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   // Widened from a single `attachment` to a JSONB array of {name, dataUrl}
   // so a submission can carry more than one file (a scan of several
@@ -392,7 +409,7 @@ async function ensureSchema() {
   // them per row instead of one. `attachment` (singular) stays on the table
   // for any row saved before this existed; the app reads `attachments` first
   // and falls back to wrapping `attachment` for those older rows.
-  await sql`ALTER TABLE student_submissions ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb`;
+  await addColumnIfMissing('student_submissions', "attachments JSON NOT NULL DEFAULT ('[]')");
   // The generic key/value table backs every module that doesn't need its own
   // dedicated table with real columns — Inventory, Timetable, Library, Transport,
   // Hostel, Accounting, Fee/Exam sub-settings, Report Template signatures, Class
@@ -401,7 +418,7 @@ async function ensureSchema() {
   // whole current value as JSON, keyed by the same string the module already
   // uses as its storage key, rather than needing one more hand-built table.
   await sql`CREATE TABLE IF NOT EXISTS kv_store (
-    key TEXT PRIMARY KEY, value JSONB NOT NULL DEFAULT '{}'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    \`key\` VARCHAR(191) PRIMARY KEY, value JSON NOT NULL DEFAULT ('{}'), updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   // Who changed what, when. One row per successful write (POST/PUT/DELETE)
   // to any /api/:resource endpoint, written centrally by the main dispatcher
@@ -412,8 +429,8 @@ async function ensureSchema() {
   // still genuinely useful for spotting an accidental bulk-delete or
   // tracking down when a record last changed.
   await sql`CREATE TABLE IF NOT EXISTS audit_log (
-    id BIGSERIAL PRIMARY KEY, actor_name TEXT, actor_role TEXT, method TEXT, resource TEXT,
-    record_id TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, actor_name TEXT, actor_role TEXT, method TEXT, resource VARCHAR(191),
+    record_id TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
 
   // One row per signed-in browser session. `id` is a SHA-256 hash of the
@@ -423,10 +440,10 @@ async function ensureSchema() {
   // cookie for anyone. See the "Session-based authentication" section below
   // for how this is created, checked, and expired.
   await sql`CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY, user_id TEXT, role TEXT, name TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at TIMESTAMPTZ NOT NULL
+    id VARCHAR(191) PRIMARY KEY, user_id VARCHAR(191), role TEXT, name TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL
   )`;
 
   // One row per browser/device a Parent or Student login has granted Web
@@ -436,10 +453,13 @@ async function ensureSchema() {
   // encryption keys, both required to encrypt a push payload for it. See
   // the "Notifications: Web Push + WhatsApp" section below for how these
   // are written (POST /api/push/subscribe) and used (sendPushToUser).
+  // endpoint is VARCHAR(700) rather than TEXT so it can carry a UNIQUE
+  // constraint directly (MySQL can't key a plain TEXT/BLOB column) — push
+  // service endpoint URLs run well under that in practice.
   await sql`CREATE TABLE IF NOT EXISTS push_subscriptions (
-    id BIGSERIAL PRIMARY KEY, user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE,
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id VARCHAR(191) NOT NULL, endpoint VARCHAR(700) NOT NULL UNIQUE,
     p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
 
   // Idempotency log for notifications that a repeated check could otherwise
@@ -449,10 +469,12 @@ async function ensureSchema() {
   // full subject set is now complete). A payment or an attendance mark is
   // its own one-off event and never re-fires, so those aren't logged here.
   // (student_id, kind, ref_key) is unique so a second attempt at the same
-  // notification is a no-op via ON CONFLICT DO NOTHING, not a duplicate row.
+  // notification is a no-op (see db.js's insertNotificationEventIfNew,
+  // MySQL's INSERT IGNORE standing in for Postgres's ON CONFLICT DO NOTHING),
+  // not a duplicate row.
   await sql`CREATE TABLE IF NOT EXISTS notification_events (
-    id BIGSERIAL PRIMARY KEY, student_id TEXT NOT NULL, kind TEXT NOT NULL, ref_key TEXT NOT NULL,
-    sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, student_id VARCHAR(191) NOT NULL, kind VARCHAR(191) NOT NULL, ref_key VARCHAR(191) NOT NULL,
+    sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (student_id, kind, ref_key)
   )`;
 
@@ -460,44 +482,52 @@ async function ensureSchema() {
   // The tables above are all read by student_id / staff_id / username / date
   // lookups constantly (a student's fee history, a staff member's payroll
   // months, attendance for one student across a year, the login lookup on
-  // every sign-in) — without an index Postgres has to scan the whole table
-  // for each of those. IF NOT EXISTS makes this idempotent and safe to run
-  // on every boot, same as the CREATE TABLE statements above. Non-unique on
-  // purpose: this is a performance fix, not a data-integrity change — adding
-  // a UNIQUE constraint on username here could fail outright (or silently
-  // change behavior) if any duplicate usernames already exist in the live
-  // data, which is a separate decision from "make lookups fast."
-  await sql`CREATE INDEX IF NOT EXISTS idx_users_username ON users (LOWER(username))`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions (user_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_payments_student_id ON payments (student_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_payments_date ON payments (date)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_student_discounts_student_id ON student_discounts (student_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_student_discounts_batch_id ON student_discounts (batch_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_student_extra_fees_student_id ON student_extra_fees (student_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_attendance_records_student_id ON attendance_records (student_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_attendance_records_date ON attendance_records (date)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_exam_results_exam_id ON exam_results (exam_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_exam_results_student_id ON exam_results (student_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_staff_attendance_records_staff_id ON staff_attendance_records (staff_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_staff_attendance_records_date ON staff_attendance_records (date)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_biometric_punches_punched_at ON biometric_punches (punched_at DESC)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_staff_payroll_staff_id ON staff_payroll (staff_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_admission_inquiries_status ON admission_inquiries (status)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_website_gallery_category ON website_gallery (category)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (created_at DESC)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log (resource)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions (expires_at)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users (deleted_at)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_students_deleted_at ON students (deleted_at)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_acct_income_date ON acct_income (date)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_acct_expenses_date ON acct_expenses (date)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_student_concerns_student_id ON student_concerns (student_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_student_concerns_recipient_staff_id ON student_concerns (recipient_staff_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_student_concerns_recipient_type ON student_concerns (recipient_type)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_student_submissions_student_id ON student_submissions (student_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_student_submissions_recipient_staff_id ON student_submissions (recipient_staff_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_student_submissions_recipient_type ON student_submissions (recipient_type)`;
+  // every sign-in) — without an index the database has to scan the whole
+  // table for each of those. createIndexIfMissing() makes this idempotent
+  // and safe to run on every boot, same as the CREATE TABLE statements
+  // above. Non-unique on purpose: this is a performance fix, not a
+  // data-integrity change — adding a UNIQUE constraint on username here
+  // could fail outright (or silently change behavior) if any duplicate
+  // usernames already exist in the live data, which is a separate decision
+  // from "make lookups fast."
+  // Postgres's original index was on LOWER(username) (a functional index) to
+  // speed up the case-insensitive login lookup below. MySQL 8.0.13+ supports
+  // that same functional-index syntax, but MariaDB (used for local testing
+  // here) does not, and GoDaddy's exact MySQL version isn't guaranteed — so
+  // this indexes the plain column instead. The login query still wraps both
+  // sides in LOWER(...) and works correctly either way; a plain index on a
+  // modest-sized users table costs nothing meaningful in practice.
+  await createIndexIfMissing('idx_users_username', 'users', 'username');
+  await createIndexIfMissing('idx_push_subscriptions_user_id', 'push_subscriptions', 'user_id');
+  await createIndexIfMissing('idx_payments_student_id', 'payments', 'student_id');
+  await createIndexIfMissing('idx_payments_date', 'payments', 'date');
+  await createIndexIfMissing('idx_student_discounts_student_id', 'student_discounts', 'student_id');
+  await createIndexIfMissing('idx_student_discounts_batch_id', 'student_discounts', 'batch_id');
+  await createIndexIfMissing('idx_student_extra_fees_student_id', 'student_extra_fees', 'student_id');
+  await createIndexIfMissing('idx_attendance_records_student_id', 'attendance_records', 'student_id');
+  await createIndexIfMissing('idx_attendance_records_date', 'attendance_records', 'date');
+  await createIndexIfMissing('idx_exam_results_exam_id', 'exam_results', 'exam_id');
+  await createIndexIfMissing('idx_exam_results_student_id', 'exam_results', 'student_id');
+  await createIndexIfMissing('idx_staff_attendance_records_staff_id', 'staff_attendance_records', 'staff_id');
+  await createIndexIfMissing('idx_staff_attendance_records_date', 'staff_attendance_records', 'date');
+  await createIndexIfMissing('idx_biometric_punches_punched_at', 'biometric_punches', 'punched_at DESC');
+  await createIndexIfMissing('idx_staff_payroll_staff_id', 'staff_payroll', 'staff_id');
+  await createIndexIfMissing('idx_admission_inquiries_status', 'admission_inquiries', 'status');
+  await createIndexIfMissing('idx_website_gallery_category', 'website_gallery', 'category');
+  await createIndexIfMissing('idx_audit_log_created_at', 'audit_log', 'created_at DESC');
+  await createIndexIfMissing('idx_audit_log_resource', 'audit_log', 'resource');
+  await createIndexIfMissing('idx_sessions_expires_at', 'sessions', 'expires_at');
+  await createIndexIfMissing('idx_sessions_user_id', 'sessions', 'user_id');
+  await createIndexIfMissing('idx_users_deleted_at', 'users', 'deleted_at');
+  await createIndexIfMissing('idx_students_deleted_at', 'students', 'deleted_at');
+  await createIndexIfMissing('idx_acct_income_date', 'acct_income', 'date');
+  await createIndexIfMissing('idx_acct_expenses_date', 'acct_expenses', 'date');
+  await createIndexIfMissing('idx_student_concerns_student_id', 'student_concerns', 'student_id');
+  await createIndexIfMissing('idx_student_concerns_recipient_staff_id', 'student_concerns', 'recipient_staff_id');
+  await createIndexIfMissing('idx_student_concerns_recipient_type', 'student_concerns', 'recipient_type');
+  await createIndexIfMissing('idx_student_submissions_student_id', 'student_submissions', 'student_id');
+  await createIndexIfMissing('idx_student_submissions_recipient_staff_id', 'student_submissions', 'recipient_staff_id');
+  await createIndexIfMissing('idx_student_submissions_recipient_type', 'student_submissions', 'recipient_type');
 }
 await ensureSchema();
 // Sweep once at boot (covers rows that aged past TRASH_RETENTION_DAYS while
@@ -518,7 +548,7 @@ async function migrateAccountingFromKv() {
   async function migrateOne(kvKey, table) {
     const [{ c }] = await sql.query(`SELECT COUNT(*)::int AS c FROM ${table}`);
     if (c > 0) return;
-    const kvRows = await sql`SELECT value FROM kv_store WHERE key = ${kvKey}`;
+    const kvRows = await sql`SELECT value FROM kv_store WHERE \`key\` = ${kvKey}`;
     const items = kvRows.length && Array.isArray(kvRows[0].value) ? kvRows[0].value : [];
     if (!items.length) return;
     const seen = new Set();
@@ -537,9 +567,8 @@ async function migrateAccountingFromKv() {
       // sql(table) dynamic-identifier helper used here originally doesn't
       // exist and throws at runtime — this is what broke the Sept 4 deploy.
       await sql.query(
-        `INSERT INTO ${table} (id, voucher_no, date, category, cost_center, amount, party, mode, reference_no, description, added_by, voided, void_reason, voided_by, voided_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-         ON CONFLICT (id) DO NOTHING`,
+        `INSERT IGNORE INTO ${table} (id, voucher_no, date, category, cost_center, amount, party, mode, reference_no, description, added_by, voided, void_reason, voided_by, voided_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
         [item.id, voucherNo, item.date || null, item.category || null, item.costCenter || null, Number(item.amount) || 0,
          item.party || null, item.mode || null, item.referenceNo || null, item.description || null,
          item.addedBy || null, !!item.voided, item.voidReason || null, item.voidedBy || null, item.voidedAt || null]
@@ -760,15 +789,15 @@ async function handleKv(req, res, key) {
     if (!allowed) return; // checkModuleAccess already sent the 403
   }
   if (req.method === 'GET') {
-    const rows = await sql`SELECT value FROM kv_store WHERE key = ${key}`;
+    const rows = await sql`SELECT value FROM kv_store WHERE \`key\` = ${key}`;
     return res.status(200).json(rows.length ? rows[0].value : {});
   }
   if (req.method === 'PUT') {
     const value = req.body;
     const json = JSON.stringify(value === undefined ? {} : value);
     await sql`
-      INSERT INTO kv_store (key, value, updated_at) VALUES (${key}, ${json}::jsonb, now())
-      ON CONFLICT (key) DO UPDATE SET value = ${json}::jsonb, updated_at = now()
+      INSERT INTO kv_store (\`key\`, value, updated_at) VALUES (${key}, ${json}::jsonb, now())
+      ON DUPLICATE KEY UPDATE value = ${json}::jsonb, updated_at = now()
     `;
     return res.status(200).json({ ok: true });
   }
@@ -806,16 +835,12 @@ app.post('/api/next-doc-number', async (req, res) => {
     const prefix = DOC_SERIES_PREFIX[series];
     if (!prefix) return res.status(400).json({ error: 'Unknown numbering series: ' + series });
     const period = currentFinancialYear();
-    // Single atomic statement: Postgres locks the (series, period) row for
-    // the duration of this UPDATE, so two requests arriving at the same
-    // instant are still serialized into 1 and 2, never both getting the same
-    // number — this is the guarantee kv_store's whole-blob PUT couldn't give.
-    const rows = await sql`
-      INSERT INTO doc_counters (series, period, next_seq) VALUES (${series}, ${period}, 1)
-      ON CONFLICT (series, period) DO UPDATE SET next_seq = doc_counters.next_seq + 1
-      RETURNING next_seq
-    `;
-    const seq = rows[0].next_seq;
+    // Single atomic statement: locks the (series, period) row for the
+    // duration of this update (via nextDocSeq's LAST_INSERT_ID idiom — see
+    // db.js), so two requests arriving at the same instant are still
+    // serialized into 1 and 2, never both getting the same number — this is
+    // the guarantee kv_store's whole-blob PUT couldn't give.
+    const seq = await nextDocSeq(series, period);
     const docNumber = `${prefix}/${period}/${String(seq).padStart(6, '0')}`;
     return res.status(200).json({ docNumber });
   } catch (err) {
@@ -1226,7 +1251,7 @@ function notifyAfterResourceWrite(resourceName, body) {
 async function handleSimple(req, res, config, resourceName) {
   const { table, fields } = config;
   if (req.method === 'GET') {
-    const rows = await sql.query(`SELECT * FROM ${table} ORDER BY created_at ASC NULLS LAST`);
+    const rows = await sql.query(`SELECT * FROM ${table} ORDER BY created_at ASC`);
     return res.status(200).json(rows.map(r => simpleToAppShape(r, fields)));
   }
   if (req.method === 'POST' || req.method === 'PUT') {
@@ -1279,7 +1304,7 @@ async function handleUsers(req, res) {
     }
     if (trashMode) await purgeExpiredTrash();
     const rows = await sql.query(
-      `SELECT * FROM ${table} WHERE deleted_at IS ${trashMode ? 'NOT NULL' : 'NULL'} ORDER BY created_at ASC NULLS LAST`
+      `SELECT * FROM ${table} WHERE deleted_at IS ${trashMode ? 'NOT NULL' : 'NULL'} ORDER BY created_at ASC`
     );
     return res.status(200).json(rows.map(r => {
       const shaped = simpleToAppShape(r, fields);
@@ -1395,7 +1420,7 @@ async function handleHybrid(req, res, config) {
     }
     if (trashMode) await purgeExpiredTrash();
     const whereClause = softDelete ? `WHERE deleted_at IS ${trashMode ? 'NOT NULL' : 'NULL'}` : '';
-    const rows = await sql.query(`SELECT * FROM ${table} ${whereClause} ORDER BY created_at ASC NULLS LAST`);
+    const rows = await sql.query(`SELECT * FROM ${table} ${whereClause} ORDER BY created_at ASC`);
     return res.status(200).json(rows.map(r => {
       const shaped = hybridToAppShape(r, core);
       // Recently Deleted needs to show when this was deleted and when it
@@ -1503,7 +1528,7 @@ const PURGEABLE_RESOURCES = {
 async function purgeExpiredTrash() {
   for (const [resource, cfg] of Object.entries(PURGEABLE_RESOURCES)) {
     const expired = await sql.query(
-      `SELECT * FROM ${cfg.table} WHERE deleted_at IS NOT NULL AND deleted_at < now() - ($1 * interval '1 day')`,
+      `SELECT * FROM ${cfg.table} WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL $1 DAY)`,
       [TRASH_RETENTION_DAYS]
     );
     for (const row of expired) {
@@ -1892,7 +1917,7 @@ async function handleFeeStructure(req, res) {
       await sql`
         INSERT INTO fee_structure (class_name, admission, fee, bus, stock)
         VALUES (${className}, ${rates.admission || 0}, ${rates.fee || 0}, ${rates.bus || 0}, ${rates.stock || 0})
-        ON CONFLICT (class_name) DO UPDATE SET admission = ${rates.admission || 0}, fee = ${rates.fee || 0}, bus = ${rates.bus || 0}, stock = ${rates.stock || 0}
+        ON DUPLICATE KEY UPDATE admission = ${rates.admission || 0}, fee = ${rates.fee || 0}, bus = ${rates.bus || 0}, stock = ${rates.stock || 0}
       `;
     }
     return res.status(200).json({ ok: true });
@@ -1910,7 +1935,7 @@ async function handleSchoolInfo(req, res) {
     const info = req.body || {};
     await sql`
       INSERT INTO school_info (id, data) VALUES (1, ${JSON.stringify(info)}::jsonb)
-      ON CONFLICT (id) DO UPDATE SET data = ${JSON.stringify(info)}::jsonb
+      ON DUPLICATE KEY UPDATE data = ${JSON.stringify(info)}::jsonb
     `;
     return res.status(200).json({ ok: true });
   }
@@ -1928,7 +1953,7 @@ async function handleAttendanceSettings(req, res) {
     await sql`
       INSERT INTO attendance_settings (id, threshold, working_days)
       VALUES (1, ${s.threshold || 75}, ${JSON.stringify(s.workingDays || [1,2,3,4,5,6])}::jsonb)
-      ON CONFLICT (id) DO UPDATE SET threshold = ${s.threshold || 75}, working_days = ${JSON.stringify(s.workingDays || [1,2,3,4,5,6])}::jsonb
+      ON DUPLICATE KEY UPDATE threshold = ${s.threshold || 75}, working_days = ${JSON.stringify(s.workingDays || [1,2,3,4,5,6])}::jsonb
     `;
     return res.status(200).json({ ok: true });
   }
@@ -2190,11 +2215,8 @@ async function notifyMarksIfComplete({ examId, studentId }) {
   const resultRows = await sql`SELECT DISTINCT subject FROM exam_results WHERE exam_id = ${examId} AND student_id = ${studentId}`;
   const done = new Set(resultRows.map(r => r.subject));
   if (!subjects.every(s => done.has(s.name))) return;
-  const inserted = await sql`
-    INSERT INTO notification_events (student_id, kind, ref_key) VALUES (${studentId}, 'marks_published', ${examId})
-    ON CONFLICT DO NOTHING RETURNING id
-  `;
-  if (!inserted.length) return; // already notified for this exam
+  const wasNew = await insertNotificationEventIfNew(studentId, 'marks_published', examId);
+  if (!wasNew) return; // already notified for this exam
   const studentRows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
   const student = studentRows[0];
   if (!student) return;
@@ -2217,7 +2239,7 @@ async function computeStudentDueBalance(student) {
     sql`SELECT fee, bus FROM fee_structure WHERE class_name = ${student.class_name}`,
     sql`SELECT applies_to, mode, value FROM student_discounts WHERE student_id = ${student.id} AND status = 'Approved' AND applies_to IN ('fee','bus')`,
     sql`SELECT category, amount, discount, class_at_payment FROM payments WHERE student_id = ${student.id} AND category IN ('fee','bus')`,
-    sql`SELECT value FROM kv_store WHERE key = 'transport-routes'`,
+    sql`SELECT value FROM kv_store WHERE \`key\` = 'transport-routes'`,
   ]);
   const struct = feeStructRows[0] || { fee: 0, bus: 0 };
   const extra = student.extra || {};
@@ -2259,7 +2281,7 @@ async function computeStudentDueBalance(student) {
 // never firing again.
 const FEE_REMINDER_LEAD_DAYS = 3;
 async function runFeeDueReminders() {
-  const settingsRows = await sql`SELECT value FROM kv_store WHERE key = 'late-fee-settings'`;
+  const settingsRows = await sql`SELECT value FROM kv_store WHERE \`key\` = 'late-fee-settings'`;
   const dueDate = settingsRows.length ? settingsRows[0].value.dueDate : '';
   if (!dueDate) return; // school hasn't set a fee due date yet — nothing to remind about
   const today = new Date().toISOString().slice(0, 10);
@@ -2275,11 +2297,8 @@ async function runFeeDueReminders() {
     try {
       const balance = await computeStudentDueBalance(student);
       if (balance <= 0) continue;
-      const inserted = await sql`
-        INSERT INTO notification_events (student_id, kind, ref_key) VALUES (${student.id}, ${kind}, ${dueDate})
-        ON CONFLICT DO NOTHING RETURNING id
-      `;
-      if (!inserted.length) continue; // already sent for this due date
+      const wasNew = await insertNotificationEventIfNew(student.id, kind, dueDate);
+      if (!wasNew) continue; // already sent for this due date
       const title = kind === 'fee_due_before' ? 'Fee due soon' : 'Fee overdue';
       const body = kind === 'fee_due_before'
         ? `${student.first_name} ${student.last_name}'s fee of ${fmtMoneyServer(balance)} is due on ${dueDate}.`
@@ -2329,7 +2348,7 @@ app.post('/api/push/subscribe', async (req, res) => {
     await sql`
       INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
       VALUES (${req.authUser.id}, ${endpoint}, ${keys.p256dh}, ${keys.auth}, ${req.headers['user-agent'] || ''})
-      ON CONFLICT (endpoint) DO UPDATE SET user_id = EXCLUDED.user_id, p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth
+      ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), p256dh = VALUES(p256dh), auth = VALUES(auth)
     `;
     return res.status(201).json({ ok: true });
   } catch (err) {
@@ -2433,7 +2452,7 @@ app.post('/api/biometric/punches', async (req, res) => {
       const punchedAt = p && p.timestamp ? new Date(p.timestamp) : null;
       if (!deviceUserId || !punchedAt || isNaN(punchedAt.getTime())) continue; // skip anything malformed rather than fail the whole batch
       let staffId = null, staffName = null;
-      const staffRows = await sql`SELECT id, first_name, last_name FROM staff WHERE extra ->> 'biometricId' = ${deviceUserId} LIMIT 1`;
+      const staffRows = await sql`SELECT id, first_name, last_name FROM staff WHERE JSON_UNQUOTE(JSON_EXTRACT(extra, '$.biometricId')) = ${deviceUserId} LIMIT 1`;
       if (staffRows.length) {
         staffId = staffRows[0].id;
         staffName = `${staffRows[0].first_name || ''} ${staffRows[0].last_name || ''}`.trim();
@@ -2441,17 +2460,15 @@ app.post('/api/biometric/punches', async (req, res) => {
       }
       const punchId = 'biop_' + deviceSerial + '_' + deviceUserId + '_' + punchedAt.toISOString();
       await sql`
-        INSERT INTO biometric_punches (id, device_serial, device_user_id, punched_at, staff_id, staff_name, matched)
+        INSERT IGNORE INTO biometric_punches (id, device_serial, device_user_id, punched_at, staff_id, staff_name, matched)
         VALUES (${punchId}, ${deviceSerial}, ${deviceUserId}, ${punchedAt.toISOString()}, ${staffId}, ${staffName}, ${!!staffId})
-        ON CONFLICT (id) DO NOTHING
       `;
       if (staffId) {
         const dateStr = punchedAt.toISOString().slice(0, 10);
         const attId = 'statt_' + staffId + '_' + dateStr;
         await sql`
-          INSERT INTO staff_attendance_records (id, staff_id, date, status)
+          INSERT IGNORE INTO staff_attendance_records (id, staff_id, date, status)
           VALUES (${attId}, ${staffId}, ${dateStr}, 'Present')
-          ON CONFLICT (id) DO NOTHING
         `;
       }
     }
@@ -2945,7 +2962,7 @@ const CONCERN_RECIPIENT_TYPES = ['class_teacher', 'subject_teacher', 'management
 // (see myStaffRecord in the Homework tab) is how "which staff member is
 // signed in right now" is worked out here too.
 async function getMyStaffRow(userId) {
-  const rows = await sql`SELECT id FROM staff WHERE extra->>'linkedUserId' = ${userId} LIMIT 1`;
+  const rows = await sql`SELECT id FROM staff WHERE JSON_UNQUOTE(JSON_EXTRACT(extra, '$.linkedUserId')) = ${userId} LIMIT 1`;
   return rows.length ? rows[0] : null;
 }
 async function getLinkedStudent(userId) {
@@ -2970,7 +2987,7 @@ async function getLinkedStudent(userId) {
 // and marks can be scoped to just that, the same way getLinkedStudent
 // scopes a Parent/Student login to just their own child.
 async function getMyStaffFull(userId) {
-  const rows = await sql`SELECT * FROM staff WHERE extra->>'linkedUserId' = ${userId} LIMIT 1`;
+  const rows = await sql`SELECT * FROM staff WHERE JSON_UNQUOTE(JSON_EXTRACT(extra, '$.linkedUserId')) = ${userId} LIMIT 1`;
   return rows.length ? rows[0] : null;
 }
 async function getTeacherScope(userId) {
@@ -3438,7 +3455,7 @@ app.all('/api/:resource', async (req, res) => {
       const student = await getLinkedStudent(req.authUser.id);
       if (!student) return res.status(200).json([]);
       const { table, fields } = PARENT_OWN_RECORD_RESOURCES[resource];
-      const rows = await sql.query(`SELECT * FROM ${table} WHERE student_id = $1 ORDER BY created_at ASC NULLS LAST`, [student.id]);
+      const rows = await sql.query(`SELECT * FROM ${table} WHERE student_id = $1 ORDER BY created_at ASC`, [student.id]);
       return res.status(200).json(rows.map(r => simpleToAppShape(r, fields())));
     }
     // A Teacher's access to the student roster ('admissions') can be turned
@@ -3491,7 +3508,7 @@ app.all('/api/:resource', async (req, res) => {
           const ids = studentRows.map(s => s.id);
           if (!ids.length) return res.status(200).json([]);
           const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
-          const rows = await sql.query(`SELECT * FROM attendance_records WHERE student_id IN (${placeholders}) ORDER BY created_at ASC NULLS LAST`, ids);
+          const rows = await sql.query(`SELECT * FROM attendance_records WHERE student_id IN (${placeholders}) ORDER BY created_at ASC`, ids);
           return res.status(200).json(rows.map(r => simpleToAppShape(r, SIMPLE_RESOURCES.attendance.fields)));
         }
         if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
@@ -3511,7 +3528,7 @@ app.all('/api/:resource', async (req, res) => {
           scope.subjectSections.some(ss => ss.subject === subject && ss.className === className && ss.section === section);
         if (req.method === 'GET') {
           if (!scope.subjectSections.length) return res.status(200).json([]);
-          const allRows = await sql`SELECT * FROM exam_results ORDER BY created_at ASC NULLS LAST`;
+          const allRows = await sql`SELECT * FROM exam_results ORDER BY created_at ASC`;
           const studentIds = [...new Set(allRows.map(r => r.student_id))];
           const classMap = await studentClassMap(studentIds);
           const filtered = allRows.filter(r => {
@@ -3552,7 +3569,7 @@ app.all('/api/:resource', async (req, res) => {
     // own record still comes back in full (their own data, nothing to
     // protect it from).
     if (req.method === 'GET' && resource === 'staff' && req.authUser && req.authUser.role === 'Teacher') {
-      const rows = await sql`SELECT * FROM staff ORDER BY created_at ASC NULLS LAST`;
+      const rows = await sql`SELECT * FROM staff ORDER BY created_at ASC`;
       return res.status(200).json(rows.map(r => {
         const shapedCore = {};
         HYBRID_RESOURCES.staff.core.forEach(f => { shapedCore[f.app] = r[f.col]; });
