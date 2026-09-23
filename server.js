@@ -123,6 +123,14 @@ function decodeHeaderValue(v) {
 // across versions, so those went through addColumnIfMissing()/
 // createIndexIfMissing() (see db.js) instead, which swallow the
 // "already exists" error the same IF NOT EXISTS was there to avoid.
+// A TEXT/BLOB/JSON column also can't take a plain literal DEFAULT on real
+// MySQL (unlike MariaDB, which allows it as an extension — this passed
+// local MariaDB testing and only surfaced once deployed against actual
+// MySQL) — MySQL 8.0.13+ requires it be written as an *expression* default
+// instead, which just means wrapping the literal in parentheses:
+// `DEFAULT ('value')`. Every TEXT/JSON column below that needs a default
+// uses that form (see purge_reason, status x2, and every `JSON ... DEFAULT
+// ('{}'/'[]')` column) for exactly this reason.
 async function ensureSchema() {
   await sql`CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(191) PRIMARY KEY, name TEXT, username VARCHAR(191), password TEXT, role TEXT,
@@ -260,7 +268,7 @@ async function ensureSchema() {
   await sql`CREATE TABLE IF NOT EXISTS purge_log (
     id VARCHAR(191) PRIMARY KEY, resource VARCHAR(191) NOT NULL, record_id VARCHAR(191) NOT NULL, record_label TEXT,
     deleted_at DATETIME, deleted_by_name TEXT,
-    purge_reason TEXT NOT NULL DEFAULT 'manual',
+    purge_reason TEXT NOT NULL DEFAULT ('manual'),
     purged_by TEXT, purged_by_name TEXT, purged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await createIndexIfMissing('idx_purge_log_resource', 'purge_log', 'resource, record_id');
@@ -372,7 +380,7 @@ async function ensureSchema() {
   await sql`CREATE TABLE IF NOT EXISTS student_concerns (
     id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), student_name TEXT, class_name TEXT, section TEXT,
     recipient_type VARCHAR(191), recipient_staff_id VARCHAR(191), recipient_name TEXT, subject_name TEXT,
-    message TEXT, status TEXT NOT NULL DEFAULT 'open',
+    message TEXT, status TEXT NOT NULL DEFAULT ('open'),
     reply_message TEXT, replied_by TEXT, replied_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
@@ -398,7 +406,7 @@ async function ensureSchema() {
     id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), student_name TEXT, class_name TEXT, section TEXT,
     recipient_type VARCHAR(191), recipient_staff_id VARCHAR(191), recipient_name TEXT, subject_name TEXT,
     homework_id TEXT, title TEXT, description TEXT, attachment LONGTEXT,
-    status TEXT NOT NULL DEFAULT 'submitted',
+    status TEXT NOT NULL DEFAULT ('submitted'),
     feedback TEXT, reviewed_by TEXT, reviewed_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
