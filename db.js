@@ -33,6 +33,16 @@ function typeCast(field, next) {
   return next();
 }
 
+// Some managed MySQL hosts (GoDaddy's included, on at least some plans)
+// require TLS on the connection and silently hang the TCP handshake rather
+// than reject it when a plaintext client connects — set DB_SSL=true in the
+// hosting environment's variables if the app hangs on startup even though
+// DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME all look correct. Left off by
+// default since it isn't needed for local/self-hosted MySQL or MariaDB.
+const ssl = /^true$/i.test(process.env.DB_SSL || '')
+  ? { rejectUnauthorized: !/^false$/i.test(process.env.DB_SSL_REJECT_UNAUTHORIZED || 'true') }
+  : undefined;
+
 export const pool = mysql.createPool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT || 3306),
@@ -43,7 +53,20 @@ export const pool = mysql.createPool({
   connectionLimit: 5,
   maxIdle: 5,
   idleTimeout: 60000,
+  // Without this, mysql2 has no upper bound on how long it will wait for
+  // the initial TCP/TLS handshake — a wrong host, a DNS name that doesn't
+  // resolve from the hosting platform's network, or a network/firewall path
+  // that just drops packets all hang indefinitely instead of erroring. That
+  // hang is what previously looked identical to app.listen() never being
+  // reached at all (see server.js's initDb()): now a bad connection fails
+  // loudly within 15s and gets logged, instead of hanging forever silently.
+  connectTimeout: 15000,
+  ssl,
   typeCast,
+});
+
+pool.on('error', (err) => {
+  console.error('MySQL pool error:', err);
 });
 
 // Postgres cast syntax (`::jsonb`, `::int`, ...) has no MySQL equivalent and

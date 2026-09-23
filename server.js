@@ -529,7 +529,18 @@ async function ensureSchema() {
   await createIndexIfMissing('idx_student_submissions_recipient_staff_id', 'student_submissions', 'recipient_staff_id');
   await createIndexIfMissing('idx_student_submissions_recipient_type', 'student_submissions', 'recipient_type');
 }
-await ensureSchema();
+// NOTE: intentionally NOT `await`ed at module scope (see initDb() below,
+// defined after migrateAccountingFromKv/migratePlaintextPasswords/
+// seedDefaultAdminIfEmpty) — this and the other startup DB tasks run in the
+// background so a slow/unreachable database can't block app.listen() at the
+// bottom of this file from ever running. A hosting platform's readiness
+// check generally just waits for the port to open; if a database call here
+// hangs (bad host, DNS, SSL mismatch, firewall) while this was still a
+// blocking top-level await, the port never opened, the platform's build
+// logged a generic "Process readiness timed out" with zero application
+// output, and there was no way to tell what was actually wrong. Now the
+// server starts regardless, and any database problem shows up as a logged
+// error below instead of a silent hang.
 // Sweep once at boot (covers rows that aged past TRASH_RETENTION_DAYS while
 // the server was down or never had anyone open Recently Deleted) and then
 // once a day thereafter — see purgeExpiredTrash's own comment above for why
@@ -580,7 +591,6 @@ async function migrateAccountingFromKv() {
   await migrateOne('acct-income', 'acct_income');
   await migrateOne('acct-expenses', 'acct_expenses');
 }
-await migrateAccountingFromKv();
 
 // ---------- One-time password migration ----------
 // Every password in the `users` table has been plain text since this app's
@@ -603,7 +613,6 @@ async function migratePlaintextPasswords() {
   }
   if (rows.length) console.log(`Migrated ${rows.length} plaintext password(s) to bcrypt hashes.`);
 }
-await migratePlaintextPasswords();
 
 // ---------- Seed a default admin only when the users table is completely empty ----------
 // The client used to seed a hardcoded admin/admin123 account itself, and the login
@@ -634,7 +643,30 @@ async function seedDefaultAdminIfEmpty() {
   console.log('it is not stored anywhere in plaintext and will not be shown again.');
   console.log('============================================================');
 }
-await seedDefaultAdminIfEmpty();
+
+// Runs the startup DB work (schema creation/migration, one-time data
+// migrations, admin seeding) in order, same as before, but as a background
+// task rather than a blocking top-level await — see the comment above the
+// purgeExpiredTrash sweep for why: this lets the HTTP server start and bind
+// its port immediately even if the database is slow to respond or
+// unreachable, instead of the whole process hanging silently before
+// app.listen() is ever reached. Any failure here is caught and logged
+// instead of crashing the process or blocking startup; routes that need the
+// database will simply error (visibly, in the request/response) until this
+// resolves, which is far more debuggable than a platform-level "process
+// never became ready" with no application logs at all.
+async function initDb() {
+  console.log('Connecting to database and ensuring schema...');
+  await ensureSchema();
+  console.log('Schema ready.');
+  await migrateAccountingFromKv();
+  await migratePlaintextPasswords();
+  await seedDefaultAdminIfEmpty();
+  console.log('Database initialization complete.');
+}
+initDb().catch(err => {
+  console.error('Database initialization failed — the server will still accept connections, but requests that touch the database will error until this is fixed. Cause:', err);
+});
 
 // ---------- Session-based authentication ----------
 // Until now, nothing on the server checked whether a caller was logged in
