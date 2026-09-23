@@ -3694,6 +3694,24 @@ app.get(/.*/, (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+// Diagnostic logging around the bind itself: on GoDaddy's platform, three
+// separate deploy/restart attempts each ran this whole file successfully
+// end to end (database schema created, admin seeded, "Database
+// initialization complete." logged) — yet "Server running on port ..."
+// below never appeared in the platform's own runtime logs, and the
+// platform kept reporting the app as unhealthy/not ready. That's
+// unexplained by anything in this file: locally, the exact same code binds
+// and starts answering requests within ~3 seconds, well before the
+// database step even finishes. The two lines bracketing the call below,
+// plus the explicit 'error' handler (a failed bind — EADDRINUSE, EACCES,
+// a bad PORT value — otherwise surfaces as an unhandled 'error' event, not
+// necessarily a clearly-logged one), are here to pin down, on the next
+// deploy, whether this line is even reached, and if so, whether the bind
+// itself is failing with a specific OS error instead of silently hanging.
+console.log(`Binding to port ${PORT} (process.env.PORT was ${JSON.stringify(process.env.PORT)})...`);
+const httpServer = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+httpServer.on('error', (err) => {
+  console.error(`HTTP server failed to bind to port ${PORT}:`, err);
 });
