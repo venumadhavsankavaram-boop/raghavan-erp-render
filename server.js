@@ -549,12 +549,13 @@ async function ensureSchema() {
 // output, and there was no way to tell what was actually wrong. Now the
 // server starts regardless, and any database problem shows up as a logged
 // error below instead of a silent hang.
-// Sweep once at boot (covers rows that aged past TRASH_RETENTION_DAYS while
-// the server was down or never had anyone open Recently Deleted) and then
-// once a day thereafter — see purgeExpiredTrash's own comment above for why
-// this runs on both a timer and on-demand.
-purgeExpiredTrash().catch(err => console.error('purgeExpiredTrash (startup) failed:', err));
-setInterval(() => { purgeExpiredTrash().catch(err => console.error('purgeExpiredTrash (interval) failed:', err)); }, 24 * 60 * 60 * 1000);
+// The actual boot-time/daily sweep call is placed further down, right after
+// purgeExpiredTrash() and PURGEABLE_RESOURCES are defined (search "Sweep once
+// at boot") — calling it up here, before that const exists yet, threw
+// `ReferenceError: Cannot access 'PURGEABLE_RESOURCES' before initialization`
+// on every single startup (caught by the .catch() below, so it never stopped
+// the server, but it silently disabled the trash-purge sweep for that boot
+// and logged a confusing, unrelated-looking error).
 
 // ---------- One-time accounting migration: kv_store blobs -> real tables ----------
 // Runs once per table (skips if acct_income / acct_expenses already has rows,
@@ -1580,6 +1581,14 @@ async function purgeExpiredTrash() {
     }
   }
 }
+// Sweep once at boot (covers rows that aged past TRASH_RETENTION_DAYS while
+// the server was down or never had anyone open Recently Deleted) and then
+// once a day thereafter. Must stay below the PURGEABLE_RESOURCES/
+// purgeExpiredTrash definitions above it — see the note near the top of this
+// file (search "Cannot access 'PURGEABLE_RESOURCES'") for why this used to
+// live up there and broke on every boot.
+purgeExpiredTrash().catch(err => console.error('purgeExpiredTrash (startup) failed:', err));
+setInterval(() => { purgeExpiredTrash().catch(err => console.error('purgeExpiredTrash (interval) failed:', err)); }, 24 * 60 * 60 * 1000);
 // Shared by both handleUsers' and handleHybrid's PUT ?purge=1 branches: an
 // Admin/Principal jumping the retention queue to remove one specific
 // already-soft-deleted record right now, instead of waiting out
