@@ -3379,6 +3379,79 @@ app.get('/api/backup', async (req, res) => {
   }
 });
 
+// ---------- ONE-TIME: Neon -> GoDaddy MySQL data import ----------
+// Temporary, admin-only route to load the real setup/config data that
+// already existed in the old Neon-backed deployment (staff, users,
+// subjects, fee structure, custom roles, kv_store settings, school info,
+// exam defs, accounting/attendance/exam-room/holiday config, and the
+// audit/wipe/purge logs) into this app's fresh MySQL database, so this
+// GoDaddy app doesn't start from empty after everything already entered
+// there. Meant to run exactly once, then be deleted from this file.
+// Double-gated: requires an already-authenticated Admin session (same as
+// every other /api/* route) AND a one-time secret only known to whoever
+// triggers the import, since this both reads and destructively replaces
+// several tables. Row contents are never logged — only counts — so no
+// staff/student PII ends up in the platform's runtime logs.
+const NEON_IMPORT_TABLES = new Set([
+  'staff', 'users', 'subjects', 'fee_structure', 'custom_roles', 'kv_store',
+  'school_info', 'exam_defs', 'acct_expenses', 'attendance_settings',
+  'exam_room_config', 'holidays', 'wipe_log', 'purge_log', 'audit_log',
+]);
+const NEON_IMPORT_JSON_COLUMNS = new Set([
+  'extra', 'value', 'data', 'details', 'snapshot', 'counts',
+  'sections', 'section_staff', 'staff_ids', 'class_subjects',
+  'permissions', 'working_days', 'attachments',
+]);
+// Postgres's json_agg gives timestamps like "...T05:08:37.385815+00:00" (an
+// explicit numeric offset, not 'Z') — db.js's own coerceParam only matches
+// the 'Z'-suffixed form used elsewhere in this app, so this route needs its
+// own, more permissive conversion straight to MySQL's DATETIME text form.
+const NEON_IMPORT_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+function neonImportToMysqlDatetime(v) {
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return v;
+  const pad = (n, w = 2) => String(n).padStart(w, '0');
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+         `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+app.post('/api/admin/neon-import', async (req, res) => {
+  if (!req.authUser || req.authUser.role !== 'Admin') {
+    return res.status(403).json({ error: 'Admin only.' });
+  }
+  if (!process.env.NEON_IMPORT_SECRET || req.headers['x-import-secret'] !== process.env.NEON_IMPORT_SECRET) {
+    return res.status(403).json({ error: 'Forbidden.' });
+  }
+  const tables = (req.body && req.body.tables) || {};
+  const summary = [];
+  try {
+    for (const [table, rows] of Object.entries(tables)) {
+      if (!NEON_IMPORT_TABLES.has(table)) continue;
+      await sql.query(`DELETE FROM \`${table}\``, []);
+      let inserted = 0;
+      for (const row of rows) {
+        const cols = Object.keys(row);
+        const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+        const colList = cols.map(c => `\`${c}\``).join(', ');
+        const values = cols.map(c => {
+          let v = row[c];
+          if (typeof v === 'string' && NEON_IMPORT_DATETIME_RE.test(v)) return neonImportToMysqlDatetime(v);
+          if (NEON_IMPORT_JSON_COLUMNS.has(c) && v !== null && typeof v === 'object') return JSON.stringify(v);
+          if (typeof v === 'boolean') return v ? 1 : 0;
+          return v;
+        });
+        await sql.query(`INSERT INTO \`${table}\` (${colList}) VALUES (${placeholders})`, values);
+        inserted++;
+      }
+      summary.push({ table, inserted });
+    }
+    console.log('neon-import complete:', summary.map(s => `${s.table}=${s.inserted}`).join(', '));
+    return res.status(200).json({ ok: true, summary });
+  } catch (err) {
+    console.error('neon-import failed:', err.message, err.sqlMessage || '');
+    return res.status(500).json({ error: err.message, sqlMessage: err.sqlMessage || null, partial: summary });
+  }
+});
+
 // Read-only viewer for the audit log — newest first, capped at 500 rows per
 // call so this stays fast and bounded no matter how long the table gets
 // (the Admin-only UI reads this straight through, no further pagination

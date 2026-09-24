@@ -18517,6 +18517,16 @@
   let schoolInfo = {};
   let schoolLogoData = '';
   let schoolPrincipalSignatureData = '';
+  // Editable Leadership section — feeds the public website's Leadership cards
+  // (via /api/school-info, which it already fetches) so an Admin can correct a
+  // name, title or email — or add/remove a leader — without a code change and
+  // redeploy. Starts empty like every other School Profile field (this file is
+  // the shared template every school runs, so it holds no one school's real
+  // names) — use "+ Add Leader" to enter real people, then Save.
+  let schoolLeadershipDraft = [];
+  function leadershipInitials(name){
+    return (name || '').split(' ').filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
+  }
 
   async function loadSchoolInfo(){
     // These are placeholder DEFAULTS ONLY — they hold until an Admin fills in
@@ -18533,6 +18543,7 @@
       address: '',
       workingDays: 220, logo: '',
       principalName: '', principalSignature: '',
+      leadership: [],
     });
     if(schoolInfo.logo) document.getElementById('sbLogoImg').src = schoolInfo.logo;
     const nameSpan = document.getElementById('sbBrandName');
@@ -18548,6 +18559,7 @@
   }
 
   function renderSchoolProfileTab(body){
+    schoolLeadershipDraft = JSON.parse(JSON.stringify(schoolInfo.leadership || []));
     body.innerHTML = `
       <div class="profile-card" style="margin-bottom:20px; max-width:340px;">
         <h4>Branding</h4>
@@ -18617,8 +18629,55 @@
         <span style="font-size:0.72rem; color:var(--ink-soft); display:block; margin-top:6px;">Use a scanned signature on a plain/white background, PNG preferred · Max 2MB</span>
       </div>
 
+      <div class="profile-card" style="margin-bottom:20px;">
+        <h4>Leadership</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:4px 0 12px;">Shown on the public website's Leadership section (Secretary, Correspondent, Principal, Academic Director, etc.). Add, edit or remove anyone here — the website picks up the change automatically, no code edit needed.</p>
+        <div id="leadershipEditorRows">${renderLeadershipEditorRows()}</div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:4px;" onclick="addLeadershipEntry()">+ Add Leader</button>
+      </div>
+
       <button class="btn btn-primary" onclick="saveSchoolProfile()">Save Changes</button>
     `;
+  }
+  function renderLeadershipEditorRows(){
+    if(!schoolLeadershipDraft.length){
+      return `<p style="font-size:0.82rem; color:var(--ink-soft); margin-bottom:10px;">No one added yet — use "+ Add Leader" below.</p>`;
+    }
+    return schoolLeadershipDraft.map((l, i) => `
+      <div style="display:flex; gap:14px; align-items:flex-start; padding:14px 0; ${i>0?'border-top:1px solid var(--border);':''}">
+        <div style="display:flex; flex-direction:column; align-items:center; gap:6px; flex-shrink:0;">
+          ${l.photo
+            ? `<img id="leadPhotoPreview${i}" src="${l.photo}" style="width:56px; height:56px; border-radius:50%; object-fit:cover; border:1.5px solid var(--border);">`
+            : `<div id="leadPhotoPreview${i}" style="width:56px; height:56px; border-radius:50%; background:linear-gradient(135deg, var(--gold), var(--magenta)); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:0.9rem;">${leadershipInitials(l.name||'')}</div>`}
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer; font-size:0.68rem; padding:3px 8px;">Photo<input type="file" accept="image/*" style="display:none;" onchange="previewLeadershipPhoto(event, ${i})"></label>
+        </div>
+        <div class="form-grid" style="flex:1;">
+          <div class="f-field"><label>Name</label><input type="text" value="${escapeHtml(l.name||'')}" oninput="schoolLeadershipDraft[${i}].name=this.value"></div>
+          <div class="f-field"><label>Title / Role</label><input type="text" value="${escapeHtml(l.title||'')}" oninput="schoolLeadershipDraft[${i}].title=this.value" placeholder="e.g. Principal, Secretary & Correspondent"></div>
+          <div class="f-field"><label>Qualification</label><input type="text" value="${escapeHtml(l.qualification||'')}" oninput="schoolLeadershipDraft[${i}].qualification=this.value"></div>
+          <div class="f-field"><label>Email</label><input type="email" value="${escapeHtml(l.email||'')}" oninput="schoolLeadershipDraft[${i}].email=this.value"></div>
+        </div>
+        <button class="btn-edit-text" style="color:var(--magenta); font-size:1rem; padding:4px 8px;" onclick="removeLeadershipEntry(${i})" title="Remove">&times;</button>
+      </div>
+    `).join('');
+  }
+  function refreshLeadershipEditor(){
+    const wrap = document.getElementById('leadershipEditorRows');
+    if(wrap) wrap.innerHTML = renderLeadershipEditorRows();
+  }
+  function addLeadershipEntry(){
+    schoolLeadershipDraft.push({ name: '', title: '', qualification: '', email: '', photo: '' });
+    refreshLeadershipEditor();
+  }
+  function removeLeadershipEntry(idx){
+    schoolLeadershipDraft.splice(idx, 1);
+    refreshLeadershipEditor();
+  }
+  function previewLeadershipPhoto(e, idx){
+    readImageFileWithSizeLimit(e, dataUrl => {
+      schoolLeadershipDraft[idx].photo = dataUrl;
+      refreshLeadershipEditor();
+    });
   }
   function previewPrincipalSignature(e){
     readImageFileWithSizeLimit(e, dataUrl => {
@@ -18670,6 +18729,9 @@
       logo: schoolLogoData || schoolInfo.logo || '',
       principalName: document.getElementById('siPrincipalName').value.trim(),
       principalSignature: schoolPrincipalSignatureData || schoolInfo.principalSignature || '',
+      leadership: schoolLeadershipDraft
+        .map(l => ({ name: (l.name||'').trim(), title: (l.title||'').trim(), qualification: (l.qualification||'').trim(), email: (l.email||'').trim(), photo: l.photo || '' }))
+        .filter(l => l.name),
     };
     await storageSet(SCHOOL_INFO_KEY, schoolInfo);
     if(schoolInfo.logo) document.getElementById('sbLogoImg').src = schoolInfo.logo;
