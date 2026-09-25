@@ -549,6 +549,40 @@ async function ensureSchema() {
   await createIndexIfMissing('idx_student_submissions_student_id', 'student_submissions', 'student_id');
   await createIndexIfMissing('idx_student_submissions_recipient_staff_id', 'student_submissions', 'recipient_staff_id');
   await createIndexIfMissing('idx_student_submissions_recipient_type', 'student_submissions', 'recipient_type');
+
+  // Sweep: every other table that gets `ORDER BY created_at` anywhere in this
+  // file (handleSimple/handleUsers/handleHybrid's generic paths, plus a few
+  // bespoke handlers) but had no supporting index — same latent
+  // ER_OUT_OF_SORTMEMORY risk that just took down Staff Directory, waiting to
+  // happen again as each of these tables accumulates rows. Two are genuinely
+  // high-risk today, not hypothetical: `website_gallery.data_url` and
+  // `users.photo` both hold base64 image data, same as staff/students' extra
+  // JSON did. The rest are lower-risk today (small text/numeric rows) but
+  // will hit the same wall eventually as payments/attendance/exam history
+  // pile up over school years — indexing now is free and idempotent, so
+  // there's no reason to wait for each one to crash in production first.
+  await createIndexIfMissing('idx_website_gallery_created_at', 'website_gallery', 'created_at');
+  await createIndexIfMissing('idx_users_created_at', 'users', 'created_at');
+  await createIndexIfMissing('idx_student_submissions_created_at', 'student_submissions', 'created_at');
+  await createIndexIfMissing('idx_payments_created_at', 'payments', 'created_at');
+  await createIndexIfMissing('idx_student_discounts_created_at', 'student_discounts', 'created_at');
+  await createIndexIfMissing('idx_student_extra_fees_created_at', 'student_extra_fees', 'created_at');
+  await createIndexIfMissing('idx_attendance_records_created_at', 'attendance_records', 'created_at');
+  await createIndexIfMissing('idx_holidays_created_at', 'holidays', 'created_at');
+  await createIndexIfMissing('idx_exam_results_created_at', 'exam_results', 'created_at');
+  await createIndexIfMissing('idx_staff_attendance_records_created_at', 'staff_attendance_records', 'created_at');
+  await createIndexIfMissing('idx_admission_inquiries_created_at', 'admission_inquiries', 'created_at DESC');
+  await createIndexIfMissing('idx_acct_income_created_at', 'acct_income', 'created_at');
+  await createIndexIfMissing('idx_acct_expenses_created_at', 'acct_expenses', 'created_at');
+  await createIndexIfMissing('idx_subjects_created_at', 'subjects', 'created_at');
+  await createIndexIfMissing('idx_exam_defs_created_at', 'exam_defs', 'created_at');
+  await createIndexIfMissing('idx_custom_roles_created_at', 'custom_roles', 'created_at');
+  await createIndexIfMissing('idx_student_concerns_created_at', 'student_concerns', 'created_at');
+  await createIndexIfMissing('idx_staff_payroll_created_at', 'staff_payroll', 'created_at');
+  await createIndexIfMissing('idx_comms_messages_created_at', 'comms_messages', 'created_at');
+  await createIndexIfMissing('idx_rooms_created_at', 'rooms', 'created_at');
+  await createIndexIfMissing('idx_exam_hall_tickets_created_at', 'exam_hall_tickets', 'created_at');
+  await createIndexIfMissing('idx_exam_room_config_created_at', 'exam_room_config', 'created_at');
 }
 // NOTE: intentionally NOT `await`ed at module scope (see initDb() below,
 // defined after migrateAccountingFromKv/migratePlaintextPasswords/
