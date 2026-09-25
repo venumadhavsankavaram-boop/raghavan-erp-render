@@ -1829,6 +1829,62 @@ async function handleDeletionRequests(req, res) {
   return res.status(405).json({ error: 'Method not allowed.' });
 }
 
+// ---------- Bulk "Delete Duplicate Students" (one step, duplicates only) ----------
+// The 3-step deletion-request flow above exists so a single click can never
+// remove a student by accident. That's the right amount of friction for an
+// ordinary record, but it turns cleaning up genuine duplicates (the same
+// student entered twice — most often from a bulk import, or two staff
+// admitting the same child on paper) into three separate clicks PER EXTRA
+// RECORD, for what is usually an obviously-correct cleanup. This endpoint
+// is a deliberate, narrow bypass of that safety net: it applies ONLY to
+// records that collide on first+last name — the exact same set the "Find
+// Duplicate Students" view already flags — and never touches anything else.
+// A student who is not part of a same-name group is completely unaffected
+// and can still only ever be removed through handleDeletionRequests above.
+// "The original" is the earliest-created record in each name group (rows
+// are pulled ORDER BY created_at ASC, so group[0] is it) — every other
+// record sharing that name is soft-deleted in the same pass. Gated to
+// MANAGEMENT_ROLES, same as every step of the approval flow it bypasses,
+// and still a soft delete — deleted_at/deleted_by/deleted_by_name are set
+// exactly as an approved deletion request would set them, so every record
+// removed this way is still sitting in Recently Deleted, recoverable for
+// TRASH_RETENTION_DAYS, same as any other student deletion.
+async function handleDeleteDuplicateStudents(req, res) {
+  if (!req.authUser || !MANAGEMENT_ROLES.includes(req.authUser.role)) {
+    return res.status(403).json({ error: 'Admin or Principal access required to delete duplicate students.' });
+  }
+  const rows = await sql`SELECT * FROM students WHERE deleted_at IS NULL ORDER BY created_at ASC`;
+  const groups = {};
+  for (const row of rows) {
+    const key = `${(row.first_name || '').trim()} ${(row.last_name || '').trim()}`.trim().toLowerCase();
+    if (!key) continue;
+    (groups[key] = groups[key] || []).push(row);
+  }
+  // Within each group, rows are already oldest-first (created_at ASC
+  // above) — index 0 is the original to keep; everything after it in the
+  // same group is a duplicate to remove.
+  const toDelete = [];
+  for (const group of Object.values(groups)) {
+    if (group.length < 2) continue;
+    for (let i = 1; i < group.length; i++) toDelete.push(group[i]);
+  }
+  const label = row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : '');
+  for (const row of toDelete) {
+    await sql`UPDATE students SET deleted_at = now(), deleted_by = ${req.authUser.id}, deleted_by_name = ${req.authUser.name} WHERE id = ${row.id}`;
+    // One audit_log row per record removed — the dispatcher's own
+    // res.on('finish') logger (see app.all('/api/:resource') below) only
+    // ever logs a single row per request with a single record_id, which
+    // would hide exactly which records this bulk action touched.
+    await sql`INSERT INTO audit_log (actor_name, actor_role, method, resource, record_id) VALUES (${req.authUser.name}, ${req.authUser.role}, 'DELETE', 'students', ${String(row.id)})`
+      .catch(err => console.error('audit log insert failed (delete-duplicates):', err));
+  }
+  return res.status(200).json({
+    ok: true,
+    deletedCount: toDelete.length,
+    deleted: toDelete.map(row => ({ id: row.id, label: label(row) })),
+  });
+}
+
 // ---------- Certificate register (Study/Bonafide, Transfer, Character, Migration) ----------
 // Every certificate issued for a student is logged here with a snapshot of
 // their details at the moment of issue (so a later correction to the live
@@ -3804,6 +3860,15 @@ app.all('/api/:resource', async (req, res) => {
     if (resource === 'users') return await handleUsers(req, res);
     if (resource === 'deletion-requests') return await handleDeletionRequests(req, res);
     if (resource === 'certificates') return await handleCertificates(req, res);
+    // One-step bulk cleanup for the "Find Duplicate Students" view — see
+    // handleDeleteDuplicateStudents' own comment for why this exists
+    // alongside (never instead of) the 3-step deletion-request flow above.
+    // Checked before the generic HYBRID_RESOURCES dispatch below, since
+    // 'students' is also a hybrid resource and would otherwise route this
+    // POST into handleHybrid's normal create/update branch.
+    if (resource === 'students' && req.method === 'POST' && req.query.action === 'delete-duplicates') {
+      return await handleDeleteDuplicateStudents(req, res);
+    }
     if (SIMPLE_RESOURCES[resource]) return await handleSimple(req, res, SIMPLE_RESOURCES[resource], resource);
     if (HYBRID_RESOURCES[resource]) return await handleHybrid(req, res, HYBRID_RESOURCES[resource]);
     if (resource === 'subjects') return await handleSubjects(req, res);

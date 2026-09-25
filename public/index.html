@@ -2545,10 +2545,11 @@
     <div class="modal-inner">
       <button class="modal-close" onclick="closeDuplicatesModal()">&times;</button>
       <h2>Find Duplicate Students</h2>
-      <p class="modal-sub">Students with the exact same first + last name (case-insensitive). Compare the details and delete the extras — keep whichever record has the most complete/correct info.</p>
+      <p class="modal-sub">Students with the exact same first + last name (case-insensitive). Compare the details and delete the extras individually below, or use "Delete All Duplicates" to remove every extra copy in one step and keep only the original (earliest-added) record in each group.</p>
       <div id="duplicatesModalBody" style="max-height:440px; overflow-y:auto;"></div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" onclick="closeDuplicatesModal()">Close</button>
+        <button type="button" class="btn btn-danger" id="deleteAllDuplicatesBtn" onclick="deleteAllDuplicates()" style="display:none;">Delete All Duplicates (Keep Originals)</button>
       </div>
     </div>
   </div>
@@ -21621,6 +21622,13 @@
     });
     const dupGroups = Object.values(groups).filter(g => g.length > 1);
     const body = document.getElementById('duplicatesModalBody');
+    const bulkBtn = document.getElementById('deleteAllDuplicatesBtn');
+    // The one-step bulk action bypasses the usual 3-step deletion approval
+    // (see deleteAllDuplicates() and handleDeleteDuplicateStudents on the
+    // server), so it's restricted to Admin/Principal — same gate the
+    // server itself enforces — and only ever shown when there's actually
+    // something to clean up.
+    if(bulkBtn) bulkBtn.style.display = (isManagementUser() && dupGroups.length > 0) ? 'inline-flex' : 'none';
     if(dupGroups.length === 0){
       body.innerHTML = `<div class="empty-state"><b>No duplicates found</b>Every student has a unique first + last name.</div>`;
       return;
@@ -21653,6 +21661,39 @@
       showToast('Step 1 of 3 recorded — open Pending Deletion Requests to continue.');
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast('Could not send the deletion request (' + e.message + ').');
+    }
+  }
+  // One-step cleanup for everything the modal above is already showing:
+  // deletes every duplicate in a single request, keeping only the
+  // original (earliest-added) record per name group. This is the only
+  // path that skips the normal 3-step deletion approval — and only for
+  // records already flagged here as duplicates; every other student
+  // deletion still goes through "Request Deletion" above. Restricted to
+  // Admin/Principal (see isManagementUser() gating the button itself, and
+  // handleDeleteDuplicateStudents enforcing the same rule server-side).
+  async function deleteAllDuplicates(){
+    const groups = {};
+    students.forEach(s => {
+      const key = ((s.firstName||'').trim() + ' ' + (s.lastName||'').trim()).trim().toLowerCase();
+      if(!key) return;
+      groups[key] = groups[key] || [];
+      groups[key].push(s);
+    });
+    const dupGroups = Object.values(groups).filter(g => g.length > 1);
+    const extraCount = dupGroups.reduce((n,g) => n + g.length - 1, 0);
+    if(!extraCount){ showToast('No duplicates to delete.'); return; }
+    const preview = dupGroups.slice(0,8).map(g => `${g[0].firstName} ${g[0].lastName} (${g.length} records)`).join('\n');
+    const more = dupGroups.length > 8 ? `\n…and ${dupGroups.length - 8} more name(s).` : '';
+    const msg = `Delete ${extraCount} duplicate record(s) across ${dupGroups.length} name(s) in one step, keeping only the original (earliest-added) entry for each name?\n\nThis skips the usual 3-step deletion approval — it applies only to these flagged duplicates. Removed records go to Recently Deleted and can be restored.\n\n${preview}${more}`;
+    if(!await showConfirmDialog(msg, { title:'Delete all duplicate students?', okText:'Delete Duplicates' })) return;
+    try{
+      const res = await throwIfNotOk(await fetch('/api/students?action=delete-duplicates', { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()} }));
+      const result = await res.json();
+      await loadStudents();
+      renderDuplicatesModal();
+      showToast(`Deleted ${result.deletedCount} duplicate record(s) — kept the original in each case.`);
+    }catch(e){
+      if(e.message !== 'SESSION_EXPIRED') showToast('Could not delete duplicates (' + e.message + ').');
     }
   }
 
