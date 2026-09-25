@@ -1907,8 +1907,14 @@ async function handleExamDefs(req, res) {
     const rows = await sql`SELECT * FROM exam_defs ORDER BY created_at ASC`;
     return res.status(200).json(rows.map(r => ({
       id: r.id, name: r.name, examType: r.exam_type,
-      startDate: r.start_date ? r.start_date.toISOString().slice(0, 10) : '',
-      endDate: r.end_date ? r.end_date.toISOString().slice(0, 10) : '',
+      // start_date/end_date are TEXT columns (see ensureSchema above), so MySQL
+      // always hands them back as plain strings already — unlike the sessions/
+      // attendance code elsewhere that reads real DATETIME columns and gets a
+      // JS Date back. Calling .toISOString() unconditionally on a string blew
+      // up with "r.start_date.toISOString is not a function" on every GET.
+      // Handle both shapes defensively instead of assuming one.
+      startDate: r.start_date ? (r.start_date instanceof Date ? r.start_date.toISOString().slice(0, 10) : String(r.start_date).slice(0, 10)) : '',
+      endDate: r.end_date ? (r.end_date instanceof Date ? r.end_date.toISOString().slice(0, 10) : String(r.end_date).slice(0, 10)) : '',
       classSubjects: r.class_subjects || {},
     })));
   }
