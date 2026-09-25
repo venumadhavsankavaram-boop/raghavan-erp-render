@@ -1339,7 +1339,17 @@ function notifyAfterResourceWrite(resourceName, body) {
 async function handleSimple(req, res, config, resourceName) {
   const { table, fields } = config;
   if (req.method === 'GET') {
-    const rows = await sql.query(`SELECT * FROM ${table} ORDER BY created_at ASC`);
+    // FORCE INDEX: an index on created_at existing is not enough — for an
+    // unfiltered SELECT * across the whole table, MySQL's optimizer will
+    // often choose a full table scan + filesort over walking the secondary
+    // index (it estimates that's cheaper when reading ~all rows), silently
+    // ignoring the index entirely. That filesort has to buffer full row
+    // width, which is what actually overflows the sort buffer on wide rows
+    // (base64 photos etc.) — confirmed live: the idx_*_created_at indexes
+    // added above did NOT stop ER_OUT_OF_SORTMEMORY on their own. Forcing
+    // the index makes MySQL read rows already in created_at order straight
+    // off the index, so no filesort — and no sort buffer — is ever needed.
+    const rows = await sql.query(`SELECT * FROM ${table} FORCE INDEX (idx_${table}_created_at) ORDER BY created_at ASC`);
     return res.status(200).json(rows.map(r => simpleToAppShape(r, fields)));
   }
   if (req.method === 'POST' || req.method === 'PUT') {
@@ -1391,8 +1401,13 @@ async function handleUsers(req, res) {
       return res.status(403).json({ error: 'Admin access required.' });
     }
     if (trashMode) await purgeExpiredTrash();
+    // FORCE INDEX — see the comment in handleSimple's GET above: an index
+    // existing doesn't stop MySQL's optimizer from ignoring it for a
+    // near-full-table scan, which is exactly what left `users.photo` (base64
+    // image data, same shape as the staff bug) still at risk after just
+    // adding the index.
     const rows = await sql.query(
-      `SELECT * FROM ${table} WHERE deleted_at IS ${trashMode ? 'NOT NULL' : 'NULL'} ORDER BY created_at ASC`
+      `SELECT * FROM ${table} FORCE INDEX (idx_${table}_created_at) WHERE deleted_at IS ${trashMode ? 'NOT NULL' : 'NULL'} ORDER BY created_at ASC`
     );
     return res.status(200).json(rows.map(r => {
       const shaped = simpleToAppShape(r, fields);
@@ -1508,7 +1523,14 @@ async function handleHybrid(req, res, config) {
     }
     if (trashMode) await purgeExpiredTrash();
     const whereClause = softDelete ? `WHERE deleted_at IS ${trashMode ? 'NOT NULL' : 'NULL'}` : '';
-    const rows = await sql.query(`SELECT * FROM ${table} ${whereClause} ORDER BY created_at ASC`);
+    // FORCE INDEX — this is the exact query that crashed Staff Directory
+    // (ER_OUT_OF_SORTMEMORY). Adding idx_<table>_created_at alone did not
+    // fix it: MySQL's optimizer still chose a full table scan + filesort
+    // over the index for this near-unfiltered SELECT *, so the filesort
+    // still had to buffer full rows (base64 photos included) and blew the
+    // sort buffer exactly as before. Forcing the index makes MySQL walk it
+    // directly in created_at order — no filesort, no sort buffer, ever.
+    const rows = await sql.query(`SELECT * FROM ${table} FORCE INDEX (idx_${table}_created_at) ${whereClause} ORDER BY created_at ASC`);
     return res.status(200).json(rows.map(r => {
       const shaped = hybridToAppShape(r, core);
       // Recently Deleted needs to show when this was deleted and when it
@@ -1898,7 +1920,7 @@ async function handleCertificates(req, res) {
 // ---------- Custom per-resource handlers ----------
 async function handleSubjects(req, res) {
   if (req.method === 'GET') {
-    const rows = await sql`SELECT * FROM subjects ORDER BY created_at ASC`;
+    const rows = await sql`SELECT * FROM subjects FORCE INDEX (idx_subjects_created_at) ORDER BY created_at ASC`;
     return res.status(200).json(rows.map(r => ({
       id: r.id, name: r.name, code: r.code || '', className: r.class_name,
       sections: r.sections || [], sectionStaff: r.section_staff || {}, staffIds: r.staff_ids || [],
@@ -1938,7 +1960,7 @@ async function handleSubjects(req, res) {
 
 async function handleExamDefs(req, res) {
   if (req.method === 'GET') {
-    const rows = await sql`SELECT * FROM exam_defs ORDER BY created_at ASC`;
+    const rows = await sql`SELECT * FROM exam_defs FORCE INDEX (idx_exam_defs_created_at) ORDER BY created_at ASC`;
     return res.status(200).json(rows.map(r => ({
       id: r.id, name: r.name, examType: r.exam_type,
       // start_date/end_date are TEXT columns (see ensureSchema above), so MySQL
@@ -1982,7 +2004,7 @@ async function handleExamDefs(req, res) {
 
 async function handleRoles(req, res) {
   if (req.method === 'GET') {
-    const rows = await sql`SELECT * FROM custom_roles ORDER BY created_at ASC`;
+    const rows = await sql`SELECT * FROM custom_roles FORCE INDEX (idx_custom_roles_created_at) ORDER BY created_at ASC`;
     return res.status(200).json(rows.map(r => ({ id: r.id, name: r.name, permissions: r.permissions })));
   }
   if (req.method === 'POST') {
@@ -2811,7 +2833,7 @@ app.get('/api/vendor/admission-inquiries', async (req, res) => {
     if (!process.env.VENDOR_API_KEY || !key || key !== process.env.VENDOR_API_KEY) {
       return res.status(401).json({ error: 'Invalid or missing vendor API key.' });
     }
-    const rows = await sql`SELECT * FROM admission_inquiries ORDER BY created_at DESC LIMIT 500`;
+    const rows = await sql`SELECT * FROM admission_inquiries FORCE INDEX (idx_admission_inquiries_created_at) ORDER BY created_at DESC LIMIT 500`;
     return res.status(200).json(rows.map(r => ({
       id: r.id,
       parentName: r.parent_name,
@@ -3185,7 +3207,7 @@ app.get('/api/concerns/inbox', async (req, res) => {
     // unnoticed. Every other staff role still only sees what's addressed to
     // their own staff record.
     if (isManagement) {
-      const rows = await sql`SELECT * FROM student_concerns ORDER BY created_at ASC`;
+      const rows = await sql`SELECT * FROM student_concerns FORCE INDEX (idx_student_concerns_created_at) ORDER BY created_at ASC`;
       return res.status(200).json(rows.map(shapeConcern));
     }
     const myStaff = await getMyStaffRow(req.authUser.id);
@@ -3320,7 +3342,7 @@ app.get('/api/submissions/inbox', async (req, res) => {
     // every submission, not just ones sent to Management, so a teacher
     // ignoring submitted work doesn't go unnoticed.
     if (isManagement) {
-      const rows = await sql`SELECT * FROM student_submissions ORDER BY created_at ASC`;
+      const rows = await sql`SELECT * FROM student_submissions FORCE INDEX (idx_student_submissions_created_at) ORDER BY created_at ASC`;
       return res.status(200).json(rows.map(shapeSubmission));
     }
     const myStaff = await getMyStaffRow(req.authUser.id);
@@ -3512,7 +3534,7 @@ app.post('/api/admin/neon-import', async (req, res) => {
 // mining).
 app.get('/api/audit-log', async (req, res) => {
   try {
-    const rows = await sql`SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 500`;
+    const rows = await sql`SELECT * FROM audit_log FORCE INDEX (idx_audit_log_created_at) ORDER BY created_at DESC LIMIT 500`;
     return res.status(200).json(rows);
   } catch (err) {
     console.error('audit-log fetch error:', err);
@@ -3703,7 +3725,7 @@ app.all('/api/:resource', async (req, res) => {
           scope.subjectSections.some(ss => ss.subject === subject && ss.className === className && ss.section === section);
         if (req.method === 'GET') {
           if (!scope.subjectSections.length) return res.status(200).json([]);
-          const allRows = await sql`SELECT * FROM exam_results ORDER BY created_at ASC`;
+          const allRows = await sql`SELECT * FROM exam_results FORCE INDEX (idx_exam_results_created_at) ORDER BY created_at ASC`;
           const studentIds = [...new Set(allRows.map(r => r.student_id))];
           const classMap = await studentClassMap(studentIds);
           const filtered = allRows.filter(r => {
@@ -3744,7 +3766,7 @@ app.all('/api/:resource', async (req, res) => {
     // own record still comes back in full (their own data, nothing to
     // protect it from).
     if (req.method === 'GET' && resource === 'staff' && req.authUser && req.authUser.role === 'Teacher') {
-      const rows = await sql`SELECT * FROM staff ORDER BY created_at ASC`;
+      const rows = await sql`SELECT * FROM staff FORCE INDEX (idx_staff_created_at) ORDER BY created_at ASC`;
       return res.status(200).json(rows.map(r => {
         const shapedCore = {};
         HYBRID_RESOURCES.staff.core.forEach(f => { shapedCore[f.app] = r[f.col]; });
