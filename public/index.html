@@ -1330,6 +1330,7 @@
         <select id="statusFilter" onchange="onStatusFilterChange()">
           <option value="Active" selected>Active</option>
           <option value="Inactive">Inactive</option>
+          <option value="Transferred">Transferred</option>
           <option value="all">All</option>
         </select>
         <div class="dropdown-wrap">
@@ -1506,12 +1507,13 @@
       <div class="topbar">
         <div>
           <h1>Promotion &amp; Transfer</h1>
-          <p>Move students to their next class, skip a grade for exceptional students, or record a transfer out.</p>
+          <p>Move students to their next class, skip a grade for exceptional students, move a student to a different section in the same class, or record a transfer out (a student leaving the school entirely).</p>
         </div>
       </div>
       <div class="mf-tabs">
         <button type="button" class="mf-tab active" id="pttab-promote" onclick="switchPromoTransferTab('promote')">Promote Students</button>
-        <button type="button" class="mf-tab" id="pttab-transfer" onclick="switchPromoTransferTab('transfer')">Transfer Students</button>
+        <button type="button" class="mf-tab" id="pttab-section" onclick="switchPromoTransferTab('section')">Change Section</button>
+        <button type="button" class="mf-tab" id="pttab-transfer" onclick="switchPromoTransferTab('transfer')" title="For a student leaving the school entirely — not for moving them to a different section">Transfer Students (Leaving School)</button>
         <button type="button" class="mf-tab" id="pttab-approvals" onclick="switchPromoTransferTab('approvals')">Approvals</button>
       </div>
       <div id="promoTransferBody"></div>
@@ -3042,6 +3044,7 @@
     { key:'syllabus_homework', label:'Homework',         icon:'📝', category:'Academics', parent:'syllabus', isNew:true },
     { key:'promotransfer', label:'Promotion & Transfer', icon:'🔀', category:'Academics' },
     { key:'promo_promote',  label:'Promote Students',  icon:'⬆️', category:'Academics', parent:'promotransfer', isNew:true },
+    { key:'promo_section', label:'Change Section', icon:'🔀', category:'Academics', parent:'promotransfer', isNew:true },
     { key:'promo_transfer', label:'Transfer Students', icon:'🔁', category:'Academics', parent:'promotransfer', isNew:true },
     { key:'promo_approvals', label:'Approve Requests', icon:'✅', category:'Academics', parent:'promotransfer', isNew:true },
 
@@ -3266,7 +3269,7 @@
   function getTimetableTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'timetable', action); }
   const SYLLABUS_SUBMODULE_KEYS = ['syllabus_tracker','syllabus_homework'];
   function getSyllabusTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'syllabus', action); }
-  const PROMOTRANSFER_SUBMODULE_KEYS = ['promo_promote','promo_transfer','promo_approvals'];
+  const PROMOTRANSFER_SUBMODULE_KEYS = ['promo_promote','promo_section','promo_transfer','promo_approvals'];
   function getPromoTransferTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'promotransfer', action); }
   const COMMS_SUBMODULE_KEYS = ['comms_compose','comms_log'];
   function getCommsTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'announcements', action); }
@@ -19191,7 +19194,7 @@
   }
   let promoTransferTab = 'promote';
   let ptClass = '', ptView = 'grid';
-  const PT_TAB_PERM_KEYS = { promote:'promo_promote', transfer:'promo_transfer', approvals:'promo_approvals' };
+  const PT_TAB_PERM_KEYS = { promote:'promo_promote', section:'promo_section', transfer:'promo_transfer', approvals:'promo_approvals' };
   function initPromoTransferView(){
     const accessibleTabs = Object.keys(PT_TAB_PERM_KEYS).filter(t => getPromoTransferTabAccess(currentUser.role, PT_TAB_PERM_KEYS[t]));
     Object.keys(PT_TAB_PERM_KEYS).forEach(t => { const btn = document.getElementById('pttab-'+t); if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none'; });
@@ -19200,7 +19203,7 @@
   }
   function switchPromoTransferTab(tab){
     promoTransferTab = tab;
-    ['promote','transfer','approvals'].forEach(t => { const btn = document.getElementById('pttab-'+t); if(btn) btn.classList.toggle('active', t===tab); });
+    ['promote','section','transfer','approvals'].forEach(t => { const btn = document.getElementById('pttab-'+t); if(btn) btn.classList.toggle('active', t===tab); });
     ptView = 'grid';
     renderPromoTransferBody();
   }
@@ -19286,6 +19289,35 @@
           ${list.length===0 ? `<div class="empty-state"><b>No active students in this class</b></div>` : ``}
         </div>
         ${canSub('promo_promote','promotransfer','edit') ? `<button class="btn btn-primary" style="margin-top:16px;" onclick="applyPromotions()">${isAdmin ? 'Promote Selected Students' : 'Submit for Admin Approval'}</button>` : ''}
+      `;
+    }else if(promoTransferTab === 'section'){
+      // Moving a student to a different section WITHIN the same class — e.g.
+      // 1st Class Section A -> 1st Class Section B. This only ever changes
+      // `section`; it never touches status, so a student moved here stays
+      // exactly as visible/active as before. Deliberately separate from the
+      // "Transfer Students" tab below, which is for a student leaving the
+      // school entirely (sets status to Transferred) — the two were easy to
+      // confuse when this was the only "transfer"-labeled option available.
+      body.innerHTML = `
+        <div class="breadcrumb"><a onclick="backToPTGrid()">All Classes</a> &nbsp;/&nbsp; ${ptClass}</div>
+        <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:14px; max-width:680px;">Select students and pick their new section. This only moves them within ${ptClass} — it does not affect their status, fees, or any other record. To record a student leaving the school entirely, use "Transfer Students (Leaving School)" instead.</p>
+        ${explanationBlock}
+        <div style="margin-bottom:12px;"><button class="btn btn-ghost btn-sm" onclick="ptSelectAll(true)">Select All</button> <button class="btn btn-ghost btn-sm" onclick="ptSelectAll(false)">Clear</button></div>
+        <div class="table-wrap">
+          <table><thead><tr><th></th><th>Student</th><th>Current Section</th><th>New Section</th></tr></thead>
+          <tbody>
+          ${list.map(s => `<tr>
+            <td><input type="checkbox" class="pt-student-check" value="${s.id}"></td>
+            <td class="name-cell">${s.firstName} ${s.lastName}</td>
+            <td><span class="pill">${s.section}</span></td>
+            <td><select class="pt-target-section" data-student="${s.id}">
+              ${SECTIONS.map(sec => `<option value="${sec}" ${sec===s.section?'selected':''}>${sec}</option>`).join('')}
+            </select></td>
+          </tr>`).join('')}
+          </tbody></table>
+          ${list.length===0 ? `<div class="empty-state"><b>No active students in this class</b></div>` : ``}
+        </div>
+        ${canSub('promo_section','promotransfer','edit') ? `<button class="btn btn-primary" style="margin-top:16px;" onclick="applyChangeSection()">${isAdmin ? 'Change Section for Selected Students' : 'Submit for Admin Approval'}</button>` : ''}
       `;
     }else{
       body.innerHTML = `
@@ -19402,17 +19434,63 @@
     renderPromoTransferBody();
   }
 
+  // Moving a student between sections within the same class — see the
+  // "Change Section" tab's own comment above for why this exists
+  // separately from Promote (changes class) and Transfer (marks a student
+  // as having left the school). Only ever changes `section`; status,
+  // admission number, fees and every other field are untouched.
+  async function applyChangeSection(){
+    const selected = Array.from(document.querySelectorAll('.pt-student-check:checked')).map(c => c.value);
+    if(selected.length === 0){ showToast('Select at least one student.'); return; }
+    const changes = selected.map(id => {
+      const sel = document.querySelector(`.pt-target-section[data-student="${id}"]`);
+      return { studentId:id, target: sel ? sel.value : '' };
+    }).filter(c => {
+      const s = students.find(x => x.id === c.studentId);
+      return s && c.target && c.target !== s.section;
+    });
+    if(changes.length === 0){ showToast('Pick a different section for at least one selected student.'); return; }
+
+    if(currentUser.role !== 'Admin'){
+      const explanation = document.getElementById('ptExplanation').value.trim();
+      if(!explanation){ showToast('Enter an explanation before submitting for approval.'); return; }
+      if(!await showConfirmDialog(`Submit this section change for ${changes.length} student(s) to Admin for approval?`)) return;
+      pendingApprovals.push({
+        id: 'appr_'+Date.now(), type:'section', requestedBy: currentUser.name, requestedByRole: currentUser.role,
+        requestDate: new Date().toISOString().slice(0,10), explanation, payload: { changes }, status:'Pending',
+      });
+      await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
+      renderPromoTransferBody();
+      showToast('Submitted for Admin approval.');
+      return;
+    }
+
+    if(!await showConfirmDialog(`Move ${changes.length} student(s) to their selected section? This only changes their section — nothing else about their record is affected.`)) return;
+    await executeChangeSection(changes);
+    showToast(`${changes.length} student(s) moved to their new section.`);
+  }
+  async function executeChangeSection(changes){
+    changes.forEach(({ studentId, target }) => {
+      const s = students.find(x => x.id === studentId);
+      if(!s) return;
+      s.section = target;
+    });
+    await persist();
+    renderDashboard();
+    renderPromoTransferBody();
+  }
+
   /* --- Approvals: promotions/transfers submitted by non-Admin roles await Admin sign-off --- */
   function renderApprovalsTab(body){
     const isAdmin = currentUser.role === 'Admin';
     const list = pendingApprovals.slice().sort((a,b) => b.id.localeCompare(a.id));
     body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">Promotions and transfers submitted by non-Admin roles land here first — nothing is applied until Admin approves it.</p>
+      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">Promotions, section changes, and transfers submitted by non-Admin roles land here first — nothing is applied until Admin approves it.</p>
       <div class="table-wrap">
         <table><thead><tr><th>Type</th><th>Requested By</th><th>Date</th><th>Explanation</th><th>Details</th><th>Status</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
         <tbody>
         ${list.map(a => `<tr>
-          <td>${a.type==='promote' ? 'Promotion' : 'Transfer'}</td>
+          <td>${a.type==='promote' ? 'Promotion' : a.type==='section' ? 'Change Section' : 'Transfer'}</td>
           <td>${a.requestedBy} <span class="pill" style="font-size:0.62rem;">${a.requestedByRole}</span></td>
           <td>${a.requestDate}</td>
           <td style="max-width:220px;">${a.explanation}</td>
@@ -19429,6 +19507,9 @@
     if(a.type === 'promote'){
       return a.payload.map(p => { const s = students.find(x=>x.id===p.studentId); return s ? `${s.firstName} ${s.lastName} → ${p.target==='__graduate__'?'Graduate':p.target}` : ''; }).filter(Boolean).join(', ');
     }
+    if(a.type === 'section'){
+      return a.payload.changes.map(c => { const s = students.find(x=>x.id===c.studentId); return s ? `${s.firstName} ${s.lastName} → Section ${c.target}` : ''; }).filter(Boolean).join(', ');
+    }
     const names = a.payload.studentIds.map(id => { const s = students.find(x=>x.id===id); return s ? s.firstName+' '+s.lastName : ''; }).filter(Boolean).join(', ');
     return names + (a.payload.reason ? ' — '+a.payload.reason : '');
   }
@@ -19437,6 +19518,7 @@
     if(!a) return;
     if(!await showConfirmDialog('Approve this request? It will be applied immediately.')) return;
     if(a.type === 'promote') await executePromotions(a.payload);
+    else if(a.type === 'section') await executeChangeSection(a.payload.changes);
     else await executeTransfers(a.payload.studentIds, a.payload.date, a.payload.reason);
     a.status = 'Approved';
     await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
