@@ -12905,6 +12905,37 @@
       emergencyName: g('stfEmergencyName').trim(), emergencyPhone: g('stfEmergencyPhone').trim(),
       photo: staffPhotoData, signature: staffSignatureData, jobTypes,
     };
+    if(!editId){
+      // Duplicate check on add only (never blocks editing an existing record).
+      // Aadhaar match is a strong signal on its own; otherwise fall back to
+      // same name (+ same DOB, when both records have one). Hard-blocks by
+      // default; only Admin gets an explicit "force add" override.
+      const aadharDup = data.aadhar ? staffList.find(s => (s.aadhar||'').trim() && (s.aadhar||'').trim() === data.aadhar.trim()) : null;
+      const nameDup = staffList.find(s =>
+        (s.firstName||'').trim().toLowerCase() === data.firstName.toLowerCase() &&
+        (s.lastName||'').trim().toLowerCase() === data.lastName.toLowerCase() &&
+        (!data.dob || !s.dob || s.dob === data.dob)
+      );
+      const dup = aadharDup || nameDup;
+      if(dup){
+        const reason = aadharDup
+          ? `Aadhaar ${data.aadhar} is already on file for staff member ${dup.firstName} ${dup.lastName} (Staff ID: ${dup.staffId}).`
+          : `A staff member named "${data.firstName} ${data.lastName}"${data.dob?' with the same date of birth':''} already exists (Staff ID: ${dup.staffId}${dup.department?', '+dup.department:''}).`;
+        if(currentUser.role === 'Admin'){
+          const proceed = await showConfirmDialog(
+            reason + '\n\nThis looks like a duplicate. Only continue if you have verified this is genuinely a different person.',
+            { title:'Possible duplicate staff member', okText:'Force add anyway', cancelText:'Cancel — let me check' }
+          );
+          if(!proceed) return false;
+        }else{
+          await showInfoDialog(
+            reason + '\n\nTo prevent duplicate records, this staff member was not added. If you\'re sure this is a different person, ask an Admin to add it.',
+            { title:'Duplicate staff — not added' }
+          );
+          return false;
+        }
+      }
+    }
     let staffRecord;
     if(editId){
       const idx = staffList.findIndex(x => x.id === editId);
@@ -22341,14 +22372,31 @@
       students[idx] = { ...students[idx], ...data };
       showToast('Student record updated.');
     }else{
-      const dup = findPossibleDuplicate(data.firstName, data.lastName, data.className, data.section, null);
+      // Duplicate check: Aadhaar match (if entered) is a strong signal regardless of
+      // class/section — a real person's Aadhaar can't legitimately belong to two
+      // student records. Falls back to the original same-name/class/section check.
+      // Hard-blocks by default; only Admin gets an explicit "force add" override,
+      // for genuine edge cases (e.g. twins) — see saveWizard's duplicate-check note.
+      const aadharDup = data.aadhar ? students.find(s => (s.aadhar||'').trim() && (s.aadhar||'').trim() === data.aadhar.trim()) : null;
+      const nameDup = findPossibleDuplicate(data.firstName, data.lastName, data.className, data.section, null);
+      const dup = aadharDup || nameDup;
       if(dup){
-        const proceed = await showConfirmDialog(
-          `A student named "${data.firstName} ${data.lastName}" already exists in ${data.className} — Section ${data.section} ` +
-          `(Admission No: ${dup.admissionNo}${dup.fatherName ? ', Father: '+dup.fatherName : ''}).\n\n` +
-          `Add this as a separate/new record anyway? Click Cancel to stop and check the existing record instead.`
-        );
-        if(!proceed) return false;
+        const reason = aadharDup
+          ? `Aadhaar ${data.aadhar} is already on file for ${dup.firstName} ${dup.lastName} (Admission No: ${dup.admissionNo}, ${dup.className} — Section ${dup.section}).`
+          : `A student named "${data.firstName} ${data.lastName}" already exists in ${data.className} — Section ${data.section} (Admission No: ${dup.admissionNo}${dup.fatherName ? ', Father: '+dup.fatherName : ''}).`;
+        if(currentUser.role === 'Admin'){
+          const proceed = await showConfirmDialog(
+            reason + '\n\nThis looks like a duplicate. Only continue if you have verified this is genuinely a different student (e.g. twins).',
+            { title:'Possible duplicate student', okText:'Force add anyway', cancelText:'Cancel — let me check' }
+          );
+          if(!proceed) return false;
+        }else{
+          await showInfoDialog(
+            reason + '\n\nTo prevent duplicate records, this student was not added. If you\'re sure this is a different student, ask an Admin to add it.',
+            { title:'Duplicate student — not added' }
+          );
+          return false;
+        }
       }
       data.id = 'stu_' + Date.now();
       data.admissionNo = nextAdmissionNo();
