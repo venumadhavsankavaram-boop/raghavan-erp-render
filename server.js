@@ -522,6 +522,19 @@ async function ensureSchema() {
   await createIndexIfMissing('idx_staff_payroll_staff_id', 'staff_payroll', 'staff_id');
   await createIndexIfMissing('idx_admission_inquiries_status', 'admission_inquiries', 'status');
   await createIndexIfMissing('idx_website_gallery_category', 'website_gallery', 'category');
+  // handleHybrid's GET does `SELECT * FROM <table> ORDER BY created_at ASC`
+  // for every HYBRID_RESOURCES table — fine for small rows, but staff and
+  // students each carry a photo/signature as base64 text inside their
+  // `extra` JSON column, and without an index MySQL has to filesort the
+  // ENTIRE result set (images included) to satisfy that ORDER BY. On
+  // GoDaddy's shared MySQL that overflows the sort buffer outright
+  // (ER_OUT_OF_SORTMEMORY, errno 1038) once enough staff/students have a
+  // photo attached — confirmed live via the app logs on 2026-09-25, which
+  // silently broke the Staff Directory for every user. An index here lets
+  // MySQL read rows already in order instead of sorting them in memory, so
+  // this can never happen regardless of how large `extra` gets.
+  await createIndexIfMissing('idx_staff_created_at', 'staff', 'created_at');
+  await createIndexIfMissing('idx_students_created_at', 'students', 'created_at');
   await createIndexIfMissing('idx_audit_log_created_at', 'audit_log', 'created_at DESC');
   await createIndexIfMissing('idx_audit_log_resource', 'audit_log', 'resource');
   await createIndexIfMissing('idx_sessions_expires_at', 'sessions', 'expires_at');
