@@ -2826,6 +2826,13 @@
   // database, not this browser's local storage. Kept only because a few legacy
   // fallback branches still check it if the server is briefly unreachable.
   const storageAvailable = (typeof window.storage !== 'undefined' && window.storage !== null);
+  // Real, live connectivity flag — unlike storageAvailable above (which is
+  // always false in production and never reflects anything real), this one
+  // actually flips based on whether the most recent OBJECT_BACKED_KEYS /
+  // API_BACKED_KEYS fetch to the server succeeded or fell back to this
+  // device's localStorage copy. Drives the dashboard banner (see
+  // renderDashboard) so it only warns when there's a genuine problem.
+  let usingLocalFallback = false;
   let students = [];
 
   function showToast(msg){
@@ -3992,9 +3999,11 @@
       }
       _apiLastSynced[key] = JSON.parse(JSON.stringify(newArray));
       localStorage.setItem(key, JSON.stringify(newArray)); // local fallback copy
+      usingLocalFallback = false;
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
       localStorage.setItem(key, JSON.stringify(newArray));
+      if(e.message !== 'SESSION_EXPIRED') usingLocalFallback = true;
     }
   }
   async function storageGet(key, fallback){
@@ -4003,8 +4012,10 @@
         const res = await fetch(OBJECT_BACKED_KEYS[key]);
         if(!res.ok) throw new Error('bad response');
         const data = await res.json();
+        usingLocalFallback = false;
         return (data && Object.keys(data).length) ? data : fallback;
       }catch(e){
+        usingLocalFallback = true;
         const raw = localStorage.getItem(key);
         return raw ? JSON.parse(raw) : fallback;
       }
@@ -4015,8 +4026,10 @@
         if(!res.ok) throw new Error('bad response');
         const data = await res.json();
         _apiLastSynced[key] = JSON.parse(JSON.stringify(data));
+        usingLocalFallback = false;
         return data.length ? data : fallback;
       }catch(e){
+        usingLocalFallback = true;
         const raw = localStorage.getItem(key);
         return raw ? JSON.parse(raw) : fallback;
       }
@@ -4036,9 +4049,11 @@
       try{
         await throwIfNotOk(await fetch(OBJECT_BACKED_KEYS[key], { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(value) }));
         localStorage.setItem(key, JSON.stringify(value));
+        usingLocalFallback = false;
       }catch(e){
         if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
         localStorage.setItem(key, JSON.stringify(value));
+        if(e.message !== 'SESSION_EXPIRED') usingLocalFallback = true;
       }
       return;
     }
@@ -4729,9 +4744,9 @@
       </div>
     `;
 
-    if(!storageAvailable){
+    if(usingLocalFallback){
       document.getElementById('dashBanner').innerHTML =
-        '<div style="background:#FFF3E0; border:1.5px solid #E8C874; color:#8a6a1f; padding:12px 18px; border-radius:12px; font-size:0.83rem; margin-bottom:22px;">⚠ Running outside the Claude.ai storage environment — using this browser\'s local storage instead. Figures below are real, computed from data saved on this device only.</div>';
+        '<div style="background:#FFF3E0; border:1.5px solid #E8C874; color:#8a6a1f; padding:12px 18px; border-radius:12px; font-size:0.83rem; margin-bottom:22px;">⚠ Could not reach the server on the last request — some figures below may be a locally cached copy from this device, not the live database. Refresh the page; if this keeps happening, check your internet connection or contact support.</div>';
     }
     animateCountUp(document.querySelector('.sh-num'), totalActive);
     renderCasteBody();
