@@ -42,6 +42,24 @@
     }
     tryLoad(0);
   });
+  // Lazy-loaded the same way as XLSX above — only needed on the one screen
+  // that plays the uploaded "Loading" animation, so it stays out of the way
+  // of everything else's startup time.
+  window.__lottieReady = new Promise((resolve) => {
+    const urls = [
+      'https://cdn.jsdelivr.net/npm/lottie-web@5.12.2/build/player/lottie.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js'
+    ];
+    function tryLoad(i){
+      if(i >= urls.length){ resolve(false); return; }
+      const s = document.createElement('script');
+      s.src = urls[i];
+      s.onload = () => resolve(true);
+      s.onerror = () => tryLoad(i+1);
+      document.head.appendChild(s);
+    }
+    tryLoad(0);
+  });
 </script>
 <style>
   :root{
@@ -1065,6 +1083,59 @@
   .trend-value-label{font-size:10px; fill:var(--navy); font-weight:600; font-family:'Poppins',sans-serif;}
   .trend-dot{transition:r .15s ease;}
   .trend-empty{font-size:0.82rem; color:var(--ink-soft); text-align:center; padding:30px 0;}
+
+  /* ============================================================
+     Motion kit v2 — 5 specific picks, wired only where noted below.
+     Prefixed mo- so nothing here collides with existing classes.
+  ============================================================ */
+  /* --- toast icon: success burst ring (payments, certificates) --- */
+  .toast.show{display:flex; align-items:center; gap:10px;}
+  .mo-burst-icon{width:26px; height:26px; flex:none; display:inline-flex;}
+  .mo-burst{width:100%; height:100%;}
+  .mo-burst-rays line{stroke:#38C285; stroke-width:6; stroke-linecap:round; opacity:0; transform-box:view-box; transform-origin:40px 40px;}
+  .mo-burst.run .mo-burst-rays line{animation:moBurstRay .5s .1s cubic-bezier(.3,1.7,.4,1) forwards;}
+  @keyframes moBurstRay{ 0%{opacity:0; transform:scale(.6);} 40%{opacity:1; transform:scale(1);} 100%{opacity:0; transform:scale(1.4);} }
+  .mo-burst-circle{fill:#1E8E5A; opacity:0; transform-box:view-box; transform-origin:40px 40px; transform:scale(.3);}
+  .mo-burst.run .mo-burst-circle{animation:moBurstCircle .3s cubic-bezier(.3,1.7,.4,1) forwards;}
+  @keyframes moBurstCircle{ to{opacity:1; transform:scale(1);} }
+  .mo-burst-check{fill:none; stroke:#fff; stroke-width:7; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:34; stroke-dashoffset:34;}
+  .mo-burst.run .mo-burst-check{animation:moBurstCheck .3s .22s ease forwards;}
+  @keyframes moBurstCheck{ to{stroke-dashoffset:0;} }
+
+  /* --- toast icon: progress ring draws, then checks (marks import) --- */
+  .mo-ringdraw{width:100%; height:100%; transform:rotate(-90deg);}
+  .mo-ringdraw-track{fill:none; stroke:rgba(255,255,255,.3); stroke-width:6;}
+  .mo-ringdraw-prog{fill:none; stroke:#38C285; stroke-width:6; stroke-linecap:round; stroke-dasharray:195; stroke-dashoffset:195;}
+  .mo-burst.run .mo-ringdraw-prog{animation:moRingFill .5s cubic-bezier(.3,.6,.3,1) forwards;}
+  @keyframes moRingFill{ to{stroke-dashoffset:0;} }
+  .mo-ringdraw-check{fill:none; stroke:#fff; stroke-width:6; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:34; stroke-dashoffset:34; transform-box:view-box; transform-origin:36px 36px; transform:rotate(90deg);}
+  .mo-burst.run .mo-ringdraw-check{animation:moRingCheck .3s .45s ease forwards;}
+  @keyframes moRingCheck{ to{stroke-dashoffset:0;} }
+
+  /* --- floating panel: determinate progress + live count (bulk import wizard) --- */
+  .mo-import-progress{
+    position:fixed; left:50%; bottom:26px; transform:translateX(-50%); z-index:65;
+    background:var(--navy); color:#fff; border-radius:12px; padding:14px 20px; box-shadow:var(--shadow);
+    min-width:280px; font-size:.82rem;
+  }
+  .mo-ip-step{font-weight:600; margin-bottom:8px;}
+  .mo-ip-track{height:8px; border-radius:5px; background:rgba(255,255,255,.2); overflow:hidden;}
+  .mo-ip-fill{height:100%; width:0%; background:linear-gradient(90deg,#B8860B,#38C285); border-radius:5px; transition:width .15s linear;}
+  .mo-ip-meta{display:flex; justify-content:space-between; margin-top:6px; opacity:.85; font-size:.74rem;}
+
+  /* --- ambient busy: liquid morph blob (backup download) --- */
+  .mo-blob-mini{width:20px; height:20px; display:none; vertical-align:middle; margin-left:8px;}
+  .mo-blob-mini.run{display:inline-block;}
+  .mo-blob-shape{width:100%; height:100%; background:linear-gradient(135deg,#B8860B,#1E8E5A); border-radius:42% 58% 63% 37% / 41% 44% 56% 59%; animation:moBlobMorph 1.6s ease-in-out infinite;}
+  @keyframes moBlobMorph{
+    0%{border-radius:42% 58% 63% 37% / 41% 44% 56% 59%; transform:rotate(0deg) scale(1);}
+    33%{border-radius:63% 37% 41% 59% / 51% 62% 38% 49%; transform:rotate(8deg) scale(1.05);}
+    66%{border-radius:37% 63% 56% 44% / 63% 39% 61% 37%; transform:rotate(-6deg) scale(.96);}
+    100%{border-radius:42% 58% 63% 37% / 41% 44% 56% 59%; transform:rotate(0deg) scale(1);}
+  }
+
+  /* --- data loading: your uploaded Lottie animation --- */
+  .mo-lottie-mini{width:46px; height:46px; margin:0 auto 4px;}
 
 </style>
 <script>
@@ -2885,9 +2956,51 @@
 
   let students = [];
 
-  function showToast(msg){
+  // Your uploaded "Loading" Lottie file, inlined so the page stays a single
+  // file — played wherever a data fetch needs a real loading indicator
+  // instead of a plain "Loading…" label.
+  const MO_LOADING_JSON = {"v":"4.8.0","meta":{"g":"LottieFiles AE 1.0.0","a":"","k":"","d":"","tc":"#FFFFFF"},"fr":29.9700012207031,"ip":0,"op":31.0000012626559,"w":500,"h":500,"nm":"Loading ","ddd":0,"assets":[],"layers":[{"ddd":0,"ind":1,"ty":4,"nm":"Rectangle_1","sr":1,"ks":{"o":{"a":0,"k":100,"ix":11},"r":{"a":0,"k":135,"ix":10},"p":{"a":0,"k":[250,156.235,0],"ix":2},"a":{"a":0,"k":[-125,-107,0],"ix":1},"s":{"a":0,"k":[100,100,100],"ix":6}},"ao":0,"shapes":[{"ty":"gr","it":[{"ind":0,"ty":"sh","ix":1,"ks":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"t":0,"s":[{"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]],"v":[[57,-57],[57,57],[-57,57],[-57,-57]],"c":true}]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"t":15,"s":[{"i":[[-31.437,0],[0,-31.437],[31.437,0],[0,31.437]],"o":[[31.437,0],[0,31.437],[-31.437,0],[0,-31.437]],"v":[[0.718,-187.388],[57.64,-130.466],[0.718,-73.544],[-56.204,-130.466]],"c":true}]},{"t":30.0000012219251,"s":[{"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]],"v":[[188.6,-188.5],[188.6,-74.5],[74.6,-74.5],[74.6,-188.5]],"c":true}]}],"ix":2},"nm":"Path 1","mn":"ADBE Vector Shape - Group","hd":false},{"ty":"st","c":{"a":0,"k":[1,1,1,1],"ix":3},"o":{"a":0,"k":100,"ix":4},"w":{"a":0,"k":0,"ix":5},"lc":1,"lj":1,"ml":4,"bm":0,"nm":"Stroke 1","mn":"ADBE Vector Graphic - Stroke","hd":false},{"ty":"fl","c":{"a":0,"k":[0.16862745098,0,0.478431372549,1],"ix":4},"o":{"a":0,"k":100,"ix":5},"r":1,"bm":0,"nm":"Fill 1","mn":"ADBE Vector Graphic - Fill","hd":false},{"ty":"tr","p":{"a":0,"k":[-125,-107],"ix":2},"a":{"a":0,"k":[0,0],"ix":1},"s":{"a":0,"k":[100,100],"ix":3},"r":{"a":0,"k":0,"ix":6},"o":{"a":0,"k":100,"ix":7},"sk":{"a":0,"k":0,"ix":4},"sa":{"a":0,"k":0,"ix":5},"nm":"Transform"}],"nm":"Rectangle 1","np":3,"cix":2,"bm":0,"ix":1,"mn":"ADBE Vector Group","hd":false}],"ip":0,"op":90.0000036657751,"st":0,"bm":0},{"ddd":0,"ind":2,"ty":4,"nm":"Rectangle_2","sr":1,"ks":{"o":{"a":0,"k":100,"ix":11},"r":{"a":0,"k":585,"ix":10},"p":{"a":0,"k":[343,250,0],"ix":2},"a":{"a":0,"k":[-125,-107,0],"ix":1},"s":{"a":0,"k":[100,100,100],"ix":6}},"ao":0,"shapes":[{"ty":"gr","it":[{"ind":0,"ty":"sh","ix":1,"ks":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"t":0,"s":[{"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]],"v":[[57,-57],[57,57],[-57,57],[-57,-57]],"c":true}]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"t":15,"s":[{"i":[[-31.437,0],[0,-31.437],[31.437,0],[0,31.437]],"o":[[31.437,0],[0,31.437],[-31.437,0],[0,-31.437]],"v":[[0.718,-187.388],[57.64,-130.466],[0.718,-73.544],[-56.204,-130.466]],"c":true}]},{"t":30.0000012219251,"s":[{"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]],"v":[[188.6,-188.5],[188.6,-74.5],[74.6,-74.5],[74.6,-188.5]],"c":true}]}],"ix":2},"nm":"Path 1","mn":"ADBE Vector Shape - Group","hd":false},{"ty":"st","c":{"a":0,"k":[1,1,1,1],"ix":3},"o":{"a":0,"k":100,"ix":4},"w":{"a":0,"k":0,"ix":5},"lc":1,"lj":1,"ml":4,"bm":0,"nm":"Stroke 1","mn":"ADBE Vector Graphic - Stroke","hd":false},{"ty":"fl","c":{"a":0,"k":[0.26274506812,0.418869527181,1,1],"ix":4},"o":{"a":0,"k":100,"ix":5},"r":1,"bm":0,"nm":"Fill 1","mn":"ADBE Vector Graphic - Fill","hd":false},{"ty":"tr","p":{"a":0,"k":[-125,-107],"ix":2},"a":{"a":0,"k":[0,0],"ix":1},"s":{"a":0,"k":[100,100],"ix":3},"r":{"a":0,"k":0,"ix":6},"o":{"a":0,"k":100,"ix":7},"sk":{"a":0,"k":0,"ix":4},"sa":{"a":0,"k":0,"ix":5},"nm":"Transform"}],"nm":"Rectangle 1","np":3,"cix":2,"bm":0,"ix":1,"mn":"ADBE Vector Group","hd":false}],"ip":0,"op":90.0000036657751,"st":0,"bm":0},{"ddd":0,"ind":3,"ty":4,"nm":"Rectangle_3","sr":1,"ks":{"o":{"a":0,"k":100,"ix":11},"r":{"a":0,"k":315,"ix":10},"p":{"a":0,"k":[250,342.86,0],"ix":2},"a":{"a":0,"k":[-125,-107,0],"ix":1},"s":{"a":0,"k":[100,100,100],"ix":6}},"ao":0,"shapes":[{"ty":"gr","it":[{"ind":0,"ty":"sh","ix":1,"ks":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"t":0,"s":[{"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]],"v":[[57,-57],[57,57],[-57,57],[-57,-57]],"c":true}]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"t":15,"s":[{"i":[[-31.437,0],[0,-31.437],[31.437,0],[0,31.437]],"o":[[31.437,0],[0,31.437],[-31.437,0],[0,-31.437]],"v":[[0.718,-187.388],[57.64,-130.466],[0.718,-73.544],[-56.204,-130.466]],"c":true}]},{"t":30.0000012219251,"s":[{"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]],"v":[[188.6,-188.5],[188.6,-74.5],[74.6,-74.5],[74.6,-188.5]],"c":true}]}],"ix":2},"nm":"Path 1","mn":"ADBE Vector Shape - Group","hd":false},{"ty":"st","c":{"a":0,"k":[1,1,1,1],"ix":3},"o":{"a":0,"k":100,"ix":4},"w":{"a":0,"k":0,"ix":5},"lc":1,"lj":1,"ml":4,"bm":0,"nm":"Stroke 1","mn":"ADBE Vector Graphic - Stroke","hd":false},{"ty":"fl","c":{"a":0,"k":[0.16862745098,0,0.478431372549,1],"ix":4},"o":{"a":0,"k":100,"ix":5},"r":1,"bm":0,"nm":"Fill 1","mn":"ADBE Vector Graphic - Fill","hd":false},{"ty":"tr","p":{"a":0,"k":[-125,-107],"ix":2},"a":{"a":0,"k":[0,0],"ix":1},"s":{"a":0,"k":[100,100],"ix":3},"r":{"a":0,"k":0,"ix":6},"o":{"a":0,"k":100,"ix":7},"sk":{"a":0,"k":0,"ix":4},"sa":{"a":0,"k":0,"ix":5},"nm":"Transform"}],"nm":"Rectangle 1","np":3,"cix":2,"bm":0,"ix":1,"mn":"ADBE Vector Group","hd":false}],"ip":0,"op":90.0000036657751,"st":0,"bm":0},{"ddd":0,"ind":4,"ty":4,"nm":"Rectangle_4","sr":1,"ks":{"o":{"a":0,"k":100,"ix":11},"r":{"a":0,"k":45,"ix":10},"p":{"a":0,"k":[157.156,250,0],"ix":2},"a":{"a":0,"k":[-125,-107,0],"ix":1},"s":{"a":0,"k":[100,100,100],"ix":6}},"ao":0,"shapes":[{"ty":"gr","it":[{"ind":0,"ty":"sh","ix":1,"ks":{"a":1,"k":[{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"t":0,"s":[{"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]],"v":[[57,-57],[57,57],[-57,57],[-57,-57]],"c":true}]},{"i":{"x":0.667,"y":1},"o":{"x":0.333,"y":0},"t":15,"s":[{"i":[[-31.437,0],[0,-31.437],[31.437,0],[0,31.437]],"o":[[31.437,0],[0,31.437],[-31.437,0],[0,-31.437]],"v":[[0.718,-187.388],[57.64,-130.466],[0.718,-73.544],[-56.204,-130.466]],"c":true}]},{"t":30.0000012219251,"s":[{"i":[[0,0],[0,0],[0,0],[0,0]],"o":[[0,0],[0,0],[0,0],[0,0]],"v":[[188.6,-188.5],[188.6,-74.5],[74.6,-74.5],[74.6,-188.5]],"c":true}]}],"ix":2},"nm":"Path 1","mn":"ADBE Vector Shape - Group","hd":false},{"ty":"st","c":{"a":0,"k":[1,1,1,1],"ix":3},"o":{"a":0,"k":100,"ix":4},"w":{"a":0,"k":0,"ix":5},"lc":1,"lj":1,"ml":4,"bm":0,"nm":"Stroke 1","mn":"ADBE Vector Graphic - Stroke","hd":false},{"ty":"fl","c":{"a":0,"k":[0.26274506812,0.418869527181,1,1],"ix":4},"o":{"a":0,"k":100,"ix":5},"r":1,"bm":0,"nm":"Fill 1","mn":"ADBE Vector Graphic - Fill","hd":false},{"ty":"tr","p":{"a":0,"k":[-125,-107],"ix":2},"a":{"a":0,"k":[0,0],"ix":1},"s":{"a":0,"k":[100,100],"ix":3},"r":{"a":0,"k":0,"ix":6},"o":{"a":0,"k":100,"ix":7},"sk":{"a":0,"k":0,"ix":4},"sa":{"a":0,"k":0,"ix":5},"nm":"Transform"}],"nm":"Rectangle 1","np":3,"cix":2,"bm":0,"ix":1,"mn":"ADBE Vector Group","hd":false}],"ip":0,"op":90.0000036657751,"st":0,"bm":0}],"markers":[]};
+
+  // Mounts the loading animation into any not-yet-initialized .mo-lottie-mini
+  // element currently in the DOM. Safe to call after any innerHTML swap.
+  async function moMountLotties(){
+    const targets = document.querySelectorAll('.mo-lottie-mini:not([data-mo-init])');
+    if(!targets.length) return;
+    targets.forEach(el => el.setAttribute('data-mo-init', '1'));
+    if(!window.lottie){ await window.__lottieReady; }
+    if(!window.lottie) return;
+    targets.forEach(el => {
+      if(!document.body.contains(el)) return; // swapped out again before the script finished loading
+      window.lottie.loadAnimation({ container: el, renderer: 'svg', loop: true, autoplay: true, animationData: MO_LOADING_JSON });
+    });
+  }
+  function moLoadingRow(colspan){
+    return `<tr><td colspan="${colspan}"><div class="empty-state"><div class="mo-lottie-mini"></div><b>Loading…</b></div></td></tr>`;
+  }
+
+  function showToast(msg, kind){
     const t = document.getElementById('toast');
-    t.textContent = msg;
+    if(kind === 'burst' || kind === 'ringdraw'){
+      const iconSvg = kind === 'burst'
+        ? `<svg viewBox="0 0 80 80" class="mo-burst run">
+             <g class="mo-burst-rays">
+               <line x1="40" y1="4" x2="40" y2="14"></line><line x1="40" y1="66" x2="40" y2="76"></line>
+               <line x1="4" y1="40" x2="14" y2="40"></line><line x1="66" y1="40" x2="76" y2="40"></line>
+               <line x1="14.6" y1="14.6" x2="21.9" y2="21.9"></line><line x1="58.1" y1="58.1" x2="65.4" y2="65.4"></line>
+               <line x1="14.6" y1="65.4" x2="21.9" y2="58.1"></line><line x1="58.1" y1="21.9" x2="65.4" y2="14.6"></line>
+             </g>
+             <circle class="mo-burst-circle" cx="40" cy="40" r="24"></circle>
+             <path class="mo-burst-check" d="M28 41 L36 49 L53 30"></path>
+           </svg>`
+        : `<svg viewBox="0 0 72 72" class="mo-burst run">
+             <circle class="mo-ringdraw-track" cx="36" cy="36" r="31" transform="rotate(-90 36 36)"></circle>
+             <circle class="mo-ringdraw-prog" cx="36" cy="36" r="31" transform="rotate(-90 36 36)"></circle>
+             <path class="mo-ringdraw-check" d="M20 37 L30 47 L52 24"></path>
+           </svg>`;
+      t.innerHTML = `<span class="mo-burst-icon">${iconSvg}</span><span>${msg}</span>`;
+    } else {
+      t.textContent = msg;
+    }
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2200);
   }
@@ -4933,7 +5046,7 @@
     closePaymentModal();
     renderDashboard();
     if(document.getElementById('view-managefee').style.display !== 'none') renderFeeBody();
-    showToast('Payment recorded.');
+    showToast('Payment recorded.', 'burst');
     if(await showConfirmDialog('Payment recorded. Print receipt now?')){
       printReceipt(record.id);
     }
@@ -5427,7 +5540,7 @@
     await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
     renderDashboard();
     renderFeeBody();
-    showToast(entries.length + ' payment(s) recorded.');
+    showToast(entries.length + ' payment(s) recorded.', 'burst');
     if(lastId && await showConfirmDialog('Payment(s) recorded. Print receipt now?')){
       printReceipt(lastId);
     }
@@ -7706,7 +7819,7 @@
         });
         await storageSet(EXAM_RESULTS_KEY, examResults);
         renderMarksSheet(document.getElementById('examBody'));
-        showToast(`${updated} mark(s) updated from Excel.${notFound ? ' '+notFound+' row(s) had no matching Admission No.' : ''}`);
+        showToast(`${updated} mark(s) updated from Excel.${notFound ? ' '+notFound+' row(s) had no matching Admission No.' : ''}`, 'ringdraw');
       }catch(err){
         showToast('Could not read that file: ' + (err && err.message ? err.message : err));
       }
@@ -18309,7 +18422,7 @@
       <div class="profile-card" style="max-width:480px; margin-bottom:24px;">
         <h4>💾 Full Data Backup</h4>
         <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Download every record in the database — students, staff, payments, attendance, everything — as one JSON file. Keep it somewhere safe; it's a full copy of the school's data.</p>
-        <button class="btn btn-primary btn-sm" id="backupDownloadBtn" onclick="downloadFullBackup()">Download Backup</button>
+        <button class="btn btn-primary btn-sm" id="backupDownloadBtn" onclick="downloadFullBackup()">Download Backup</button><span class="mo-blob-mini" id="backupBlob"><span class="mo-blob-shape"></span></span>
       </div>
 
       <div class="profile-card" style="max-width:560px; margin-bottom:24px; border-top:4px solid #C0264B;">
@@ -18357,16 +18470,18 @@
         <button class="btn btn-ghost btn-sm" style="margin-bottom:12px;" onclick="loadAuditLogTab()">Refresh</button>
         <div class="table-wrap" style="max-height:420px; overflow-y:auto;">
           <table><thead><tr><th>When</th><th>Actor</th><th>Role</th><th>Action</th><th>Resource</th><th>Record</th></tr></thead>
-          <tbody id="auditLogTableBody"><tr><td colspan="6"><div class="empty-state"><b>Loading…</b></div></td></tr></tbody></table>
+          <tbody id="auditLogTableBody">${moLoadingRow(6)}</tbody></table>
         </div>
       </div>
     `;
+    moMountLotties();
     loadAuditLogTab();
   }
   async function loadAuditLogTab(){
     const tbody = document.getElementById('auditLogTableBody');
     if(!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><b>Loading…</b></div></td></tr>`;
+    tbody.innerHTML = moLoadingRow(6);
+    moMountLotties();
     try{
       const res = await fetch('/api/audit-log');
       await throwIfNotOk(res);
@@ -18386,9 +18501,11 @@
   }
   async function downloadFullBackup(){
     const btn = document.getElementById('backupDownloadBtn');
+    const blob2 = document.getElementById('backupBlob');
     const originalLabel = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Preparing backup…';
+    if(blob2) blob2.classList.add('run');
     try{
       const res = await fetch('/api/backup');
       await throwIfNotOk(res);
@@ -18401,12 +18518,13 @@
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      showToast('Backup downloaded.');
+      showToast('Backup downloaded.', 'burst');
     }catch(e){
       showToast('Could not generate the backup (' + e.message + ').');
     }finally{
       btn.disabled = false;
       btn.textContent = originalLabel;
+      if(blob2) blob2.classList.remove('run');
     }
   }
   // Clears demo/test records from Inventory and Accounting so a school can switch
@@ -21540,6 +21658,27 @@
     XLSX.writeFile(wb, `${slugifySchoolName()}_${importWizard.entity}_import_issues.xlsx`);
   }
 
+  function moShowImportProgress(total){
+    const panel = document.createElement('div');
+    panel.className = 'mo-import-progress';
+    panel.innerHTML = `<div class="mo-ip-step" id="moIpStep">Writing records…</div>
+      <div class="mo-ip-track"><div class="mo-ip-fill" id="moIpFill"></div></div>
+      <div class="mo-ip-meta"><span><b id="moIpCount">0</b> / ${total} records</span><span id="moIpPct">0%</span></div>`;
+    document.body.appendChild(panel);
+    return {
+      update(done, total){
+        const pct = Math.round((done/total)*100);
+        panel.querySelector('#moIpFill').style.width = pct + '%';
+        panel.querySelector('#moIpCount').textContent = done;
+        panel.querySelector('#moIpPct').textContent = pct + '%';
+      },
+      done(){
+        panel.querySelector('#moIpStep').textContent = 'Done';
+        setTimeout(() => panel.remove(), 500);
+      }
+    };
+  }
+
   async function commitImportWizard(){
     const cfg = IMPORT_FIELD_DEFS[importWizard.entity];
     const list = cfg.listRef();
@@ -21548,36 +21687,45 @@
     const proceed = await showConfirmDialog(`Import ${toCommit.length} ${cfg.label.toLowerCase()} record(s) now?`, {title:'Confirm Import'});
     if(!proceed) return;
 
+    // Determinate progress + live count: only shown for imports big enough that
+    // a per-row percentage is actually meaningful (small imports just finish).
+    const progress = toCommit.length >= 20 ? moShowImportProgress(toCommit.length) : null;
     let added = 0, updated = 0;
-    toCommit.forEach(r => {
-      if(r.existingId){
-        const existing = list.find(x => x.id === r.existingId);
-        if(existing){
-          // Patch semantics — see the big comment at the top of this section:
-          // only a field that actually had a value in this row is written;
-          // a blank cell never clears something already on file.
-          r.presentKeys.forEach(k => {
-            const f = cfg.fields.find(x => x.key === k);
-            if(f && f.isMatchKey) return;
-            existing[k] = r.fields[k];
-          });
-          if(cfg.deriveFields) cfg.deriveFields(existing);
-          updated++;
+    const CHUNK = 25;
+    for(let i = 0; i < toCommit.length; i += CHUNK){
+      toCommit.slice(i, i + CHUNK).forEach(r => {
+        if(r.existingId){
+          const existing = list.find(x => x.id === r.existingId);
+          if(existing){
+            // Patch semantics — see the big comment at the top of this section:
+            // only a field that actually had a value in this row is written;
+            // a blank cell never clears something already on file.
+            r.presentKeys.forEach(k => {
+              const f = cfg.fields.find(x => x.key === k);
+              if(f && f.isMatchKey) return;
+              existing[k] = r.fields[k];
+            });
+            if(cfg.deriveFields) cfg.deriveFields(existing);
+            updated++;
+          }
+        }else{
+          const rec = cfg.newRecordDefaults();
+          cfg.fields.forEach(f => { if(!f.isMatchKey) rec[f.key] = r.fields[f.key]; });
+          rec[cfg.matchKey] = r.fields[cfg.matchKey] || cfg.newIdValue();
+          if(cfg.deriveFields) cfg.deriveFields(rec);
+          list.push(rec);
+          added++;
         }
-      }else{
-        const rec = cfg.newRecordDefaults();
-        cfg.fields.forEach(f => { if(!f.isMatchKey) rec[f.key] = r.fields[f.key]; });
-        rec[cfg.matchKey] = r.fields[cfg.matchKey] || cfg.newIdValue();
-        if(cfg.deriveFields) cfg.deriveFields(rec);
-        list.push(rec);
-        added++;
-      }
-    });
+      });
+      if(progress) progress.update(Math.min(i + CHUNK, toCommit.length), toCommit.length);
+      if(i + CHUNK < toCommit.length) await new Promise(r => setTimeout(r, 0));
+    }
+    if(progress) progress.done();
     await cfg.afterCommit();
     const errorCount = importWizard.validated.length - toCommit.length;
     let msg = `${added} added, ${updated} updated.`;
     if(errorCount) msg += ` ${errorCount} row(s) had errors and were not imported — download the Issues Report from the previous step to see why.`;
-    showToast(msg);
+    showToast(msg, 'burst');
     closeImportWizard();
   }
 
@@ -22103,7 +22251,7 @@
       const data = await res.json();
       closeCertModal();
       printFn(s, { serialNo:data.serialNo, conduct:payload.conduct, purpose:payload.purpose, details:data.details || payload.details });
-      showToast(type + ' Certificate ' + data.serialNo + ' generated and logged.');
+      showToast(type + ' Certificate ' + data.serialNo + ' generated and logged.', 'burst');
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast('Could not generate the certificate (' + e.message + ').');
     }
