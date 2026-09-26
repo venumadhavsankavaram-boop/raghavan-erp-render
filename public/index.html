@@ -2272,6 +2272,15 @@
             <div class="f-field"><label>Date of Birth <span class="required-star">*</span></label><input type="date" id="stfDob" required></div>
             <div class="f-field"><label>Blood Group</label><select id="stfBlood"><option value="">Select blood group</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option><option>O+</option><option>O-</option></select></div>
             <div class="f-field"><label>Aadhar Number</label><input type="text" id="stfAadhar" placeholder="12-digit Aadhaar number" inputmode="numeric" maxlength="12" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12)"></div>
+            <div class="f-field">
+              <label>Caste Category</label>
+              <select id="stfCaste">
+                <option value="">Not specified</option>
+                <option>OC</option><option>BC-A</option><option>BC-B</option><option>BC-C</option>
+                <option>BC-D</option><option>BC-E</option><option>SC</option><option>ST</option>
+                <option>EWS</option><option>Other</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -4387,15 +4396,17 @@
       if(!r.date || (r.status !== 'Present' && r.status !== 'Absent')) return;
       const m = byKey[String(r.date).slice(0,7)];
       if(!m) return;
-      m.studentTotal++;
-      if(r.status === 'Present') m.studentPresent++;
+      const w = attSessionWeight(r);
+      m.studentTotal += w;
+      if(r.status === 'Present') m.studentPresent += w;
     });
     staffAttendanceRecords.forEach(r => {
       if(!r.date || (r.status !== 'Present' && r.status !== 'Absent')) return;
       const m = byKey[String(r.date).slice(0,7)];
       if(!m) return;
-      m.staffTotal++;
-      if(r.status === 'Present') m.staffPresent++;
+      const w = attSessionWeight(r);
+      m.staffTotal += w;
+      if(r.status === 'Present') m.staffPresent += w;
     });
     return months.map(m => ({
       key: m.key, label: m.label,
@@ -6168,6 +6179,16 @@
   let holidays = [];
   let attSettings = { threshold: 75, workingDays: [1,2,3,4,5,6] };
 
+  /* Twice-daily (Morning/Afternoon) attendance. A record marked before this
+     feature shipped has no `session` field at all — per school decision,
+     every % and day-count calculation treats a sessionless record as a full
+     day (both sessions), so it's given weight 2 to match the 2 rows
+     (Morning + Afternoon) a day marked under the new system produces.
+     Used identically for both student (attendanceRecords) and staff
+     (staffAttendanceRecords) — same shape, same rule. */
+  function attSessionWeight(r){ return r.session ? 1 : 2; }
+  const ATT_SESSIONS = ['Morning', 'Afternoon'];
+
   async function loadAttendance(){
     attendanceRecords = await storageGet(ATTENDANCE_KEY, []);
     holidays = await storageGet(HOLIDAYS_KEY, []);
@@ -6179,6 +6200,7 @@
   let attCurrentClass = '', attCurrentSection = '';
   let atReportsFrom = '', atReportsTo = '';
   let attMarkDate = new Date().toISOString().slice(0,10);
+  let attMarkSession = 'Morning';
   let pendingMarks = {};
 
   function initAttendanceView(){
@@ -6238,6 +6260,7 @@
   let staffAttendanceRecords = [];
   let staffAttTab = 'mark';
   let staffAttMarkDate = new Date().toISOString().slice(0,10);
+  let staffAttMarkSession = 'Morning';
   let staffPendingMarks = {};
   /* --- Biometric attendance (optional, per-school integration) ---
      Whether THIS school has a biometric device bridge set up at all — a
@@ -6345,14 +6368,18 @@
     const list = filteredStaffForAttendance();
     list.forEach(st => {
       if(staffPendingMarks[st.id] === undefined){
-        const rec = staffAttendanceRecords.find(r => r.staffId===st.id && r.date===staffAttMarkDate);
-        staffPendingMarks[st.id] = rec ? rec.status : 'Present';
+        const rec = staffAttendanceRecords.find(r => r.staffId===st.id && r.date===staffAttMarkDate && r.session===staffAttMarkSession);
+        const legacyRec = !rec ? staffAttendanceRecords.find(r => r.staffId===st.id && r.date===staffAttMarkDate && !r.session) : null;
+        staffPendingMarks[st.id] = rec ? rec.status : (legacyRec ? legacyRec.status : 'Present');
       }
     });
     body.innerHTML = `
       <div class="ms-toolbar">
         <div class="ms-toolbar-left">
           <input type="date" class="input" id="staffAttDateInput" value="${staffAttMarkDate}" onchange="changeStaffAttDate(this.value)" style="max-width:200px;">
+          <div class="att-status-row" style="display:inline-flex;">
+            ${ATT_SESSIONS.map(sess => `<button type="button" class="att-status-btn ${staffAttMarkSession===sess?'active':''}" onclick="changeStaffAttSession('${sess}')">${sess==='Morning'?'🌅':'🌇'} ${sess}</button>`).join('')}
+          </div>
           <button class="btn btn-ghost btn-sm" onclick="markAllStaffStatus('Present')">Mark All Present</button>
           <button class="btn btn-ghost btn-sm" onclick="markAllStaffStatus('Absent')">Mark All Absent</button>
         </div>
@@ -6378,6 +6405,7 @@
     `;
   }
   function changeStaffAttDate(val){ staffAttMarkDate = val; staffPendingMarks = {}; renderStaffAttendanceContent(); }
+  function changeStaffAttSession(val){ staffAttMarkSession = val; staffPendingMarks = {}; renderStaffAttendanceContent(); }
   function setStaffAttStatus(staffId, status){ staffPendingMarks[staffId] = status; renderStaffAttendanceContent(); }
   function markAllStaffStatus(status){
     filteredStaffForAttendance().forEach(st => { staffPendingMarks[st.id] = status; });
@@ -6386,22 +6414,24 @@
   async function saveStaffAttendance(){
     Object.keys(staffPendingMarks).forEach(staffId => {
       const status = staffPendingMarks[staffId];
-      let rec = staffAttendanceRecords.find(r => r.staffId===staffId && r.date===staffAttMarkDate);
+      let rec = staffAttendanceRecords.find(r => r.staffId===staffId && r.date===staffAttMarkDate && r.session===staffAttMarkSession);
       if(rec){ rec.status = status; }
-      else { staffAttendanceRecords.push({ id:'statt_'+staffId+'_'+staffAttMarkDate, staffId, date:staffAttMarkDate, status }); }
+      else { staffAttendanceRecords.push({ id:'statt_'+staffId+'_'+staffAttMarkDate+'_'+staffAttMarkSession, staffId, date:staffAttMarkDate, session:staffAttMarkSession, status }); }
     });
     await storageSet(STAFF_ATTENDANCE_KEY, staffAttendanceRecords);
-    showToast('Staff attendance saved for ' + staffAttMarkDate + '.');
+    showToast('Staff attendance saved for ' + staffAttMarkDate + ' (' + staffAttMarkSession + ').');
   }
+  // See computeAttendanceStats' comment — same session-weighting rule.
   function computeStaffAttendanceStats(staffId, fromDate, toDate){
     let recs = staffAttendanceRecords.filter(r => r.staffId === staffId);
     if(fromDate) recs = recs.filter(r => r.date >= fromDate);
     if(toDate) recs = recs.filter(r => r.date <= toDate);
-    const present = recs.filter(r => r.status==='Present').length;
-    const late = recs.filter(r => r.status==='Late').length;
-    const absent = recs.filter(r => r.status==='Absent').length;
-    const leave = recs.filter(r => r.status==='Leave').length;
-    const total = recs.length;
+    const sumBy = status => recs.filter(r => r.status===status).reduce((n,r) => n + attSessionWeight(r), 0);
+    const present = sumBy('Present');
+    const late = sumBy('Late');
+    const absent = sumBy('Absent');
+    const leave = sumBy('Leave');
+    const total = recs.reduce((n,r) => n + attSessionWeight(r), 0);
     const attended = present + late;
     const pct = total > 0 ? Math.round((attended/total)*100) : 0;
     return { present, absent, late, leave, total, pct };
@@ -6423,6 +6453,7 @@
         <span><span class="dot2" style="background:var(--magenta);"></span>Absent</span>
         <span><span class="dot2" style="background:var(--brand-navy);"></span>Leave (counts as absent)</span>
       </div>
+      <p style="font-size:0.74rem; color:var(--ink-soft); margin:-4px 0 10px;">Counts are per <b>session</b> (Morning + Afternoon), not per day — a fully-present day now shows as 2, not 1. Payroll's Loss-of-Pay calculation already converts this back to days. Attendance marked before the two-session change counts as 2 (a full day) either way, so % stays consistent across the change.</p>
       <div class="table-wrap">
         <table><thead><tr><th>Staff</th><th>Designation</th><th>Department</th><th>Present</th><th>Absent</th><th>Late</th><th>Leave</th><th>Total Marked</th><th>%</th></tr></thead>
         <tbody>
@@ -6515,8 +6546,12 @@
       .sort((a,b) => (a.firstName||'').localeCompare(b.firstName||''));
     list.forEach(s => {
       if(pendingMarks[s.id] === undefined){
-        const rec = attendanceRecords.find(r => r.studentId===s.id && r.date===attMarkDate);
-        pendingMarks[s.id] = rec ? rec.status : 'Present';
+        const rec = attendanceRecords.find(r => r.studentId===s.id && r.date===attMarkDate && r.session===attMarkSession);
+        // Falls back to a pre-two-session (sessionless) record for this date
+        // so re-opening an old date shows its original status as a starting
+        // point, rather than defaulting everyone back to Present.
+        const legacyRec = !rec ? attendanceRecords.find(r => r.studentId===s.id && r.date===attMarkDate && !r.session) : null;
+        pendingMarks[s.id] = rec ? rec.status : (legacyRec ? legacyRec.status : 'Present');
       }
     });
     const isHoliday = holidays.some(h => h.date===attMarkDate);
@@ -6525,6 +6560,9 @@
       <div class="ms-toolbar">
         <div class="ms-toolbar-left">
           <input type="date" class="input" id="attDateInput" value="${attMarkDate}" onchange="changeAttDate(this.value)" style="max-width:200px;">
+          <div class="att-status-row" style="display:inline-flex;">
+            ${ATT_SESSIONS.map(sess => `<button type="button" class="att-status-btn ${attMarkSession===sess?'active':''}" onclick="changeAttSession('${sess}')">${sess==='Morning'?'🌅':'🌇'} ${sess}</button>`).join('')}
+          </div>
           <button class="btn btn-ghost btn-sm" onclick="markAllStatus('Present')">Mark All Present</button>
           <button class="btn btn-ghost btn-sm" onclick="markAllStatus('Absent')">Mark All Absent</button>
         </div>
@@ -6555,6 +6593,11 @@
     pendingMarks = {};
     renderAttendanceBody();
   }
+  function changeAttSession(val){
+    attMarkSession = val;
+    pendingMarks = {};
+    renderAttendanceBody();
+  }
   function setAttStatus(studentId, status){
     pendingMarks[studentId] = status;
     renderAttendanceBody();
@@ -6568,24 +6611,29 @@
   async function saveAttendance(){
     Object.keys(pendingMarks).forEach(studentId => {
       const status = pendingMarks[studentId];
-      let rec = attendanceRecords.find(r => r.studentId===studentId && r.date===attMarkDate);
+      let rec = attendanceRecords.find(r => r.studentId===studentId && r.date===attMarkDate && r.session===attMarkSession);
       if(rec){ rec.status = status; }
-      else { attendanceRecords.push({ id:'att_'+studentId+'_'+attMarkDate, studentId, date:attMarkDate, status }); }
+      else { attendanceRecords.push({ id:'att_'+studentId+'_'+attMarkDate+'_'+attMarkSession, studentId, date:attMarkDate, session:attMarkSession, status }); }
     });
     await storageSet(ATTENDANCE_KEY, attendanceRecords);
-    showToast('Attendance saved for ' + attMarkDate + '.');
+    showToast('Attendance saved for ' + attMarkDate + ' (' + attMarkSession + ').');
   }
 
   /* --- Stats --- */
+  // Counts in "sessions" now, not raw rows — a sessionless (pre-two-session)
+  // record counts twice, a Morning/Afternoon-tagged record counts once each,
+  // so a full pre-feature day and a fully-marked new-style day both weigh
+  // the same. See attSessionWeight().
   function computeAttendanceStats(studentId, fromDate, toDate){
     let recs = attendanceRecords.filter(r => r.studentId === studentId);
     if(fromDate) recs = recs.filter(r => r.date >= fromDate);
     if(toDate) recs = recs.filter(r => r.date <= toDate);
-    const present = recs.filter(r => r.status==='Present').length;
-    const late = recs.filter(r => r.status==='Late').length;
-    const absent = recs.filter(r => r.status==='Absent').length;
-    const leave = recs.filter(r => r.status==='Leave').length;
-    const total = recs.length;
+    const sumBy = status => recs.filter(r => r.status===status).reduce((n,r) => n + attSessionWeight(r), 0);
+    const present = sumBy('Present');
+    const late = sumBy('Late');
+    const absent = sumBy('Absent');
+    const leave = sumBy('Leave');
+    const total = recs.reduce((n,r) => n + attSessionWeight(r), 0);
     const attended = present + late;
     const pct = total > 0 ? Math.round((attended/total)*100) : 0;
     return { present, absent, late, leave, total, pct };
@@ -6622,6 +6670,7 @@
         <span><span class="dot2" style="background:var(--magenta);"></span>Absent</span>
         <span><span class="dot2" style="background:var(--brand-navy);"></span>Leave (counts as absent)</span>
       </div>
+      <p style="font-size:0.74rem; color:var(--ink-soft); margin:-4px 0 10px;">Counts are per <b>session</b> (Morning + Afternoon), not per day — a fully-present day now shows as 2, not 1. Attendance marked before the two-session change is counted as 2 (a full day) either way, so % stays consistent across the change.</p>
       <div class="table-wrap">
         <table><thead><tr><th>Student</th><th>Class</th><th>Present</th><th>Absent</th><th>Late</th><th>Leave</th><th>Total Marked</th><th>%</th></tr></thead>
         <tbody>
@@ -10306,7 +10355,7 @@
 
     // Employee
     { id:'staff_directory', category:'Employee', name:'Staff Directory', icon:'🧑‍💼', scopable:'staff', desc:'Every active staff member with role, department, and contact.',
-      getRows(f){ return applyStaffScope(staffList.filter(staffIsActive), f).map(st => ({ 'Staff ID':st.staffId, 'Name':st.firstName+' '+st.lastName, 'Designation':st.designation||'', 'Department':st.department||'', 'Phone':st.phone||'', 'Email':st.email||'' })); } },
+      getRows(f){ return applyStaffScope(staffList.filter(staffIsActive), f).map(st => ({ 'Staff ID':st.staffId, 'Name':st.firstName+' '+st.lastName, 'Designation':st.designation||'', 'Department':st.department||'', 'Caste Category':st.caste||'', 'Phone':st.phone||'', 'Email':st.email||'' })); } },
     { id:'staff_address', category:'Employee', name:'Staff Address & Contact Report', icon:'📇', scopable:'staff', desc:'Address and phone number for every active staff member.',
       getRows(f){ return applyStaffScope(staffList.filter(staffIsActive), f).map(st => ({ 'Name':st.firstName+' '+st.lastName, 'Designation':st.designation||'', 'Phone':st.phone||'', 'Address':st.address||'' })); } },
     { id:'staff_salary', category:'Employee', name:'Staff Salary Summary', icon:'💵', scopable:'staff', desc:'Monthly salary on file for every active staff member.',
@@ -12180,6 +12229,7 @@
           <div class="profile-row"><span>Date of Birth</span><span>${st.dob||'—'}</span></div>
           <div class="profile-row"><span>Blood Group</span><span>${st.blood||'—'}</span></div>
           <div class="profile-row"><span>Aadhar Number</span><span>${st.aadhar||'—'}</span></div>
+          <div class="profile-row"><span>Caste Category</span><span>${st.caste||'—'}</span></div>
         </div>
         <div class="profile-card">
           <h4>Professional Details</h4>
@@ -12782,6 +12832,7 @@
         document.getElementById('stfDob').value = st.dob || '';
         document.getElementById('stfBlood').value = st.blood || '';
         document.getElementById('stfAadhar').value = st.aadhar || '';
+        document.getElementById('stfCaste').value = st.caste || '';
         document.getElementById('stfDept').value = st.department || '';
         document.getElementById('stfDesignation').value = st.designation || '';
         document.getElementById('stfDoj').value = st.doj || '';
@@ -12908,6 +12959,7 @@
     const data = {
       firstName: g('stfFirstName').trim(), lastName: g('stfLastName').trim(),
       gender: g('stfGender'), dob: g('stfDob'), blood: g('stfBlood'), aadhar: g('stfAadhar').trim(),
+      caste: g('stfCaste'),
       department: g('stfDept'), designation: g('stfDesignation'), doj: g('stfDoj'), status: g('stfStatus'),
       qualification: g('stfQualification').trim(), experience: g('stfExperience'), salary: g('stfSalary'),
       biometricId: g('stfBiometricId').trim(),
@@ -13023,8 +13075,16 @@
     const d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
   }
+  // Returns a DAY-equivalent count, not a raw row count — payroll deducts in
+  // days, not sessions. A sessionless (legacy) row already weighs 2 (one
+  // full day), and a Morning+Afternoon pair also sums to 2, so dividing the
+  // total weight by 2 gives whole days for a fully-absent day and 0.5 for a
+  // single missed session (e.g. left after lunch) either way.
   function staffAttendanceCountInMonth(staffId, monthStr, statuses){
-    return staffAttendanceRecords.filter(r => r.staffId===staffId && (r.date||'').slice(0,7)===monthStr && statuses.includes(r.status)).length;
+    const weight = staffAttendanceRecords
+      .filter(r => r.staffId===staffId && (r.date||'').slice(0,7)===monthStr && statuses.includes(r.status))
+      .reduce((n,r) => n + attSessionWeight(r), 0);
+    return weight / 2;
   }
   function findPayrollRecord(staffId, monthStr){
     return staffPayrollRecords.find(p => p.staffId === staffId && p.month === monthStr);
@@ -19900,7 +19960,7 @@
       items.push({
         icon: isAbsent ? '🚫' : r.status==='Late' ? '⏰' : r.status==='Leave' ? '🌿' : '✅',
         tag:'Attendance', date: r.date,
-        title: `Marked ${r.status} on ${r.date}`,
+        title: `Marked ${r.status} on ${r.date}${r.session ? ' ('+r.session+')' : ''}`,
         detail: isAbsent ? 'Contact the school office if this is unexpected.' : '',
         highlight: isAbsent,
       });

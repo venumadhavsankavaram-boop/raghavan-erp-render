@@ -174,7 +174,8 @@ async function ensureSchema() {
     paid_amount DECIMAL(14,2) DEFAULT 0, date TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS attendance_records (
-    id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), date VARCHAR(32), status TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id VARCHAR(191) PRIMARY KEY, student_id VARCHAR(191), date VARCHAR(32), status TEXT,
+    session VARCHAR(20), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS holidays (
     id VARCHAR(191) PRIMARY KEY, date TEXT, name TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -184,7 +185,8 @@ async function ensureSchema() {
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`CREATE TABLE IF NOT EXISTS staff_attendance_records (
-    id VARCHAR(191) PRIMARY KEY, staff_id VARCHAR(191), date VARCHAR(32), status TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id VARCHAR(191) PRIMARY KEY, staff_id VARCHAR(191), date VARCHAR(32), status TEXT,
+    session VARCHAR(20), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   // Raw log of every punch the on-site biometric bridge has ever forwarded
   // (see the "Biometric attendance" section below) — kept even for
@@ -218,6 +220,17 @@ async function ensureSchema() {
   // actually gave that final approval, and purge_log can carry it forward.
   await addColumnIfMissing('students', 'deleted_by TEXT');
   await addColumnIfMissing('students', 'deleted_by_name TEXT');
+  // Twice-daily (morning/afternoon) attendance — added on an already-live
+  // database via addColumnIfMissing rather than the CREATE TABLE above, which
+  // only applies to a fresh install. NULL/'' on an existing row means it was
+  // marked before this feature shipped; every stats function in the app
+  // (computeAttendanceStats, computeStaffAttendanceStats,
+  // monthlyAttendanceTrend, staffAttendanceCountInMonth) treats a sessionless
+  // row as a full day (weight 2, matching one row per session) so historical
+  // attendance % is unaffected by this migration — see attSessionWeight() in
+  // index.html.
+  await addColumnIfMissing('attendance_records', 'session VARCHAR(20)');
+  await addColumnIfMissing('staff_attendance_records', 'session VARCHAR(20)');
   // A student record is never deleted on a single click — see
   // HYBRID_RESOURCES.students' deleteViaApprovalOnly flag and
   // handleDeletionRequests below. Getting from "requested" to "actually
@@ -982,7 +995,7 @@ const SIMPLE_RESOURCES = {
     table: 'attendance_records',
     fields: [
       { app: 'id', col: 'id' }, { app: 'studentId', col: 'student_id' }, { app: 'date', col: 'date' },
-      { app: 'status', col: 'status' },
+      { app: 'status', col: 'status' }, { app: 'session', col: 'session' },
     ],
   },
   holidays: {
@@ -1000,7 +1013,7 @@ const SIMPLE_RESOURCES = {
     table: 'staff_attendance_records',
     fields: [
       { app: 'id', col: 'id' }, { app: 'staffId', col: 'staff_id' }, { app: 'date', col: 'date' },
-      { app: 'status', col: 'status' },
+      { app: 'status', col: 'status' }, { app: 'session', col: 'session' },
     ],
   },
   'admission-inquiries': {
@@ -2644,11 +2657,21 @@ app.post('/api/biometric/punches', async (req, res) => {
         VALUES (${punchId}, ${deviceSerial}, ${deviceUserId}, ${punchedAt.toISOString()}, ${staffId}, ${staffName}, ${!!staffId})
       `;
       if (staffId) {
-        const dateStr = punchedAt.toISOString().slice(0, 10);
-        const attId = 'statt_' + staffId + '_' + dateStr;
+        // IST is UTC+5:30 with no DST, so this fixed offset is safe year-round.
+        // Cutoff is 1:00 PM IST — a punch before that is treated as the
+        // morning-session punch, at/after as the afternoon-session punch.
+        // Schools with a different session split can adjust the cutoff hour
+        // (13) below; this only affects auto-marking from biometric punches,
+        // not manual marking in the ERP, which lets staff pick the session
+        // explicitly.
+        const istMs = punchedAt.getTime() + 5.5 * 60 * 60 * 1000;
+        const istDate = new Date(istMs);
+        const dateStr = istDate.toISOString().slice(0, 10);
+        const session = istDate.getUTCHours() < 13 ? 'Morning' : 'Afternoon';
+        const attId = 'statt_' + staffId + '_' + dateStr + '_' + session;
         await sql`
-          INSERT IGNORE INTO staff_attendance_records (id, staff_id, date, status)
-          VALUES (${attId}, ${staffId}, ${dateStr}, 'Present')
+          INSERT IGNORE INTO staff_attendance_records (id, staff_id, date, session, status)
+          VALUES (${attId}, ${staffId}, ${dateStr}, ${session}, 'Present')
         `;
       }
     }
