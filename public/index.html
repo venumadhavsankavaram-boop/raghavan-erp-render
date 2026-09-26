@@ -429,6 +429,13 @@
     padding:6px 12px; border-radius:8px; font-size:0.76rem; font-weight:600; border:1.5px solid var(--border);
     background:var(--white); color:var(--ink-soft); cursor:pointer;
   }
+  /* Fallback highlight for any .active att-status-btn that has no data-status
+     (e.g. the Morning/Afternoon session-toggle buttons) — without this, those
+     buttons got the "active" class on click but no visible style change, so
+     the session toggle looked like it wasn't responding. The more specific
+     [data-status="..."] rules below still win for the Present/Absent/Late/
+     Leave buttons, giving those their own status colors. */
+  .att-status-btn.active{background:var(--brand-navy); border-color:var(--brand-navy); color:#fff;}
   .att-status-btn.active[data-status="Present"]{background:var(--teal); border-color:var(--teal); color:var(--white);}
   .att-status-btn.active[data-status="Absent"]{background:var(--magenta); border-color:var(--magenta); color:var(--white);}
   .att-status-btn.active[data-status="Late"]{background:var(--gold); border-color:var(--gold); color:var(--white);}
