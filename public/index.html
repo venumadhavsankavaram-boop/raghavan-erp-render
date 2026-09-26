@@ -773,6 +773,26 @@
     padding:6px 12px; font-size:0.8rem; margin:0 8px 8px 0;
   }
   .sibling-chip button{background:none; border:none; color:var(--magenta); font-weight:700; cursor:pointer;}
+  .sibling-search-results{
+    border:1px solid rgba(0,0,0,0.1); border-radius:10px; max-height:220px; overflow-y:auto;
+    background:var(--card-bg,#fff);
+  }
+  [data-theme="dark"] .sibling-search-results{background:#1d2733; border-color:rgba(255,255,255,0.1);}
+  .sibling-search-results:empty{border:none;}
+  .sibling-result-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:8px 12px; cursor:pointer; font-size:0.82rem; border-bottom:1px solid rgba(0,0,0,0.05);
+  }
+  [data-theme="dark"] .sibling-result-row{border-color:rgba(255,255,255,0.06);}
+  .sibling-result-row:last-child{border-bottom:none;}
+  .sibling-result-row:hover{background:var(--cream,#f7f3ea);}
+  [data-theme="dark"] .sibling-result-row:hover{background:rgba(255,255,255,0.06);}
+  .sibling-result-name b{color:var(--navy);}
+  [data-theme="dark"] .sibling-result-name b{color:#eef2f5;}
+  .sibling-result-meta{font-size:0.72rem; color:var(--ink-soft); margin-top:1px;}
+  .sibling-result-match{font-size:0.68rem; font-weight:700; color:var(--teal,#1f9d8f); text-transform:uppercase; letter-spacing:0.02em; white-space:nowrap;}
+  .sibling-result-empty{padding:10px 12px; font-size:0.8rem; color:var(--ink-soft);}
+  .sibling-result-name mark{background:rgba(31,157,143,0.28); color:inherit; border-radius:3px; padding:0 1px;}
 
   /* ===== MODAL ===== */
   .modal-overlay{
@@ -1045,6 +1065,72 @@
   .trend-value-label{font-size:10px; fill:var(--navy); font-weight:600; font-family:'Poppins',sans-serif;}
   .trend-dot{transition:r .15s ease;}
   .trend-empty{font-size:0.82rem; color:var(--ink-soft); text-align:center; padding:30px 0;}
+
+  /* ===== Motion UI — "is it working, or has it stalled?" indicators =====
+     Added per request: users couldn't tell if a save/import was still
+     running or had silently died, especially after navigating away.
+     Seven pieces, each independent and reusable:
+       1. mtTopBar        — thin sweeping bar, auto-driven by every fetch()
+       2. mt-skeleton-*   — structure-preview placeholder for slow first loads
+       3. mtDeterminate   — "X of Y (Z%)" progress for bulk operations
+       4. mtJobTray       — persistent corner tray that survives switching views
+       5. .mt-btn-busy    — button swallows its own label while a click is in flight
+       6. mtRotatingText  — cycling status microcopy for one long single action
+       7. sbSyncChip      — "Synced Xs ago" heartbeat in the sidebar footer
+     See the "Motion Language Picker" reference doc for the research behind
+     these (NN/g loading-state thresholds) and the fuller pattern set. */
+  #mtTopBar{position:fixed; top:0; left:0; height:3px; width:0%; z-index:9999;
+    background:linear-gradient(90deg, var(--teal,#1f9d8f), var(--navy,#16324f));
+    transition:width .25s ease, opacity .2s ease; opacity:0; pointer-events:none;}
+  #mtTopBar.active{opacity:1;}
+  #mtTopBar.finishing{width:100% !important; transition:width .15s ease, opacity .35s ease .1s; opacity:0;}
+
+  .mt-skel{position:relative; overflow:hidden; background:#e8ecef; border-radius:8px;}
+  [data-theme="dark"] .mt-skel{background:#2a3644;}
+  .mt-skel::after{content:''; position:absolute; inset:0; transform:translateX(-100%);
+    background:linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+    animation:mtShimmer 1.4s infinite;}
+  [data-theme="dark"] .mt-skel::after{background:linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent);}
+  @keyframes mtShimmer{100%{transform:translateX(100%);}}
+  .mt-skel-row{height:14px; margin-bottom:10px; border-radius:6px;}
+  .mt-skel-card{border-radius:12px;}
+  .mt-skel-wrap{padding:4px 2px;}
+
+  .mt-determinate{margin:10px 0;}
+  .mt-determinate .mt-det-track{height:8px; border-radius:5px; background:#e4e9ec; overflow:hidden;}
+  [data-theme="dark"] .mt-determinate .mt-det-track{background:#2a3644;}
+  .mt-determinate .mt-det-fill{height:100%; border-radius:5px; background:linear-gradient(90deg,var(--teal,#1f9d8f),var(--navy,#16324f)); transition:width .25s ease;}
+  .mt-determinate .mt-det-meta{display:flex; justify-content:space-between; font-size:0.76rem; color:var(--ink-soft,#667); margin-top:6px;}
+
+  #mtJobTray{position:fixed; right:18px; bottom:18px; z-index:9998; display:flex; flex-direction:column; gap:8px; max-width:320px;}
+  .mt-job-card{background:var(--card-bg,#fff); border:1px solid rgba(0,0,0,0.08); border-radius:12px; padding:12px 14px;
+    box-shadow:0 8px 24px rgba(20,30,40,0.16); font-size:0.8rem; animation:mtJobIn .2s ease;}
+  [data-theme="dark"] .mt-job-card{background:#1d2733; border-color:rgba(255,255,255,0.08); color:#eef2f5;}
+  @keyframes mtJobIn{from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:none;}}
+  .mt-job-head{display:flex; align-items:center; gap:8px; font-weight:700; color:var(--navy,#16324f); margin-bottom:6px;}
+  [data-theme="dark"] .mt-job-head{color:#eef2f5;}
+  .mt-job-spin{width:14px; height:14px; border-radius:50%; border:2px solid rgba(31,157,143,0.25); border-top-color:var(--teal,#1f9d8f); animation:mtSpin .7s linear infinite; flex-shrink:0;}
+  @keyframes mtSpin{100%{transform:rotate(360deg);}}
+  .mt-job-check{color:var(--teal,#1f9d8f); flex-shrink:0;}
+  .mt-job-detail{color:var(--ink-soft,#667); font-size:0.76rem; margin-bottom:6px;}
+  .mt-job-track{height:6px; border-radius:4px; background:#e4e9ec; overflow:hidden;}
+  [data-theme="dark"] .mt-job-track{background:#2a3644;}
+  .mt-job-fill{height:100%; border-radius:4px; background:linear-gradient(90deg,var(--teal,#1f9d8f),var(--navy,#16324f)); transition:width .3s ease;}
+
+  .mt-btn-busy{position:relative; color:transparent !important; pointer-events:none; opacity:0.85;}
+  .mt-btn-busy::after{content:''; position:absolute; left:50%; top:50%; width:15px; height:15px; margin:-8px 0 0 -8px;
+    border-radius:50%; border:2px solid rgba(255,255,255,0.4); border-top-color:#fff; animation:mtSpin .6s linear infinite;}
+  .btn-ghost.mt-btn-busy::after, .btn-secondary.mt-btn-busy::after{border:2px solid rgba(22,50,79,0.25); border-top-color:var(--navy,#16324f);}
+
+  .sb-sync-chip{font-size:0.68rem; color:rgba(255,255,255,0.55); margin-top:1px; display:flex; align-items:center; gap:5px;}
+  .sb-sync-chip .sb-sync-dot{width:6px; height:6px; border-radius:50%; background:#5fd3a0; flex-shrink:0;}
+  .sb-sync-chip.offline .sb-sync-dot{background:#e8a23a;}
+  .sb-sync-chip.offline{color:#f0c987;}
+
+  .login-boot-progress{margin-top:14px;}
+  .login-boot-progress .lbp-track{height:6px; border-radius:4px; background:rgba(0,0,0,0.08); overflow:hidden;}
+  .login-boot-progress .lbp-fill{height:100%; width:0%; border-radius:4px; background:linear-gradient(90deg,var(--login-accent,#1f9d8f),var(--login-accent-deep,#16324f)); transition:width .3s ease;}
+  .login-boot-progress .lbp-label{font-size:0.76rem; color:var(--ink-soft,#667); margin-top:7px; min-height:1.1em;}
 </style>
 <script>
   /* ===== AUTOMATIC WEBSITE THEME SYNC =====
@@ -1153,6 +1239,9 @@
 </head>
 <body>
 
+<div id="mtTopBar"></div>
+<div id="mtJobTray"></div>
+
 <div class="login-overlay" id="loginOverlay">
   <div class="login-card">
     <!-- Per-school branding: swap this src for the same logo used on the
@@ -1185,7 +1274,11 @@
         </div>
       </div>
       <div id="loginError" style="display:none; color:var(--magenta); font-size:0.82rem; margin-bottom:10px; text-align:left;">Incorrect username or password.</div>
-      <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; margin-top:10px;">Sign In</button>
+      <button type="submit" class="btn btn-primary" id="loginSubmitBtn" style="width:100%; justify-content:center; margin-top:10px;">Sign In</button>
+      <div class="login-boot-progress" id="loginBootProgress" style="display:none;">
+        <div class="lbp-track"><div class="lbp-fill" id="loginBootFill"></div></div>
+        <div class="lbp-label" id="loginBootLabel">Connecting…</div>
+      </div>
     </form>
     <button type="button" class="settings-link" style="margin-top:14px;" onclick="toggleForgotPassword(true)">Forgot password?</button>
 
@@ -1305,6 +1398,7 @@
         <div style="overflow:hidden; min-width:0;">
           <div class="sb-user-name" id="sbUserName" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">—</div>
           <div class="sb-user-role" id="sbUserRole" style="margin-bottom:0;">—</div>
+          <div class="sb-sync-chip" id="sbSyncChip" title="Whether your last save reached the server"><span class="sb-sync-dot"></span><span id="sbSyncChipText">Synced</span></div>
         </div>
       </div>
       <button class="sb-logout-btn" id="themeToggleBtn" onclick="toggleTheme()" style="margin-bottom:8px;">🌙 <span class="sb-btn-label">Dark Mode</span></button>
@@ -1973,13 +2067,17 @@
             <div class="f-field"><label>Year</label><input type="text" id="fPrevYear" placeholder="e.g. 2024-25"></div>
           </div>
           <h4 class="wpanel-h">Sibling Information</h4>
-          <div style="display:flex; gap:10px; margin-bottom:10px;">
-            <select id="fSiblingSelect" style="flex:1;">
-              <option value="">Select a student already enrolled</option>
-            </select>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="addSibling()">+ Add Sibling</button>
+          <p style="font-size:0.76rem; color:var(--ink-soft); margin:-4px 0 10px;">Type a name below — matches on the surname are shown first. Narrow by class/section too if you know them.</p>
+          <div style="display:flex; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+            <select id="fSiblingClassFilter" style="width:130px;" onchange="renderSiblingSearchResults()"><option value="">Any class</option></select>
+            <select id="fSiblingSectionFilter" style="width:110px;" onchange="renderSiblingSearchResults()"><option value="">Any section</option></select>
+            <div class="input-icon-wrap" style="flex:1; min-width:180px;">
+              <span class="input-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>
+              <input type="text" id="fSiblingSearch" class="input" style="width:100%;" placeholder="Type 2-3 letters of a name…" oninput="renderSiblingSearchResults()" autocomplete="off">
+            </div>
           </div>
-          <div id="siblingList"></div>
+          <div id="siblingSearchResults" class="sibling-search-results"></div>
+          <div id="siblingList" style="margin-top:8px;"></div>
         </div>
 
         <div class="wtab-panel" id="panel-transport" style="display:none;">
@@ -2852,6 +2950,137 @@
   // device's localStorage copy. Drives the dashboard banner (see
   // renderDashboard) so it only warns when there's a genuine problem.
   let usingLocalFallback = false;
+
+  /* ===== MotionUI — shared "is it working?" indicators =====
+     One small toolkit backing all the pieces described in the CSS block
+     above. Nothing here is module-specific; individual modules just call
+     into it at the handful of spots wired further down (bulk import,
+     the login/data-boot sequence, and the sidebar sync chip). */
+  const MotionUI = (function(){
+    // --- 1. Top loading bar, driven automatically by every fetch() the app
+    // makes anywhere (no call site needs to know about this). A short delay
+    // before showing it avoids a flash on requests that resolve instantly.
+    let inFlight = 0, showTimer = null;
+    const bar = document.getElementById('mtTopBar');
+    function topBarShow(){
+      inFlight++;
+      if(inFlight === 1 && !showTimer){
+        showTimer = setTimeout(() => { if(inFlight > 0 && bar){ bar.classList.remove('finishing'); bar.style.width = '12%'; bar.classList.add('active'); requestAnimationFrame(()=>{ bar.style.width = '72%'; }); } showTimer = null; }, 150);
+      }
+    }
+    function topBarHide(){
+      inFlight = Math.max(0, inFlight - 1);
+      if(inFlight === 0){
+        if(showTimer){ clearTimeout(showTimer); showTimer = null; return; }
+        if(bar){ bar.classList.add('finishing'); setTimeout(()=>{ bar.classList.remove('active','finishing'); bar.style.width = '0%'; }, 400); }
+      }
+    }
+    const _origFetch = window.fetch.bind(window);
+    window.fetch = function(...args){
+      topBarShow();
+      return _origFetch(...args).then(res => { if(res && res.ok) markSynced(); return res; }).finally(topBarHide);
+    };
+
+    // --- 2. Skeleton screens — call skeletonRows(n) for a quick placeholder
+    // block to drop into a container while its real content is still loading.
+    function skeletonRows(n, opts){
+      opts = opts || {};
+      const w = opts.widths || ['92%','78%','85%','60%','88%','70%'];
+      let html = '<div class="mt-skel-wrap">';
+      for(let i=0;i<n;i++) html += `<div class="mt-skel mt-skel-row" style="width:${w[i % w.length]}"></div>`;
+      html += '</div>';
+      return html;
+    }
+
+    // --- 3 & 4. A bulk-operation "job": shows a determinate progress bar
+    // inline (returned HTML string via .barHtml/.update) AND a matching
+    // persistent tray card in the bottom-right corner (#mtJobTray) that
+    // keeps counting even if the user switches to another module while it
+    // runs — that survival-across-navigation is the point: the tray div
+    // lives at the very top of <body>, outside every view's markup, so
+    // switching views never touches it.
+    let jobSeq = 0;
+    function startJob(label){
+      const id = 'mtjob' + (++jobSeq);
+      const tray = document.getElementById('mtJobTray');
+      if(tray){
+        const card = document.createElement('div');
+        card.className = 'mt-job-card';
+        card.id = id;
+        card.innerHTML = `
+          <div class="mt-job-head"><span class="mt-job-spin"></span><span class="mt-job-label">${label}</span></div>
+          <div class="mt-job-detail" id="${id}-detail">Starting…</div>
+          <div class="mt-job-track"><div class="mt-job-fill" id="${id}-fill" style="width:0%"></div></div>
+        `;
+        tray.appendChild(card);
+      }
+      return {
+        id,
+        update(current, total, detail){
+          const pct = total > 0 ? Math.min(100, Math.round((current/total)*100)) : 0;
+          const fill = document.getElementById(id+'-fill');
+          const det = document.getElementById(id+'-detail');
+          if(fill) fill.style.width = pct + '%';
+          if(det) det.textContent = detail || `${current} of ${total} · ${pct}%`;
+        },
+        succeed(finalText){
+          const card = document.getElementById(id);
+          if(!card) return;
+          card.querySelector('.mt-job-spin')?.replaceWith(Object.assign(document.createElement('span'), {className:'mt-job-check', textContent:'✓'}));
+          const det = document.getElementById(id+'-detail'); if(det) det.textContent = finalText || 'Done';
+          const fill = document.getElementById(id+'-fill'); if(fill) fill.style.width = '100%';
+          setTimeout(() => card.remove(), 4000);
+        },
+        fail(msg){
+          const card = document.getElementById(id);
+          if(!card) return;
+          card.querySelector('.mt-job-spin')?.remove();
+          const det = document.getElementById(id+'-detail'); if(det){ det.textContent = msg || 'Failed'; det.style.color = 'var(--magenta,#c0392b)'; }
+          setTimeout(() => card.remove(), 6000);
+        }
+      };
+    }
+
+    // --- 5. Button-swallows-label: disables the button and shows a spinner
+    // in place of its text for the life of the given promise, then restores it.
+    async function busyButton(btn, promiseFactory){
+      if(!btn) return promiseFactory();
+      btn.classList.add('mt-btn-busy');
+      btn.disabled = true;
+      try{ return await promiseFactory(); }
+      finally{ btn.classList.remove('mt-btn-busy'); btn.disabled = false; }
+    }
+
+    // --- 6. Rotating status microcopy for one long single action.
+    function rotatingText(el, phrases, intervalMs){
+      if(!el) return { stop(){} };
+      let i = 0;
+      el.textContent = phrases[0] || '';
+      const timer = setInterval(() => { i = (i+1) % phrases.length; el.textContent = phrases[i]; }, intervalMs || 1400);
+      return { stop(){ clearInterval(timer); } };
+    }
+
+    // --- 7. Sidebar heartbeat chip — "Synced Xs ago" vs "Working offline".
+    let lastSyncedAt = Date.now();
+    function markSynced(){ lastSyncedAt = Date.now(); }
+    function tickSyncChip(){
+      const chip = document.getElementById('sbSyncChip');
+      const text = document.getElementById('sbSyncChipText');
+      if(!chip || !text) return;
+      if(usingLocalFallback){
+        chip.classList.add('offline');
+        text.textContent = 'Working offline';
+      }else{
+        chip.classList.remove('offline');
+        const secs = Math.round((Date.now() - lastSyncedAt)/1000);
+        text.textContent = secs < 5 ? 'Synced just now' : secs < 60 ? `Synced ${secs}s ago` : `Synced ${Math.round(secs/60)}m ago`;
+      }
+    }
+    setInterval(tickSyncChip, 3000);
+
+    return { skeletonRows, startJob, busyButton, rotatingText, markSynced, tickSyncChip };
+  })();
+
   let students = [];
 
   function showToast(msg){
@@ -2982,25 +3211,42 @@
   async function persist(){
     const oldStudents = _studentsLastSynced || [];
     const newIds = new Set(students.map(s => s.id));
+    const deletes = oldStudents.filter(s => !newIds.has(s.id));
+    const writes = students.filter(s => {
+      const old = oldStudents.find(x => x.id === s.id);
+      return !old || JSON.stringify(old) !== JSON.stringify(s);
+    });
+    const totalOps = deletes.length + writes.length;
+    // A single edit (the overwhelming majority of calls to persist()) is
+    // already covered by the global top loading bar — no need for more UI
+    // than that. A bulk operation (an import of hundreds of rows, a mass
+    // promotion) is the case that left people unsure whether anything was
+    // still happening, especially if they switched tabs mid-way — so only
+    // those get the visible, persistent job-tray progress.
+    const job = totalOps > 15 ? MotionUI.startJob(`Saving ${totalOps} student record${totalOps===1?'':'s'}…`) : null;
+    let opsDone = 0;
+    const tick = () => { opsDone++; if(job) job.update(opsDone, totalOps, `${opsDone} of ${totalOps} saved`); };
     try{
-      for(const s of oldStudents){
-        if(!newIds.has(s.id)){
-          await throwIfNotOk(await fetch('/api/students?id=' + encodeURIComponent(s.id), { method:'DELETE', headers: actorHeaders() }));
-        }
+      for(const s of deletes){
+        await throwIfNotOk(await fetch('/api/students?id=' + encodeURIComponent(s.id), { method:'DELETE', headers: actorHeaders() }));
+        tick();
       }
-      for(const s of students){
+      for(const s of writes){
         const old = oldStudents.find(x => x.id === s.id);
         if(!old){
           await throwIfNotOk(await fetch('/api/students', { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(s) }));
-        }else if(JSON.stringify(old) !== JSON.stringify(s)){
+        }else{
           await throwIfNotOk(await fetch('/api/students', { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(s) }));
         }
+        tick();
       }
       _studentsLastSynced = JSON.parse(JSON.stringify(students));
       localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
+      if(job) job.succeed(`${totalOps} of ${totalOps} saved`);
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
       localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
+      if(job) job.fail('Stopped — ' + e.message);
     }
   }
 
@@ -3521,11 +3767,18 @@
       currentUser = u;
       moduleAccess = u.moduleAccess || { restricted: false, enabledKeys: [] };
       sessionStorage.setItem('rgv_current_user', u.id);
-      await loadAllAppData();
+      // A returning visit with an existing session cookie used to just sit
+      // on the (already-visible) login screen doing nothing for however long
+      // this data load took, then abruptly flip to the dashboard — the exact
+      // "did anything happen or did it freeze?" doubt reported for this app.
+      showLoginBootProgress();
+      await loadAllAppData((done,total,label) => updateLoginBootProgress(done,total,label));
+      hideLoginBootProgress();
       hideLoginScreen();
       applyRolePermissions();
       initSbSectionsCollapseState();
       updateMyProfileBadge();
+      MotionUI.tickSyncChip();
       const allowed = getRoleViews(currentUser.role).length ? getRoleViews(currentUser.role) : ['dashboard'];
       switchView(allowed[0]);
       startIdleWatcher();
@@ -3544,6 +3797,29 @@
   function hideLoginScreen(){
     document.getElementById('loginOverlay').style.display = 'none';
     document.getElementById('appShell').style.display = 'flex';
+  }
+
+  // Determinate progress + rotating "Loading <module>…" microcopy for the
+  // one wait every single user hits and could previously not tell was still
+  // running: the 33-loader data fetch after a successful login (and again,
+  // silently, when an existing session is restored on page refresh). Shown
+  // right on the login card, which is already what's on screen at that point.
+  function showLoginBootProgress(){
+    const box = document.getElementById('loginBootProgress');
+    if(box) box.style.display = 'block';
+  }
+  function updateLoginBootProgress(done, total, label){
+    const fill = document.getElementById('loginBootFill');
+    const text = document.getElementById('loginBootLabel');
+    const pct = total > 0 ? Math.round((done/total)*100) : 0;
+    if(fill) fill.style.width = pct + '%';
+    if(text) text.textContent = `Loading ${label}… (${done} of ${total})`;
+  }
+  function hideLoginBootProgress(){
+    const box = document.getElementById('loginBootProgress');
+    if(box) box.style.display = 'none';
+    const fill = document.getElementById('loginBootFill');
+    if(fill) fill.style.width = '0%';
   }
 
   // Verifies a username/password against the server (the only place that can
@@ -3577,7 +3853,11 @@
     e.preventDefault();
     const uname = document.getElementById('loginUsername').value.trim();
     const pw = document.getElementById('loginPassword').value;
-    const u = await verifyLogin(uname, pw, loginAudience);
+    const submitBtn = document.getElementById('loginSubmitBtn');
+    // Button-swallows-label: the "Sign In" button itself visibly does
+    // something the instant it's clicked, rather than sitting inert through
+    // the credential check network round trip.
+    const u = await MotionUI.busyButton(submitBtn, () => verifyLogin(uname, pw, loginAudience));
     if(!u){
       const errEl = document.getElementById('loginError');
       // A suspended-access or wrong-audience message is real, specific
@@ -3605,11 +3885,19 @@
     // whatever was cached locally instead of the real server data. Now that
     // /api/login has set a real session cookie, load everything again —
     // this time every request is authenticated and gets the actual data.
-    await loadAllAppData();
+    // Determinate progress + rotating "Loading <module>…" microcopy in place
+    // of the button, so the wait for all 33 loaders reads as active work
+    // instead of a frozen screen.
+    if(submitBtn) submitBtn.style.display = 'none';
+    showLoginBootProgress();
+    await loadAllAppData((done,total,label) => updateLoginBootProgress(done,total,label));
+    hideLoginBootProgress();
+    if(submitBtn) submitBtn.style.display = '';
     hideLoginScreen();
     applyRolePermissions();
     initSbSectionsCollapseState();
     updateMyProfileBadge();
+    MotionUI.tickSyncChip();
     const allowed = getRoleViews(currentUser.role).length ? getRoleViews(currentUser.role) : ['dashboard'];
     switchView(allowed[0]);
     startIdleWatcher();
@@ -4003,26 +4291,40 @@
     const apiPath = API_BACKED_KEYS[key];
     const oldArray = _apiLastSynced[key] || [];
     const newIds = new Set(newArray.map(x => x.id));
+    const deletes = oldArray.filter(item => !newIds.has(item.id));
+    const writes = newArray.filter(item => {
+      const old = oldArray.find(x => x.id === item.id);
+      return !old || JSON.stringify(old) !== JSON.stringify(item);
+    });
+    const totalOps = deletes.length + writes.length;
+    // Same reasoning as persist() above (students) — only a genuinely bulk
+    // change (a big import/bulk-edit) gets the persistent job-tray progress;
+    // an ordinary single-record save is already covered by the top bar.
+    const job = totalOps > 15 ? MotionUI.startJob(`Saving ${totalOps} record${totalOps===1?'':'s'}…`) : null;
+    let opsDone = 0;
+    const tick = () => { opsDone++; if(job) job.update(opsDone, totalOps, `${opsDone} of ${totalOps} saved`); };
     try{
-      for(const item of oldArray){
-        if(!newIds.has(item.id)){
-          await throwIfNotOk(await fetch(apiPath + '?id=' + encodeURIComponent(item.id), { method:'DELETE', headers: actorHeaders() }));
-        }
+      for(const item of deletes){
+        await throwIfNotOk(await fetch(apiPath + '?id=' + encodeURIComponent(item.id), { method:'DELETE', headers: actorHeaders() }));
+        tick();
       }
-      for(const item of newArray){
+      for(const item of writes){
         const old = oldArray.find(x => x.id === item.id);
         if(!old){
           await throwIfNotOk(await fetch(apiPath, { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(item) }));
-        }else if(JSON.stringify(old) !== JSON.stringify(item)){
+        }else{
           await throwIfNotOk(await fetch(apiPath, { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(item) }));
         }
+        tick();
       }
       _apiLastSynced[key] = JSON.parse(JSON.stringify(newArray));
       localStorage.setItem(key, JSON.stringify(newArray)); // local fallback copy
       usingLocalFallback = false;
+      if(job) job.succeed(`${totalOps} of ${totalOps} saved`);
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
       localStorage.setItem(key, JSON.stringify(newArray));
+      if(job) job.fail('Stopped — ' + e.message);
       if(e.message !== 'SESSION_EXPIRED') usingLocalFallback = true;
     }
   }
@@ -21454,7 +21756,8 @@
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" onclick="renderImportWizardStep2()">Back</button>
-        <button type="button" class="btn btn-primary" onclick="commitImportWizard()" ${counts.new+counts.update===0?'disabled':''}>Import ${counts.new+counts.update} ${cfg.label} (${counts.new} new, ${counts.update} update)</button>
+        <button type="button" class="btn btn-primary" onclick="commitImportWizard(this)" ${counts.new+counts.update===0?'disabled':''}>Import ${counts.new+counts.update} ${cfg.label} (${counts.new} new, ${counts.update} update)</button>
+        <div class="mt-import-status" id="importWizardRotatingStatus" style="display:none; font-size:0.78rem; color:var(--ink-soft); margin-top:8px;"></div>
       </div>
     `;
   }
@@ -21476,7 +21779,7 @@
     XLSX.writeFile(wb, `${slugifySchoolName()}_${importWizard.entity}_import_issues.xlsx`);
   }
 
-  async function commitImportWizard(){
+  async function commitImportWizard(btn){
     const cfg = IMPORT_FIELD_DEFS[importWizard.entity];
     const list = cfg.listRef();
     const toCommit = importWizard.validated.filter(r => r.status !== 'error');
@@ -21484,37 +21787,51 @@
     const proceed = await showConfirmDialog(`Import ${toCommit.length} ${cfg.label.toLowerCase()} record(s) now?`, {title:'Confirm Import'});
     if(!proceed) return;
 
-    let added = 0, updated = 0;
-    toCommit.forEach(r => {
-      if(r.existingId){
-        const existing = list.find(x => x.id === r.existingId);
-        if(existing){
-          // Patch semantics — see the big comment at the top of this section:
-          // only a field that actually had a value in this row is written;
-          // a blank cell never clears something already on file.
-          r.presentKeys.forEach(k => {
-            const f = cfg.fields.find(x => x.key === k);
-            if(f && f.isMatchKey) return;
-            existing[k] = r.fields[k];
-          });
-          if(cfg.deriveFields) cfg.deriveFields(existing);
-          updated++;
+    // A large import can take a real amount of time once it reaches the
+    // network-save step below (see persist()/syncArrayToApi() job-tray
+    // progress) — this is the exact "did it freeze?" scenario reported, so
+    // the button and this status line stay visibly busy for the whole thing,
+    // with rotating phase text under it since building the in-memory patch
+    // and writing it to the server are two genuinely different phases.
+    const statusEl = document.getElementById('importWizardRotatingStatus');
+    let rotator = null;
+    if(statusEl){ statusEl.style.display = 'block'; rotator = MotionUI.rotatingText(statusEl, ['Applying changes…', 'Writing to the database…', 'Almost there…'], 1600); }
+
+    await MotionUI.busyButton(btn, async () => {
+      let added = 0, updated = 0;
+      toCommit.forEach(r => {
+        if(r.existingId){
+          const existing = list.find(x => x.id === r.existingId);
+          if(existing){
+            // Patch semantics — see the big comment at the top of this section:
+            // only a field that actually had a value in this row is written;
+            // a blank cell never clears something already on file.
+            r.presentKeys.forEach(k => {
+              const f = cfg.fields.find(x => x.key === k);
+              if(f && f.isMatchKey) return;
+              existing[k] = r.fields[k];
+            });
+            if(cfg.deriveFields) cfg.deriveFields(existing);
+            updated++;
+          }
+        }else{
+          const rec = cfg.newRecordDefaults();
+          cfg.fields.forEach(f => { if(!f.isMatchKey) rec[f.key] = r.fields[f.key]; });
+          rec[cfg.matchKey] = r.fields[cfg.matchKey] || cfg.newIdValue();
+          if(cfg.deriveFields) cfg.deriveFields(rec);
+          list.push(rec);
+          added++;
         }
-      }else{
-        const rec = cfg.newRecordDefaults();
-        cfg.fields.forEach(f => { if(!f.isMatchKey) rec[f.key] = r.fields[f.key]; });
-        rec[cfg.matchKey] = r.fields[cfg.matchKey] || cfg.newIdValue();
-        if(cfg.deriveFields) cfg.deriveFields(rec);
-        list.push(rec);
-        added++;
-      }
+      });
+      await cfg.afterCommit();
+      if(rotator) rotator.stop();
+      if(statusEl) statusEl.style.display = 'none';
+      const errorCount = importWizard.validated.length - toCommit.length;
+      let msg = `${added} added, ${updated} updated.`;
+      if(errorCount) msg += ` ${errorCount} row(s) had errors and were not imported — download the Issues Report from the previous step to see why.`;
+      showToast(msg);
+      closeImportWizard();
     });
-    await cfg.afterCommit();
-    const errorCount = importWizard.validated.length - toCommit.length;
-    let msg = `${added} added, ${updated} updated.`;
-    if(errorCount) msg += ` ${errorCount} row(s) had errors and were not imported — download the Issues Report from the previous step to see why.`;
-    showToast(msg);
-    closeImportWizard();
   }
 
   // ===== Recently Deleted (soft-delete trash + restore) =====
@@ -22267,10 +22584,71 @@
     });
   }
 
+  // The sibling picker used to be one giant <select> listing every enrolled
+  // student ("Select a student already enrolled") — fine at first, unusable
+  // once the school had hundreds of students on file. Replaced with a live
+  // search: type a couple of letters, matches rank surname hits first (a
+  // sibling search is almost always "same surname"), then first-name hits,
+  // then any other match, with an optional class/section narrow-down for
+  // when you already know where the sibling studies.
+  let wizardSiblingExcludeId = '';
   function populateSiblingSelect(excludeId){
-    const sel = document.getElementById('fSiblingSelect');
-    sel.innerHTML = '<option value="">Select a student already enrolled</option>' +
-      students.filter(s => s.id !== excludeId).map(s => `<option value="${s.id}">${s.firstName} ${s.lastName} — ${s.admissionNo}</option>`).join('');
+    wizardSiblingExcludeId = excludeId || '';
+    const classSel = document.getElementById('fSiblingClassFilter');
+    const secSel = document.getElementById('fSiblingSectionFilter');
+    if(classSel) classSel.innerHTML = '<option value="">Any class</option>' + CLASS_LEVELS.map(c => `<option>${c}</option>`).join('');
+    if(secSel) secSel.innerHTML = '<option value="">Any section</option>' + SECTIONS.map(s => `<option>${s}</option>`).join('');
+    const searchEl = document.getElementById('fSiblingSearch');
+    if(searchEl) searchEl.value = '';
+    renderSiblingSearchResults();
+  }
+
+  function siblingSearchRank(s, q){
+    const first = (s.firstName||'').trim().toLowerCase();
+    const last = (s.lastName||'').trim().toLowerCase();
+    if(last.startsWith(q)) return 0;   // surname match — ranked first, as asked
+    if(first.startsWith(q)) return 1;  // first-name match
+    if(last.includes(q) || first.includes(q)) return 2; // matches mid-word
+    return -1; // no match at all
+  }
+  function highlightMatch(name, q){
+    if(!q) return escapeHtml(name);
+    const idx = name.toLowerCase().indexOf(q);
+    if(idx === -1) return escapeHtml(name);
+    return escapeHtml(name.slice(0,idx)) + '<mark>' + escapeHtml(name.slice(idx, idx+q.length)) + '</mark>' + escapeHtml(name.slice(idx+q.length));
+  }
+  function renderSiblingSearchResults(){
+    const box = document.getElementById('siblingSearchResults');
+    if(!box) return;
+    const q = (document.getElementById('fSiblingSearch').value || '').trim().toLowerCase();
+    const classFilter = document.getElementById('fSiblingClassFilter').value;
+    const sectionFilter = document.getElementById('fSiblingSectionFilter').value;
+    if(q.length < 2){
+      box.innerHTML = q.length ? `<div class="sibling-result-empty">Keep typing — at least 2 letters.</div>` : '';
+      return;
+    }
+    const matches = students
+      .filter(s => s.id !== wizardSiblingExcludeId && !wizardSiblings.includes(s.id))
+      .filter(s => !classFilter || s.className === classFilter)
+      .filter(s => !sectionFilter || s.section === sectionFilter)
+      .map(s => ({ s, rank: siblingSearchRank(s, q) }))
+      .filter(x => x.rank !== -1)
+      .sort((a,b) => a.rank - b.rank || (a.s.firstName||'').localeCompare(b.s.firstName||''))
+      .slice(0, 25);
+    if(!matches.length){
+      box.innerHTML = `<div class="sibling-result-empty">No enrolled student matches "${escapeHtml(q)}"${classFilter||sectionFilter ? ' in that class/section' : ''}.</div>`;
+      return;
+    }
+    const rankLabel = ['Surname match','Name match','Match'];
+    box.innerHTML = matches.map(({s, rank}) => `
+      <div class="sibling-result-row" onclick="addSiblingFromSearch('${s.id}')">
+        <div>
+          <div class="sibling-result-name">${highlightMatch(s.firstName||'', q)} <b>${highlightMatch(s.lastName||'', q)}</b></div>
+          <div class="sibling-result-meta">${s.className||'—'} — Section ${s.section||'—'} · Admission No: ${s.admissionNo||'—'}</div>
+        </div>
+        <span class="sibling-result-match">${rankLabel[rank]}</span>
+      </div>
+    `).join('');
   }
 
   function renderSiblingList(){
@@ -22282,16 +22660,18 @@
     }).join('');
   }
 
-  function addSibling(){
-    const id = document.getElementById('fSiblingSelect').value;
+  function addSiblingFromSearch(id){
     if(!id || wizardSiblings.includes(id)) return;
     wizardSiblings.push(id);
     renderSiblingList();
+    document.getElementById('fSiblingSearch').value = '';
+    renderSiblingSearchResults();
   }
 
   function removeSibling(id){
     wizardSiblings = wizardSiblings.filter(x => x !== id);
     renderSiblingList();
+    renderSiblingSearchResults();
   }
 
   function populateWizardRouteOptions(){
@@ -22631,7 +23011,7 @@
   // and submitLogin() once a real session is confirmed, so every module
   // ends up with actual server data rather than whatever the first,
   // pre-login pass fell back to.
-  function loadAllAppData(){
+  function loadAllAppData(onProgress){
     // These 29 loaders were chained one-after-another with .then() — fine
     // back when each just read its own key out of this browser's
     // localStorage instantly, but once the key/value store change made
@@ -22646,18 +23026,27 @@
     // ordering requirement between any two of them — safe to run together.
     // Total wait time now tracks the single slowest request instead of the
     // sum of all 29.
-    return Promise.all([
-      loadClassLevels(), loadSectionLevels(), loadClassSectionOverrides(),
-      loadSchoolInfo(), loadFinance(), loadFeeExtras(), loadAttendance(),
-      loadStaffAttendance(), loadExams(), loadRooms(), loadExamHallTickets(),
-      loadExamRoomConfigs(), loadExamHolidays(), loadReportTemplates(),
-      loadAdmitCardTemplates(), loadExamCoScholastic(),
-      loadAdminDownloads(), loadPendingApprovals(), loadInventory(),
-      loadTimetable(), loadSyllabusHomework(), loadTransport(), loadLibrary(),
-      loadHostel(), loadAccounting(), loadAccountingLedger(), loadComms(), loadStaff(),
-      loadStaffPayroll(), loadSubjects(), loadCustomRoles(), loadStudents(),
-      loadUsers(), loadBiometricStatus(),
-    ]);
+    // Optional onProgress(done, total, label) — passed only by the two
+    // authenticated call sites (submitLogin / initAuth) so the login screen
+    // can show real "18 of 33 loaded — Loading Attendance…" progress instead
+    // of going blank for however long this takes; the pre-login pass below
+    // doesn't bother (nothing meaningful to show yet).
+    const loaders = [
+      ['Classes', loadClassLevels], ['Sections', loadSectionLevels], ['Class/section setup', loadClassSectionOverrides],
+      ['School Profile', loadSchoolInfo], ['Finance', loadFinance], ['Fee Extras', loadFeeExtras], ['Attendance', loadAttendance],
+      ['Staff Attendance', loadStaffAttendance], ['Exams', loadExams], ['Rooms', loadRooms], ['Hall Tickets', loadExamHallTickets],
+      ['Exam Room Setup', loadExamRoomConfigs], ['Exam Holidays', loadExamHolidays], ['Report Templates', loadReportTemplates],
+      ['Admit Card Templates', loadAdmitCardTemplates], ['Co-Scholastic', loadExamCoScholastic],
+      ['Admin Downloads', loadAdminDownloads], ['Pending Approvals', loadPendingApprovals], ['Inventory', loadInventory],
+      ['Timetable', loadTimetable], ['Syllabus & Homework', loadSyllabusHomework], ['Transport', loadTransport], ['Library', loadLibrary],
+      ['Hostel', loadHostel], ['Accounting', loadAccounting], ['Accounting Ledger', loadAccountingLedger], ['Communication', loadComms], ['Staff', loadStaff],
+      ['Staff Payroll', loadStaffPayroll], ['Subjects', loadSubjects], ['Custom Roles', loadCustomRoles], ['Students', loadStudents],
+      ['Users', loadUsers], ['Biometric Status', loadBiometricStatus],
+    ];
+    if(!onProgress) return Promise.all(loaders.map(([,fn]) => fn()));
+    let done = 0;
+    const total = loaders.length;
+    return Promise.all(loaders.map(([label, fn]) => Promise.resolve(fn()).finally(() => { done++; onProgress(done, total, label); })));
   }
   loadAllAppData().then(() => initAuth()).then(() => applyTheme(document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'));
 </script>
