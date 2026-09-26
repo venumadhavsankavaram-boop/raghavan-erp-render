@@ -1137,6 +1137,52 @@
   /* --- data loading: your uploaded Lottie animation --- */
   .mo-lottie-mini{width:46px; height:46px; margin:0 auto 4px;}
 
+  /* ============================================================
+     Motion kit v3 — universal save/load feedback.
+     Receipts (payments, ledger payments, certificates): toast icon
+     switches from the burst ring to "processing + count-up".
+     Every other save/load funnels through storageSet/storageGet,
+     which drives a small ambient corner badge: Loading(your file)
+     while a request is in flight, Soft Pulse Ring once a save is
+     confirmed stored. Never shown on the login screen.
+  ============================================================ */
+  /* --- toast icon: processing ring + count-up (receipts) --- */
+  .mo-radial-icon{width:30px; height:30px; flex:none; display:inline-flex; position:relative;}
+  .mo-radial-icon svg{width:100%; height:100%; transform:rotate(-90deg);}
+  .mo-radial-track{fill:none; stroke:rgba(255,255,255,.3); stroke-width:7;}
+  .mo-radial-bar{fill:none; stroke:#38C285; stroke-width:7; stroke-linecap:round; stroke-dasharray:88; stroke-dashoffset:88;}
+  .mo-radial-icon.run .mo-radial-bar{animation:moRadialFill 1s cubic-bezier(.3,.6,.3,1) forwards;}
+  @keyframes moRadialFill{ to{stroke-dashoffset:0;} }
+  .mo-radial-count{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-family:'JetBrains Mono',monospace; font-weight:700; font-size:.56rem; color:#fff;
+  }
+  .mo-radial-check{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    opacity:0; transform:scale(.5); color:#38C285; font-size:16px; font-weight:800;
+  }
+  .mo-radial-icon.run .mo-radial-check{animation:moRadialCheckIn .3s .95s cubic-bezier(.3,1.8,.4,1) forwards;}
+  @keyframes moRadialCheckIn{ to{opacity:1; transform:scale(1);} }
+
+  /* --- ambient corner badge: universal save/load status --- */
+  .mo-sync-badge{
+    position:fixed; left:18px; bottom:18px; z-index:70;
+    display:none; align-items:center; gap:8px;
+    background:var(--navy); color:#fff; padding:8px 14px; border-radius:999px;
+    box-shadow:var(--shadow); font-size:.78rem; font-weight:600;
+    opacity:0; transform:translateY(8px); pointer-events:none;
+    transition:opacity .2s ease, transform .2s ease;
+  }
+  .mo-sync-badge.show{display:flex; opacity:1; transform:translateY(0);}
+  .mo-sync-badge .mo-sync-icon{display:none; align-items:center; justify-content:center; width:20px; height:20px; flex:none;}
+  .mo-sync-badge.mode-loading .mo-sync-icon-load, .mo-sync-badge.mode-saving .mo-sync-icon-load{display:flex;}
+  .mo-sync-badge.mode-saved .mo-sync-icon-pulse{display:flex;}
+  .mo-sync-badge#moSyncBadge .mo-lottie-mini{width:20px; height:20px; margin:0;}
+  .mo-pulse-ring{width:14px; height:14px; border-radius:50%; border:2px solid #38C285; position:relative;}
+  .mo-pulse-ring::after{content:''; position:absolute; inset:-4px; border-radius:50%; border:2px solid #38C285; opacity:.7; animation:moPulseRing 1s ease-out;}
+  @keyframes moPulseRing{ 0%{transform:scale(.5); opacity:.8;} 100%{transform:scale(1.9); opacity:0;} }
+  .mo-sync-badge.mode-error{background:#7a2e2e;}
+
 </style>
 <script>
   /* ===== AUTOMATIC WEBSITE THEME SYNC =====
@@ -2723,6 +2769,11 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="mo-sync-badge" id="moSyncBadge" aria-hidden="true">
+  <span class="mo-sync-icon mo-sync-icon-load"><div class="mo-lottie-mini" id="moSyncLottie"></div></span>
+  <span class="mo-sync-icon mo-sync-icon-pulse"><span class="mo-pulse-ring"></span></span>
+  <span class="mo-sync-label" id="moSyncLabel">Loading…</span>
+</div>
 
 <script>
   /* ===== THEME (dark/light mode) ===== */
@@ -2978,7 +3029,7 @@
     return `<tr><td colspan="${colspan}"><div class="empty-state"><div class="mo-lottie-mini"></div><b>Loading…</b></div></td></tr>`;
   }
 
-  function showToast(msg, kind){
+  function showToast(msg, kind, countTarget){
     const t = document.getElementById('toast');
     if(kind === 'burst' || kind === 'ringdraw'){
       const iconSvg = kind === 'burst'
@@ -2998,11 +3049,72 @@
              <path class="mo-ringdraw-check" d="M20 37 L30 47 L52 24"></path>
            </svg>`;
       t.innerHTML = `<span class="mo-burst-icon">${iconSvg}</span><span>${msg}</span>`;
+    } else if(kind === 'radial'){
+      // Processing + count-up — used for receipts (payments, ledger payments, certificates)
+      // instead of the plain success ring, per the user's request.
+      t.innerHTML = `<span class="mo-radial-icon run" id="moRadialIcon">
+          <svg viewBox="0 0 36 36">
+            <circle class="mo-radial-track" cx="18" cy="18" r="14"></circle>
+            <circle class="mo-radial-bar" cx="18" cy="18" r="14"></circle>
+          </svg>
+          <div class="mo-radial-count" id="moRadialCount">0</div>
+          <div class="mo-radial-check">✓</div>
+        </span><span>${msg}</span>`;
+      const target = Math.round(Number(countTarget)) || 100;
+      const countEl = document.getElementById('moRadialCount');
+      const start = performance.now();
+      const dur = 1000;
+      const tick = (now) => {
+        const tt = Math.min((now-start)/dur, 1);
+        const eased = 1 - Math.pow(1-tt, 3);
+        if(countEl) countEl.textContent = Math.round(eased * target);
+        if(tt < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
     } else {
       t.textContent = msg;
     }
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  // ===== Universal save/load ambient indicator =====
+  // Drives the small corner badge (#moSyncBadge): "Loading (your file)" while a
+  // storageSet/storageGet call is in flight, "Soft pulse ring" once a save is
+  // confirmed stored. Wired at the storageSet/storageGet choke point (below) so
+  // it covers every save/load in the app without patching each call site, and
+  // never touches submitLogin (which uses its own separate fetch, not these).
+  let moSyncActive = 0;
+  let moSyncHideTimer = null;
+  function moSyncSetMode(mode, label){
+    const badge = document.getElementById('moSyncBadge');
+    if(!badge) return;
+    // Never show this on the login/sign-in screen (e.g. the post-login
+    // loadAllAppData() calls, which run before hideLoginScreen()) — that
+    // screen must stay exactly as it was, with no added motion.
+    const loginOverlay = document.getElementById('loginOverlay');
+    if(loginOverlay && loginOverlay.style.display !== 'none'){
+      badge.classList.remove('show');
+      return;
+    }
+    badge.className = 'mo-sync-badge show mode-' + mode;
+    const lbl = document.getElementById('moSyncLabel');
+    if(lbl) lbl.textContent = label;
+    if(mode === 'loading' || mode === 'saving') moMountLotties();
+  }
+  function moSyncStart(kind){
+    moSyncActive++;
+    clearTimeout(moSyncHideTimer);
+    moSyncSetMode(kind === 'save' ? 'saving' : 'loading', kind === 'save' ? 'Saving…' : 'Loading…');
+  }
+  function moSyncDone(kind, ok){
+    moSyncActive = Math.max(0, moSyncActive - 1);
+    if(kind === 'save') moSyncSetMode(ok ? 'saved' : 'error', ok ? 'Saved' : 'Not saved');
+    const badge = document.getElementById('moSyncBadge');
+    clearTimeout(moSyncHideTimer);
+    moSyncHideTimer = setTimeout(() => {
+      if(moSyncActive === 0 && badge) badge.classList.remove('show');
+    }, kind === 'save' ? 1100 : 250);
   }
 
   /* ===== Field validation helpers (mobile numbers, Aadhaar, photo size) =====
@@ -4184,7 +4296,21 @@
       if(e.message !== 'SESSION_EXPIRED') usingLocalFallback = true;
     }
   }
+  // Thin wrapper: drives the ambient "Loading (your file)" badge around every
+  // storageGet call (and, by extension, every syncArrayToApi call reached via
+  // storageSet below), without touching the actual fetch/fallback logic.
   async function storageGet(key, fallback){
+    moSyncStart('load');
+    try{
+      const r = await _storageGetImpl(key, fallback);
+      moSyncDone('load', true);
+      return r;
+    }catch(e){
+      moSyncDone('load', false);
+      throw e;
+    }
+  }
+  async function _storageGetImpl(key, fallback){
     if(OBJECT_BACKED_KEYS[key]){
       try{
         const res = await fetch(OBJECT_BACKED_KEYS[key]);
@@ -4222,7 +4348,21 @@
       }
     }catch(e){ return fallback; }
   }
+  // Thin wrapper: drives the ambient "Loading (your file)" → "Soft pulse ring"
+  // badge around every storageSet call, without touching the actual save
+  // logic (server PUT/POST/DELETE, localStorage fallback, error toasts).
   async function storageSet(key, value){
+    moSyncStart('save');
+    try{
+      const r = await _storageSetImpl(key, value);
+      moSyncDone('save', true);
+      return r;
+    }catch(e){
+      moSyncDone('save', false);
+      throw e;
+    }
+  }
+  async function _storageSetImpl(key, value){
     if(OBJECT_BACKED_KEYS[key]){
       try{
         await throwIfNotOk(await fetch(OBJECT_BACKED_KEYS[key], { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(value) }));
@@ -5046,7 +5186,7 @@
     closePaymentModal();
     renderDashboard();
     if(document.getElementById('view-managefee').style.display !== 'none') renderFeeBody();
-    showToast('Payment recorded.', 'burst');
+    showToast('Payment recorded.', 'radial', record.amount);
     if(await showConfirmDialog('Payment recorded. Print receipt now?')){
       printReceipt(record.id);
     }
@@ -5540,7 +5680,7 @@
     await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
     renderDashboard();
     renderFeeBody();
-    showToast(entries.length + ' payment(s) recorded.', 'burst');
+    showToast(entries.length + ' payment(s) recorded.', 'radial', entries.reduce((s,e)=>s+e.amt,0));
     if(lastId && await showConfirmDialog('Payment(s) recorded. Print receipt now?')){
       printReceipt(lastId);
     }
@@ -22251,7 +22391,7 @@
       const data = await res.json();
       closeCertModal();
       printFn(s, { serialNo:data.serialNo, conduct:payload.conduct, purpose:payload.purpose, details:data.details || payload.details });
-      showToast(type + ' Certificate ' + data.serialNo + ' generated and logged.', 'burst');
+      showToast(type + ' Certificate ' + data.serialNo + ' generated and logged.', 'radial', 100);
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast('Could not generate the certificate (' + e.message + ').');
     }
