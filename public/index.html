@@ -6929,23 +6929,39 @@
   }
 
   /* --- Stats --- */
-  // Counts in "sessions" now, not raw rows — a sessionless (pre-two-session)
-  // record counts twice, a Morning/Afternoon-tagged record counts once each,
-  // so a full pre-feature day and a fully-marked new-style day both weigh
-  // the same. See attSessionWeight().
+  // Student attendance is reported in DAY-equivalents, not raw session
+  // counts. attSessionWeight() weighs a sessionless (pre-two-session)
+  // record as 2 "half-day units" and a Morning/Afternoon-tagged record as
+  // 1 each — dividing the summed weight by 2 turns that into actual days:
+  // a fully-present day (both sessions, or one legacy whole-day record)
+  // comes out to 1, and a day where only one of the two sessions was
+  // marked Present comes out to 0.5 — the "1/2 day" a student who only
+  // attended the morning session should show, instead of the raw session
+  // count (which used to read as a confusing whole "1").
+  // (Staff attendance/payroll deliberately keeps its own separate raw
+  // session-unit counting — see computeStaffAttendanceStats — so this
+  // conversion is student-only and doesn't touch that.)
   function computeAttendanceStats(studentId, fromDate, toDate){
     let recs = attendanceRecords.filter(r => r.studentId === studentId);
     if(fromDate) recs = recs.filter(r => r.date >= fromDate);
     if(toDate) recs = recs.filter(r => r.date <= toDate);
-    const sumBy = status => recs.filter(r => r.status===status).reduce((n,r) => n + attSessionWeight(r), 0);
+    const sumBy = status => recs.filter(r => r.status===status).reduce((n,r) => n + attSessionWeight(r), 0) / 2;
     const present = sumBy('Present');
     const late = sumBy('Late');
     const absent = sumBy('Absent');
     const leave = sumBy('Leave');
-    const total = recs.reduce((n,r) => n + attSessionWeight(r), 0);
+    const total = recs.reduce((n,r) => n + attSessionWeight(r), 0) / 2;
     const attended = present + late;
     const pct = total > 0 ? Math.round((attended/total)*100) : 0;
     return { present, absent, late, leave, total, pct };
+  }
+  // Formats a day-equivalent attendance count for display: a whole number
+  // of days shows plain ("12"), a half-day remainder shows as ".5" ("12.5")
+  // rather than an ugly float — this is the literal "1/2" the count now
+  // reflects when only one session of a day was marked.
+  function fmtAttDays(n){
+    n = Math.round((Number(n)||0) * 2) / 2; // snap away any float noise
+    return Number.isInteger(n) ? String(n) : n.toFixed(1);
   }
 
   /* --- Reports --- */
@@ -6979,15 +6995,15 @@
         <span><span class="dot2" style="background:var(--magenta);"></span>Absent</span>
         <span><span class="dot2" style="background:var(--brand-navy);"></span>Leave (counts as absent)</span>
       </div>
-      <p style="font-size:0.74rem; color:var(--ink-soft); margin:-4px 0 10px;">Counts are per <b>session</b> (Morning + Afternoon), not per day — a fully-present day now shows as 2, not 1. Attendance marked before the two-session change is counted as 2 (a full day) either way, so % stays consistent across the change.</p>
+      <p style="font-size:0.74rem; color:var(--ink-soft); margin:-4px 0 10px;">Counts are in <b>days</b> — if only one of the two sessions (Morning/Afternoon) was marked on a given date, that date counts as half a day (shown as ".5") instead of a full day.</p>
       <div class="table-wrap">
         <table><thead><tr><th>Student</th><th>Class</th><th>Present</th><th>Absent</th><th>Late</th><th>Leave</th><th>Total Marked</th><th>%</th></tr></thead>
         <tbody>
         ${rows.map(r => `<tr>
           <td class="name-cell">${r.s.firstName} ${r.s.lastName}</td>
           <td><span class="pill">${r.s.className} - ${r.s.section}</span></td>
-          <td>${r.stats.present}</td><td>${r.stats.absent}</td><td>${r.stats.late}</td><td>${r.stats.leave}</td>
-          <td>${r.stats.total}</td>
+          <td>${fmtAttDays(r.stats.present)}</td><td>${fmtAttDays(r.stats.absent)}</td><td>${fmtAttDays(r.stats.late)}</td><td>${fmtAttDays(r.stats.leave)}</td>
+          <td>${fmtAttDays(r.stats.total)}</td>
           <td class="att-pct ${r.pctClass}">${r.stats.pct}%</td>
         </tr>`).join('')}
         </tbody></table>
@@ -7103,7 +7119,7 @@
           <td class="name-cell">${d.student.firstName} ${d.student.lastName}</td>
           <td><span class="pill">${d.student.className} - ${d.student.section}</span></td>
           <td>${d.parentPhone||'—'}</td>
-          <td>${d.stats.present}</td><td>${d.stats.absent}</td>
+          <td>${fmtAttDays(d.stats.present)}</td><td>${fmtAttDays(d.stats.absent)}</td>
           <td class="att-pct bad">${d.stats.pct}%</td>
           <td><button class="btn-edit-text" onclick="openAttNotifyModal('single','${d.student.id}')">Notify</button></td>
         </tr>`).join('')}
