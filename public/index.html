@@ -3241,11 +3241,20 @@
         tick();
       }
       _studentsLastSynced = JSON.parse(JSON.stringify(students));
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
+      // This local copy is only an offline fallback — the real save above
+      // already succeeded at this point. A large roster with many photos
+      // can exceed the browser's own localStorage quota (5-10MB, separate
+      // from any server/database quota), which used to throw here AFTER a
+      // successful server save and get reported as "Could not save to the
+      // server" — a false alarm that scared people into thinking their edit
+      // was lost when it had already reached the database fine. Now it's
+      // just silently skipped: the server copy (just written above) is the
+      // real one anyway.
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(students)); }catch(e){}
       if(job) job.succeed(`${totalOps} of ${totalOps} saved`);
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(students)); }catch(e2){}
       if(job) job.fail('Stopped — ' + e.message);
     }
   }
@@ -4318,12 +4327,17 @@
         tick();
       }
       _apiLastSynced[key] = JSON.parse(JSON.stringify(newArray));
-      localStorage.setItem(key, JSON.stringify(newArray)); // local fallback copy
+      // Local fallback copy only — the real save already succeeded above.
+      // See the matching comment in persist() for why this is wrapped: a
+      // full browser localStorage quota (separate from anything server- or
+      // database-side) used to throw here right after a successful save and
+      // get misreported as a failed one.
+      try{ localStorage.setItem(key, JSON.stringify(newArray)); }catch(e){}
       usingLocalFallback = false;
       if(job) job.succeed(`${totalOps} of ${totalOps} saved`);
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
-      localStorage.setItem(key, JSON.stringify(newArray));
+      try{ localStorage.setItem(key, JSON.stringify(newArray)); }catch(e2){}
       if(job) job.fail('Stopped — ' + e.message);
       if(e.message !== 'SESSION_EXPIRED') usingLocalFallback = true;
     }
@@ -4370,11 +4384,12 @@
     if(OBJECT_BACKED_KEYS[key]){
       try{
         await throwIfNotOk(await fetch(OBJECT_BACKED_KEYS[key], { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(value) }));
-        localStorage.setItem(key, JSON.stringify(value));
+        // Local fallback copy only — see the matching comment in persist().
+        try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){}
         usingLocalFallback = false;
       }catch(e){
         if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
-        localStorage.setItem(key, JSON.stringify(value));
+        try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e2){}
         if(e.message !== 'SESSION_EXPIRED') usingLocalFallback = true;
       }
       return;
