@@ -2230,6 +2230,50 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="familyFeeModalOverlay">
+  <div class="modal" style="max-width:820px;">
+    <div class="modal-inner">
+      <button class="modal-close" onclick="closeFamilyFeeModal()">&times;</button>
+      <h2>Collect Family Fees</h2>
+      <p class="modal-sub">Record one offline payment across the family.</p>
+      <div class="form-grid" style="margin-bottom:10px;">
+        <div class="f-field">
+          <label>Payment Mode</label>
+          <select id="ffMode"><option>Cash</option><option>Online</option><option>UPI</option><option>Cheque</option></select>
+        </div>
+        <div class="f-field">
+          <label>Payment Date</label>
+          <input type="date" id="ffDate">
+        </div>
+        <div class="f-field">
+          <label>Notes</label>
+          <input type="text" id="ffNote" placeholder="Optional notes">
+        </div>
+        <div class="f-field">
+          <label>Family Total (auto-divide)</label>
+          <input type="number" min="0" id="ffFamilyTotal" placeholder="Enter amount" oninput="autoDivideFamilyTotal()">
+        </div>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto; margin-bottom:14px;">
+        <table><thead><tr>
+          <th style="width:36px;"></th><th>Student</th><th>Type</th><th>Due Date</th><th>Outstanding</th><th>Amount to Pay</th>
+        </tr></thead>
+        <tbody id="familyFeeRows"></tbody></table>
+      </div>
+      <div class="pay-summary-box">
+        <div class="pay-summary-grid">
+          <div class="pay-summary-item highlight"><span>Total to Pay</span><b id="ffTotalToPay">₹0</b></div>
+          <div class="pay-summary-item" id="ffUnallocatedWrap" style="display:none;"><span>Not allocated</span><b id="ffUnallocated" style="color:var(--magenta);">₹0</b></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeFamilyFeeModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="submitFamilyPayments()">💰 Collect Fees</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="userModalOverlay">
   <div class="modal" style="max-width:480px;">
     <div class="modal-inner">
@@ -5218,21 +5262,42 @@
     return 'REHS-' + yy + '-' + String(seq).padStart(6,'0');
   }
 
+  // Prints one payment record exactly as before — unchanged for every
+  // existing single-category payment, which is still the vast majority.
   function printReceipt(paymentIdOrRecord){
     const p = (typeof paymentIdOrRecord === 'object' && paymentIdOrRecord !== null)
       ? paymentIdOrRecord
       : payments.find(x => x.id === paymentIdOrRecord);
     if(!p) return;
+    // A family-fee collection gives every fee head paid for ONE student in
+    // the same batch the same receipt number (see recordFamilyPayment), so
+    // grouping by receiptNo here prints them as one itemized receipt instead
+    // of one receipt per head — while a normal single-category payment's
+    // receiptNo is unique to itself, so this group is always just [p].
+    const group = p.receiptNo ? payments.filter(x => x.receiptNo === p.receiptNo && x.studentId === p.studentId) : [p];
+    printReceiptRecords(group.length ? group : [p]);
+  }
+  // Prints every payment record sharing one receipt number (e.g. from
+  // recordFamilyPayment) as a single itemized receipt.
+  function printReceiptByNo(receiptNo){
+    const recs = payments.filter(p => p.receiptNo === receiptNo);
+    if(!recs.length) return;
+    printReceiptRecords(recs);
+  }
+  function printReceiptRecords(recs){
+    const p = recs[0];
+    if(!p) return;
     const s = students.find(x => x.id === p.studentId);
     if(!s) return;
     const receiptNo = p.receiptNo || nextReceiptNo();
-    const netPaid = Number(p.amount)||0;
-    const disc = Number(p.discount)||0;
+    const netPaid = recs.reduce((sum,r) => sum + (Number(r.amount)||0), 0);
+    const disc = recs.reduce((sum,r) => sum + (Number(r.discount)||0), 0);
     const { totals } = computeStudentFinance(s);
     const phone = s.fatherPhone || s.motherPhone || s.guardianPhone || '—';
     const address = s.fatherAddress || s.motherAddress || s.guardianAddress || '—';
     const fatherName = s.fatherName || '—';
     const amountWords = 'Rs ' + numberToWordsIndian(netPaid) + ' Only';
+    const feeRowsHtml = recs.map(r => `<tr><td>${feeLabelFor(r)}</td><td>${r.instalment || '—'}</td><td style="text-align:right;">${(Number(r.amount)||0).toLocaleString('en-IN')}.00</td></tr>`).join('');
 
     const copyBlock = (label) => `
       <div class="rcpt-copy">
@@ -5256,7 +5321,7 @@
         <table class="rcpt-table">
           <thead><tr><td><b>FEE NAME</b></td><td><b>INSTALMENT</b></td><td style="text-align:right;"><b>AMOUNT</b></td></tr></thead>
           <tbody>
-            <tr><td>${feeLabelFor(p)}</td><td>${p.instalment || '—'}</td><td style="text-align:right;">${netPaid.toLocaleString('en-IN')}.00</td></tr>
+            ${feeRowsHtml}
             <tr class="rcpt-total-row"><td colspan="2">Total Paid Amount</td><td style="text-align:right;">${netPaid.toLocaleString('en-IN')}.00</td></tr>
           </tbody>
         </table>
@@ -5441,28 +5506,57 @@
 
   function renderFeeSectionList(body){
     const rows = students.filter(s => s.className===feeCurrentClass && s.section===feeCurrentSection && isActive(s));
+    const canPay = canSub('managefee_collection','managefee','create');
+    const canPrint = canSub('managefee_collection','managefee','print');
     const tableRows = rows.map(s => {
       const { totals } = computeStudentFinance(s);
-      return `<tr onclick="openStudentLedger('${s.id}')" style="cursor:pointer;">
-        <td class="name-cell">${s.firstName} ${s.lastName}</td>
-        <td class="id-cell">${s.admissionNo}</td>
-        <td>${fmtMoney(totals.expected)}</td>
-        <td>${fmtMoney(totals.collected)}</td>
-        <td class="balance-tag ${totals.receivable>0?'due':'zero'}">${fmtMoney(totals.receivable)}</td>
+      const { hasSiblings, familyIds, totals: familyTotals } = getFamilySummary(s);
+      const allPaid = totals.receivable <= 0;
+      const famNote = (val) => hasSiblings ? `<div style="font-size:0.68rem; color:var(--ink-soft); margin-top:2px; font-weight:400;">👪 Family: ${fmtMoney(val)}</div>` : '';
+      return `<tr>
+        <td class="name-cell" style="cursor:pointer;" onclick="openStudentLedger('${s.id}')">
+          ${s.firstName} ${s.lastName}
+          <div style="font-size:0.72rem; color:var(--ink-soft); font-weight:400;">${s.admissionNo}${s.fatherName ? ` · S/o ${s.fatherName}` : ''}</div>
+          ${hasSiblings ? `<span class="pill" style="margin-top:4px; display:inline-block;">Siblings: ${familyIds.length-1}</span>` : ''}
+        </td>
+        <td>${fmtMoney(totals.collected)}${famNote(familyTotals.collected)}</td>
+        <td class="balance-tag ${totals.receivable>0?'due':'zero'}">${fmtMoney(totals.receivable)}${famNote(familyTotals.receivable)}</td>
+        <td>${totals.discount>0?fmtMoney(totals.discount):'-'}${famNote(familyTotals.discount)}</td>
+        <td>${fmtMoney(totals.expected)}${famNote(familyTotals.expected)}</td>
+        <td>${allPaid
+          ? `<span class="pill" style="background:var(--success-bg,#e5f6ee); color:var(--success-ink,#1E8E5A);">✓ All Paid</span>`
+          : `<span class="pill" style="background:var(--warning-bg,#fdf1dd); color:var(--warning-ink,#9a6400);">⏱ Pending</span>`}</td>
+        <td>
+          ${!allPaid && canPay ? `<button class="btn btn-primary btn-sm" onclick="openFamilyFeeModal('${s.id}')">Pay</button>` : ''}
+          ${canPrint ? `<button class="btn btn-ghost btn-sm" onclick="openStudentReceipts('${s.id}')">Receipts</button>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="openStudentLedger('${s.id}')">View Details</button>
+        </td>
       </tr>`;
     }).join('');
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToFeeGrid()">All Classes</a> &nbsp;/&nbsp; ${feeCurrentClass} — Section ${feeCurrentSection}</div>
-      <div class="table-wrap">
-        <table><thead><tr><th>Student</th><th>Admission No</th><th>Expected</th><th>Collected</th><th>Balance</th></tr></thead>
+      <div class="table-wrap" style="overflow-x:auto;">
+        <table><thead><tr><th>Student</th><th>Total Paid</th><th>Outstanding</th><th>Discount</th><th>Total Amount</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>${tableRows}</tbody></table>
         ${rows.length===0 ? `<div class="empty-state"><b>No students here</b></div>` : ``}
       </div>`;
   }
 
+  // "Receipts" quick action from the class-section list: jumps straight to
+  // this student's ledger and scrolls to their Payment History, instead of
+  // opening a whole separate view just to find past receipts.
+  function openStudentReceipts(id){
+    openStudentLedger(id);
+    setTimeout(() => {
+      const heading = Array.from(document.querySelectorAll('#feeBody h3')).find(h => h.textContent.includes('Payment History'));
+      if(heading) heading.scrollIntoView({ behavior:'smooth', block:'start' });
+    }, 60);
+  }
+
   function openStudentLedger(id){
     feeCurrentStudentId = id;
     feeView = 'ledger';
+    ledgerFamilyView = 'single';
     renderFeeBody();
   }
 
@@ -5475,24 +5569,12 @@
     return new Date() > cutoff ? Number(lateFeeSettings.amount) : 0;
   }
 
-  function renderStudentLedger(body){
-    const s = students.find(x => x.id === feeCurrentStudentId);
-    if(!s){ feeView = 'grid'; return renderFeeBody(); }
+  // Every category + extra-fee item for a student, split into what's still
+  // pending vs. already fully paid. Shared by the single-student ledger view,
+  // the class-section list's Family Total figures, and the Collect Family
+  // Fees modal, so all three always agree on what's actually owed.
+  function computePendingFeeRows(s){
     const { perCat, extras } = computeStudentFinance(s);
-    const studentPayments = payments.filter(p => p.studentId === s.id).sort((a,b) => (b.date||'').localeCompare(a.date||''));
-
-    const familyIds = getFamilyIds(s);
-    const hasSiblings = familyIds.length > 1;
-    let familyTotals = null;
-    if(hasSiblings){
-      familyTotals = familyIds.reduce((acc, id) => {
-        const sib = students.find(x => x.id === id);
-        if(!sib) return acc;
-        const ft = computeStudentFinance(sib).totals;
-        return { expected: acc.expected+ft.expected, collected: acc.collected+ft.collected, receivable: acc.receivable+ft.receivable };
-      }, { expected:0, collected:0, receivable:0 });
-    }
-
     const catRows = Object.keys(CATS).filter(c => perCat[c].expected > 0).map(c => ({
       type: 'category', key: c, label: CATS[c],
       total: perCat[c].expected, paid: perCat[c].collected, discount: perCat[c].discount,
@@ -5512,6 +5594,134 @@
     const pendingRows = allRows.filter(r => r.outstanding > 0);
     const paidRows = allRows.filter(r => r.outstanding <= 0);
     const totalPendingOutstanding = pendingRows.reduce((sum,r) => sum+r.outstanding, 0);
+    return { allRows, pendingRows, paidRows, totalPendingOutstanding };
+  }
+
+  // Aggregates computeStudentFinance() totals across a student's whole
+  // family (self + linked siblings, in either direction). Used to show
+  // "Family Total" figures next to a student's own figures wherever it's
+  // useful to see the whole household's fee position at a glance.
+  function getFamilySummary(s){
+    const familyIds = getFamilyIds(s);
+    const hasSiblings = familyIds.length > 1;
+    const totals = familyIds.reduce((acc, id) => {
+      const member = students.find(x => x.id === id);
+      if(!member) return acc;
+      const t = computeStudentFinance(member).totals;
+      return {
+        expected: acc.expected + t.expected, collected: acc.collected + t.collected,
+        discount: acc.discount + t.discount, receivable: acc.receivable + t.receivable,
+      };
+    }, { expected:0, collected:0, discount:0, receivable:0 });
+    return { familyIds, hasSiblings, totals };
+  }
+
+  // 'single' shows just the opened student's own fee rows (unchanged
+  // behaviour); 'family' shows the whole household side by side. Reset
+  // whenever a different student's ledger is opened, so it never leaks
+  // across students.
+  let ledgerFamilyView = 'single';
+  function setLedgerFamilyView(mode){
+    ledgerFamilyView = mode;
+    renderFeeBody();
+  }
+
+  // Read-only per-member breakdown for the ledger's Family view — every fee
+  // head each sibling owes or has paid, side by side. Actual money collection
+  // for more than one student always goes through the Collect Family Fees
+  // modal, never through inputs on this page, so there's only one code path
+  // that ever creates a multi-student batch of payments.
+  function renderFamilyMembersReadOnly(familyIds, focusId){
+    return familyIds.map(id => {
+      const m = students.find(x => x.id === id);
+      if(!m) return '';
+      const { allRows } = computePendingFeeRows(m);
+      const { totals } = computeStudentFinance(m);
+      const rowsHtml = allRows.length ? allRows.map(r => `
+        <tr>
+          <td><span class="pill">${r.label}</span></td>
+          <td>${r.dueDate}</td>
+          <td>${fmtMoney(r.total)}</td>
+          <td>${fmtMoney(r.paid)}</td>
+          <td>${r.discount>0?fmtMoney(r.discount):'-'}</td>
+          <td>${r.lateFee>0?fmtMoney(r.lateFee):'-'}</td>
+          <td class="balance-tag ${r.outstanding>0?'due':'zero'}">${fmtMoney(r.outstanding)}</td>
+        </tr>`).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No fee items</b></div></td></tr>`;
+      const open = id === focusId;
+      return `
+        <div style="margin-bottom:14px;">
+          <div onclick="toggleFamilyMemberCard('${id}')" style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:14px 18px; background:var(--surface-2,#f5f2e9); border-radius:14px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="transition:transform .2s ease; transform:rotate(${open?90:0}deg); flex:none;" id="famChevron-${id}"><path d="M9 6L15 12L9 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <b>${m.firstName} ${m.lastName}</b>
+            ${id===focusId ? `<span class="pill">Self</span>` : ``}
+            <span class="pill">${m.className} - Section ${m.section}</span>
+            <span style="margin-left:auto; font-weight:700; color:${totals.receivable>0?'var(--magenta)':'var(--teal,#1E8E5A)'};">${totals.receivable>0?fmtMoney(totals.receivable)+' due':'All Paid'}</span>
+          </div>
+          <div id="famCard-${id}" style="${open?'':'display:none;'} margin-top:8px;">
+            <div class="table-wrap"><table><thead><tr><th>Type</th><th>Due Date</th><th>Total Amount</th><th>Paid</th><th>Discount</th><th>Late Fees</th><th>Outstanding</th></tr></thead>
+            <tbody>${rowsHtml}</tbody></table></div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+  function toggleFamilyMemberCard(id){
+    const el = document.getElementById('famCard-'+id);
+    const chev = document.getElementById('famChevron-'+id);
+    if(!el) return;
+    const opening = el.style.display === 'none';
+    el.style.display = opening ? '' : 'none';
+    if(chev) chev.style.transform = opening ? 'rotate(90deg)' : 'rotate(0deg)';
+  }
+
+  function renderStudentLedger(body){
+    const s = students.find(x => x.id === feeCurrentStudentId);
+    if(!s){ feeView = 'grid'; return renderFeeBody(); }
+    const { extras } = computeStudentFinance(s);
+    const studentPayments = payments.filter(p => p.studentId === s.id).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+
+    const { familyIds, hasSiblings, totals: familyTotals } = getFamilySummary(s);
+    if(!hasSiblings) ledgerFamilyView = 'single';
+    const { pendingRows, paidRows, totalPendingOutstanding } = computePendingFeeRows(s);
+
+    // The Single Student / Family toggle plus the household-wide summary
+    // card and its Collect Family Fees button — only ever shown once this
+    // student has a linked sibling.
+    const familySectionHtml = hasSiblings ? `
+      <div class="ms-toolbar" style="margin-bottom:14px;">
+        <div class="ms-toolbar-left"></div>
+        <div class="ms-toolbar-right">
+          <button type="button" class="mf-tab ${ledgerFamilyView==='single'?'active':''}" onclick="setLedgerFamilyView('single')">Single Student</button>
+          <button type="button" class="mf-tab ${ledgerFamilyView==='family'?'active':''}" onclick="setLedgerFamilyView('family')">Family</button>
+        </div>
+      </div>
+      <div class="dash-section-title"><div><h3>👪 Family Summary</h3><span class="eyebrow-sm">${familyIds.length} member${familyIds.length===1?'':'s'}</span></div>
+        ${canSub('managefee_collection','managefee','create') ? `<button class="btn btn-primary btn-sm" onclick="openFamilyFeeModal('${s.id}')">💰 Collect Family Fees</button>` : ''}
+      </div>
+      <div class="fee-summary-row" style="margin-bottom:20px;">
+        <div class="fee-sum-card"><b>${fmtMoney(familyTotals.expected)}</b><span>Total Amount</span></div>
+        <div class="fee-sum-card"><b>${fmtMoney(familyTotals.collected)}</b><span>Total Paid</span></div>
+        <div class="fee-sum-card"><b>${fmtMoney(familyTotals.receivable)}</b><span>Total Outstanding</span></div>
+        <div class="fee-sum-card"><b>${familyTotals.discount>0?fmtMoney(familyTotals.discount):'-'}</b><span>Total Discount</span></div>
+      </div>
+    ` : ``;
+
+    // In Family view, the rest of the page (below) is replaced entirely by
+    // a per-member read-only breakdown — actual collection always happens
+    // through the Collect Family Fees modal above, never inline here, so
+    // there's exactly one place that creates payment records for more than
+    // one student at a time.
+    if(hasSiblings && ledgerFamilyView === 'family'){
+      body.innerHTML = `
+        <div class="breadcrumb"><a onclick="backToFeeGrid()">All Classes</a> &nbsp;/&nbsp; <a onclick="backToFeeSection()">${s.className} — ${s.section}</a> &nbsp;/&nbsp; ${s.firstName} ${s.lastName}</div>
+        <div class="profile-head">
+          ${s.photo ? `<img class="profile-photo" src="${s.photo}">` : `<div class="profile-photo">${initials(s)}</div>`}
+          <div><h2>${s.firstName} ${s.lastName}</h2><div class="p-meta">${s.admissionNo} · ${s.className} — Section ${s.section} · <span class="pill">Siblings: ${familyIds.length-1}</span></div></div>
+        </div>
+        ${familySectionHtml}
+        ${renderFamilyMembersReadOnly(familyIds, s.id)}
+      `;
+      return;
+    }
 
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToFeeGrid()">All Classes</a> &nbsp;/&nbsp; <a onclick="backToFeeSection()">${s.className} — ${s.section}</a> &nbsp;/&nbsp; ${s.firstName} ${s.lastName}</div>
@@ -5524,11 +5734,7 @@
         </div>
       </div>
 
-      ${hasSiblings ? `<div class="fee-summary-row" style="margin-bottom:6px;">
-        <div class="fee-sum-card"><b>${fmtMoney(familyTotals.expected)}</b><span>👪 Family Total Expected</span></div>
-        <div class="fee-sum-card"><b>${fmtMoney(familyTotals.collected)}</b><span>👪 Family Total Collected</span></div>
-        <div class="fee-sum-card"><b>${fmtMoney(familyTotals.receivable)}</b><span>👪 Family Total Due</span></div>
-      </div>` : ``}
+      ${familySectionHtml}
 
       ${paidRows.length ? `
       <div class="fully-paid-banner" onclick="toggleFullyPaidBanner()">
@@ -5683,6 +5889,192 @@
     showToast(entries.length + ' payment(s) recorded.', 'radial', entries.reduce((s,e)=>s+e.amt,0));
     if(lastId && await showConfirmDialog('Payment(s) recorded. Print receipt now?')){
       printReceipt(lastId);
+    }
+  }
+
+  // Records one family member's share of a Collect Family Fees payment.
+  // Allocates `amountToPay` across that student's own pending fee rows,
+  // oldest/first row first (same order Quick Pay already fills in), each
+  // becoming its own payment record — so accounting still sees every fee
+  // head (Tuition, Transport, etc.) posted to its own income account —
+  // but every record created here shares ONE receipt number, so printReceipt
+  // shows them as a single itemized receipt for that student. A different
+  // family member always gets a different receipt number, since they're
+  // billed as separate students. Pushes into the in-memory `payments` /
+  // `studentExtraFees` arrays but does not persist — the caller saves once
+  // after every selected family member has been recorded.
+  function recordFamilyPayment(studentId, amountToPay, mode, date, note){
+    const student = students.find(x => x.id === studentId);
+    if(!student || !(amountToPay > 0)) return null;
+    const { pendingRows } = computePendingFeeRows(student);
+    let remaining = amountToPay;
+    const receiptNo = nextReceiptNo();
+    const created = [];
+    for(const r of pendingRows){
+      if(remaining <= 0) break;
+      const take = Math.min(remaining, r.outstanding);
+      if(take <= 0) continue;
+      remaining -= take;
+      if(r.type === 'extra'){
+        const fee = studentExtraFees.find(x => x.id === r.key);
+        if(fee){
+          fee.paidAmount = (Number(fee.paidAmount)||0) + take;
+          if(fee.paidAmount >= fee.amount) fee.paid = true;
+        }
+        const record = {
+          id: 'pay_' + Date.now() + '_' + studentId + '_' + r.key,
+          receiptNo, studentId, studentName: student.name,
+          category: 'extra', extraFeeName: fee ? fee.name : r.label, extraFeeId: r.key,
+          mode, amount: take, discount: 0, instalment: '', date, note: note || '',
+          classAtPayment: student.className,
+        };
+        payments.push(record);
+        created.push(record);
+      } else {
+        const record = {
+          id: 'pay_' + Date.now() + '_' + studentId + '_' + r.key,
+          receiptNo, studentId, studentName: student.name,
+          category: r.key, mode, amount: take, discount: 0, instalment: '', date, note: note || '',
+          classAtPayment: student.className,
+        };
+        payments.push(record);
+        created.push(record);
+      }
+    }
+    return created.length ? { studentId, receiptNo, records: created, unapplied: remaining } : null;
+  }
+
+  /* --- Collect Family Fees modal --- */
+  function openFamilyFeeModal(anchorStudentId){
+    const s = students.find(x => x.id === anchorStudentId);
+    if(!s) return;
+    const familyIds = getFamilyIds(s);
+    document.getElementById('ffMode').value = 'Cash';
+    document.getElementById('ffDate').value = new Date().toISOString().slice(0,10);
+    document.getElementById('ffNote').value = '';
+    document.getElementById('ffFamilyTotal').value = '';
+    document.getElementById('ffUnallocatedWrap').style.display = 'none';
+    const rowsEl = document.getElementById('familyFeeRows');
+    rowsEl.innerHTML = familyIds.map(id => {
+      const m = students.find(x => x.id === id);
+      if(!m) return '';
+      const { pendingRows, totalPendingOutstanding } = computePendingFeeRows(m);
+      const typeHtml = pendingRows.length
+        ? pendingRows.map(r => `<span class="pill">${r.label}</span>`).join(' ')
+        : `<span class="pill" style="background:var(--success-bg,#e5f6ee); color:var(--success-ink,#1E8E5A);">All Paid</span>`;
+      const dueDate = pendingRows.length ? pendingRows.map(r=>r.dueDate).sort()[0] : '—';
+      const payable = totalPendingOutstanding > 0;
+      return `
+        <tr class="ff-student-row" data-student-id="${m.id}" data-outstanding="${totalPendingOutstanding}">
+          <td><input type="checkbox" id="ffChk_${m.id}" ${payable?'checked':''} ${payable?'':'disabled'} onchange="onFamilyRowToggle()"></td>
+          <td class="name-cell">${m.firstName} ${m.lastName}<div style="font-size:0.72rem; color:var(--ink-soft); font-weight:400;">${m.className} - Section ${m.section}${m.id===s.id?' · Self':''}</div></td>
+          <td>${typeHtml}</td>
+          <td>${dueDate}</td>
+          <td class="balance-tag ${payable?'due':'zero'}">${fmtMoney(totalPendingOutstanding)}</td>
+          <td><input type="number" min="0" max="${totalPendingOutstanding}" id="ffAmt_${m.id}" value="0" ${payable?'':'disabled'} oninput="onFamilyAmountInput()" style="width:110px; padding:6px 8px; border-radius:7px; border:1.5px solid var(--border);"></td>
+        </tr>`;
+    }).join('');
+    document.getElementById('familyFeeModalOverlay').classList.add('open');
+    updateFamilyTotalToPay();
+  }
+  function closeFamilyFeeModal(){
+    document.getElementById('familyFeeModalOverlay').classList.remove('open');
+  }
+  function onFamilyRowToggle(){
+    document.querySelectorAll('.ff-student-row').forEach(row => {
+      const id = row.dataset.studentId;
+      const chk = document.getElementById('ffChk_'+id);
+      const amtInput = document.getElementById('ffAmt_'+id);
+      if(!chk || !amtInput) return;
+      if(!chk.checked){ amtInput.value = 0; amtInput.disabled = true; }
+      else if(Number(row.dataset.outstanding) > 0){ amtInput.disabled = false; }
+    });
+    updateFamilyTotalToPay();
+  }
+  function onFamilyAmountInput(){
+    updateFamilyTotalToPay();
+  }
+  function updateFamilyTotalToPay(){
+    let total = 0;
+    document.querySelectorAll('.ff-student-row').forEach(row => {
+      const id = row.dataset.studentId;
+      const chk = document.getElementById('ffChk_'+id);
+      const amtInput = document.getElementById('ffAmt_'+id);
+      if(chk && chk.checked && amtInput) total += Number(amtInput.value) || 0;
+    });
+    const el = document.getElementById('ffTotalToPay');
+    if(el) el.textContent = fmtMoney(total);
+  }
+  // Splits the entered Family Total equally across the checked siblings,
+  // capping each at what they actually owe and carrying any leftover from a
+  // capped sibling on to the ones who still have room — so nobody is ever
+  // auto-allocated more than their own outstanding balance. Whatever still
+  // can't be placed once everyone's fully covered is shown as "Not allocated"
+  // rather than silently applied or dropped.
+  function autoDivideFamilyTotal(){
+    const totalInput = Number(document.getElementById('ffFamilyTotal').value) || 0;
+    const rows = Array.from(document.querySelectorAll('.ff-student-row')).filter(row => {
+      const chk = document.getElementById('ffChk_'+row.dataset.studentId);
+      return chk && chk.checked && Number(row.dataset.outstanding) > 0;
+    });
+    const unallocWrap = document.getElementById('ffUnallocatedWrap');
+    const unallocEl = document.getElementById('ffUnallocated');
+    if(!rows.length){
+      if(unallocWrap) unallocWrap.style.display = totalInput > 0 ? '' : 'none';
+      if(unallocEl) unallocEl.textContent = fmtMoney(totalInput);
+      updateFamilyTotalToPay();
+      return;
+    }
+    const pool = rows.map(row => ({ id: row.dataset.studentId, due: Number(row.dataset.outstanding)||0, alloc:0, capped:false }));
+    let remaining = totalInput;
+    let guard = 0;
+    while(remaining > 0.01 && pool.some(p => !p.capped) && guard < 100){
+      guard++;
+      const active = pool.filter(p => !p.capped);
+      const share = remaining / active.length;
+      let leftover = 0;
+      active.forEach(p => {
+        const room = p.due - p.alloc;
+        if(share >= room){ leftover += share - room; p.alloc = p.due; p.capped = true; }
+        else { p.alloc += share; }
+      });
+      remaining = leftover;
+    }
+    pool.forEach(p => {
+      const amtInput = document.getElementById('ffAmt_'+p.id);
+      if(amtInput) amtInput.value = Math.round(p.alloc);
+    });
+    const unallocated = Math.max(0, Math.round(remaining));
+    if(unallocWrap) unallocWrap.style.display = unallocated > 0 ? '' : 'none';
+    if(unallocEl) unallocEl.textContent = fmtMoney(unallocated);
+    updateFamilyTotalToPay();
+  }
+  async function submitFamilyPayments(){
+    const mode = document.getElementById('ffMode').value;
+    const date = document.getElementById('ffDate').value || new Date().toISOString().slice(0,10);
+    const note = document.getElementById('ffNote').value.trim();
+    const toPay = Array.from(document.querySelectorAll('.ff-student-row')).map(row => {
+      const id = row.dataset.studentId;
+      const chk = document.getElementById('ffChk_'+id);
+      const amtInput = document.getElementById('ffAmt_'+id);
+      return { studentId: id, amount: Number(amtInput ? amtInput.value : 0) || 0, checked: chk ? chk.checked : false };
+    }).filter(r => r.checked && r.amount > 0);
+    if(!toPay.length){ showToast('Select at least one student and enter an amount to pay.'); return; }
+    const results = [];
+    toPay.forEach(t => {
+      const res = recordFamilyPayment(t.studentId, t.amount, mode, date, note);
+      if(res) results.push(res);
+    });
+    if(!results.length){ showToast('Nothing was recorded — check the amounts entered.'); return; }
+    await storageSet(PAYMENTS_KEY, payments);
+    await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
+    closeFamilyFeeModal();
+    renderDashboard();
+    renderFeeBody();
+    const totalPaid = toPay.reduce((sum,t) => sum + t.amount, 0);
+    showToast(results.length + ' receipt(s) generated for ' + results.length + ' student(s).', 'radial', totalPaid);
+    if(await showConfirmDialog('Payment(s) recorded. Print receipt(s) now?')){
+      results.forEach(r => printReceiptByNo(r.receiptNo));
     }
   }
 
