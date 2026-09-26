@@ -1940,6 +1940,10 @@
               </select>
             </div>
             <div class="f-field">
+              <label>Caste <span style="font-weight:400; color:var(--ink-soft);">(specific caste, optional)</span></label>
+              <input type="text" id="fCasteName" placeholder="e.g. Kapu, Balija, Reddy">
+            </div>
+            <div class="f-field">
               <label>Religion</label>
               <select id="fReligion">
                 <option value="">Not specified</option>
@@ -19904,6 +19908,7 @@
           <div class="profile-row"><span>PEN Number</span><span>${s.pen||'—'}</span></div>
           <div class="profile-row"><span>Aadhar Number</span><span>${s.aadhar||'—'}</span></div>
           <div class="profile-row"><span>Caste Category</span><span>${s.caste||'—'}</span></div>
+          <div class="profile-row"><span>Caste</span><span>${s.casteName||'—'}</span></div>
           <div class="profile-row"><span>Religion</span><span>${s.religion||'—'}</span></div>
           <div class="profile-row"><span>Admission Category</span><span>${s.category||'—'}</span></div>
           <div class="profile-row"><span>Nationality</span><span>${s.nationality||'—'}</span></div>
@@ -21057,7 +21062,7 @@
       'Admission No': s.admissionNo, 'First Name': s.firstName, 'Last Name': s.lastName,
       'Class': s.className, 'Section': s.section, 'Gender': s.gender||'', 'Date of Birth': s.dob||'',
       'Email': s.email||'', 'Date of Joining': s.admDate||'', 'Blood Group': s.blood||'',
-      'Caste Category': s.caste||'', 'Religion': s.religion||'',
+      'Caste Category': s.caste||'', 'Caste': s.casteName||'', 'Religion': s.religion||'',
       'Father Name': s.fatherName||'', 'Father Phone': s.fatherPhone||'',
       'Mother Name': s.motherName||'', 'Mother Phone': s.motherPhone||'',
       'Address': s.fatherAddress||s.motherAddress||'', 'Needs Transport': s.needsTransport||'No',
@@ -21212,6 +21217,7 @@
         { key:'admDate', label:'Date of Joining', aliases:['date of joining','admission date','doj'], type:'date' },
         { key:'blood', label:'Blood Group', aliases:['blood group','blood'] },
         { key:'caste', label:'Caste Category', aliases:['caste category','caste','category'] },
+        { key:'casteName', label:'Caste', aliases:['caste name','specific caste','sub caste','sub-caste'] },
         { key:'religion', label:'Religion', aliases:['religion'] },
         { key:'fatherName', label:'Father Name', aliases:['father name'] },
         { key:'fatherPhone', label:'Father Phone', aliases:['father phone'], type:'phone' },
@@ -22533,6 +22539,7 @@
     document.getElementById('fPen').value = s.pen || '';
     document.getElementById('fAadhar').value = s.aadhar || '';
     document.getElementById('fCaste').value = s.caste || '';
+    document.getElementById('fCasteName').value = s.casteName || '';
     document.getElementById('fReligion').value = s.religion || '';
     document.getElementById('fCategory').value = s.category || '';
     document.getElementById('fNationality').value = s.nationality === 'Indian' || !s.nationality ? 'Indian' : 'Other';
@@ -22701,7 +22708,7 @@
       dob: g('fDob'), email: g('fEmail').trim(), password: g('fPassword'),
       admDate: g('fAdmDate'), blood: g('fBlood').trim(), motherTongue: g('fMotherTongue').trim(),
       birthPlace: g('fBirthPlace').trim(), pen: g('fPen').trim(), aadhar: g('fAadhar').trim(),
-      caste: g('fCaste'), religion: g('fReligion'), category: g('fCategory'),
+      caste: g('fCaste'), casteName: g('fCasteName'), religion: g('fReligion'), category: g('fCategory'),
       nationality: g('fNationality') === 'Other' ? g('fNationalityText').trim() : 'Indian',
       status: g('fStatus'), photo: wizardPhotoData,
 
