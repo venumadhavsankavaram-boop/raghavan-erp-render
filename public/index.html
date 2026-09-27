@@ -242,6 +242,38 @@
   }
   .mf-tab .nb-badge{ margin-left:6px; display:inline-flex; vertical-align:middle; }
 
+  /* Approvals Center bell — sits in the sidebar's user footer so it's on
+     screen from every page, not tucked inside one module (see the "How
+     approvals reach you" note in openApprovalsCenter() for the reasoning). */
+  .approvals-bell-btn{
+    position:relative; display:flex; align-items:center; justify-content:center; gap:0;
+    width:100%; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);
+    border-radius:9px; padding:9px 10px; margin-bottom:8px; color:#fff; cursor:pointer;
+    font-size:0.82rem; font-weight:600;
+  }
+  .approvals-bell-btn:hover{ background:rgba(255,255,255,0.12); }
+  .approvals-bell-btn .approvals-bell-icon{ font-size:1rem; margin-right:8px; }
+  .approvals-bell-btn.has-pending .approvals-bell-icon{ animation:approvalsBellRing 2.2s ease-in-out infinite; }
+  @keyframes approvalsBellRing{
+    0%,100%{ transform:rotate(0deg); } 5%{ transform:rotate(-14deg); } 10%{ transform:rotate(11deg); }
+    15%{ transform:rotate(-8deg); } 20%{ transform:rotate(5deg); } 25%{ transform:rotate(0deg); }
+  }
+  .approvals-bell-badge{
+    margin-left:8px; background:var(--magenta); color:#fff; font-size:0.68rem; font-weight:700;
+    min-width:19px; height:19px; border-radius:999px; display:none; align-items:center; justify-content:center;
+    padding:0 5px; box-shadow:0 0 0 3px rgba(209,16,115,0.25);
+  }
+  .approvals-item-card{
+    display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
+    padding:12px 14px; border:1px solid var(--border); border-radius:10px; margin-bottom:10px;
+  }
+  .approvals-item-meta{ font-size:0.76rem; color:var(--ink-soft); margin-top:3px; }
+  .approvals-item-actions{ display:flex; gap:8px; flex-shrink:0; white-space:nowrap; }
+  .approvals-source-pill{
+    font-size:0.6rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;
+    background:rgba(90,120,255,0.12); color:#3d55c9; border-radius:999px; padding:2px 8px; margin-right:6px;
+  }
+
   .main{flex:1; padding:32px 40px; overflow-x:hidden; overflow-y:auto; height:100vh;}
   .topbar{display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; flex-wrap:wrap; gap:14px;}
   .topbar h1{font-size:1.72rem;}
@@ -1545,6 +1577,10 @@
     </div>
     </div>
     <div class="sb-user-footer">
+      <button type="button" class="approvals-bell-btn" id="approvalsBellBtn" onclick="openApprovalsCenter()" style="display:none;">
+        <span class="approvals-bell-icon">🔔</span><span class="sb-btn-label">Approvals</span>
+        <span class="approvals-bell-badge" id="approvalsBellBadge">0</span>
+      </button>
       <div onclick="switchView('myaccount')" style="cursor:pointer; display:flex; align-items:center; gap:10px; margin-bottom:10px; border-radius:8px; padding:6px; margin:-6px -6px 6px;" onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='none'">
         <div id="sbUserAvatar" style="width:42px; height:42px; border-radius:50%; background:rgba(255,255,255,0.14); display:flex; align-items:center; justify-content:center; font-weight:700; color:#fff; overflow:hidden; flex-shrink:0; font-size:0.95rem;">—<span class="sb-user-online-dot" title="Signed in"></span></div>
         <div style="overflow:hidden; min-width:0;">
@@ -2778,6 +2814,20 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="approvalsCenterModalOverlay">
+  <div class="modal" style="max-width:680px;">
+    <div class="modal-inner">
+      <button class="modal-close" onclick="closeApprovalsCenter()">&times;</button>
+      <h2>🔔 Approvals Center</h2>
+      <p class="modal-sub">Everything from every module that's waiting on a decision, in one place — approve or reject right here, or open the item's own page for the full picture first.</p>
+      <div id="approvalsCenterBody" style="max-height:480px; overflow-y:auto;"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeApprovalsCenter()">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="trashModalOverlay">
   <div class="modal" style="max-width:640px;">
     <div class="modal-inner">
@@ -3993,7 +4043,7 @@
   // loadAllAppData() a second time so every module has the actual data
   // (the first pass, before we knew the session was valid, mostly got 401s
   // and fell back to whatever was cached locally).
-  // ---------- Web Push subscription (Parent/Student logins only) ----------
+  // ---------- Web Push subscription (Parent/Student + Admin/Principal logins) ----------
   // Fee payment, fee due, marks-published and Absent/Late/Leave attendance
   // pushes all come from server.js's notify* functions (see "Notifications:
   // Web Push + WhatsApp") — this just gets the browser subscribed so
@@ -4002,6 +4052,12 @@
   // wherever it can't work (older browser, permission denied, or this
   // school's deploy hasn't set VAPID keys yet) rather than ever blocking
   // login itself.
+  // Admin/Principal were added alongside the Approvals Center (see
+  // "Approvals Center" further below) — a deletion request or fee-discount
+  // request now pushes to them the same way a fee payment pushes to a
+  // parent, so "someone needs my approval" reaches them even with the app
+  // closed, not just while they happen to have it open for the in-app bell
+  // to poll.
   function urlBase64ToUint8Array(base64String){
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
     const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -4009,7 +4065,7 @@
     return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
   }
   async function maybeSubscribeToPush(){
-    if(!currentUser || (currentUser.role !== 'Student' && currentUser.role !== 'Parent')) return;
+    if(!currentUser || !['Student','Parent','Admin','Principal'].includes(currentUser.role)) return;
     if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
     try{
       const keyRes = await fetch('/api/push/vapid-key');
@@ -4049,6 +4105,7 @@
       switchView(allowed[0]);
       startIdleWatcher();
       maybeSubscribeToPush();
+      startApprovalsWatcher();
     }else{
       currentUser = null;
       sessionStorage.removeItem('rgv_current_user');
@@ -4133,11 +4190,13 @@
     switchView(allowed[0]);
     startIdleWatcher();
     maybeSubscribeToPush();
+    startApprovalsWatcher();
     return false;
   }
 
   function logout(){
     stopIdleWatcher();
+    stopApprovalsWatcher();
     currentUser = null;
     sessionStorage.removeItem('rgv_current_user');
     // Best-effort — invalidates the session server-side so the cookie can't
@@ -22977,6 +23036,233 @@
     }catch(e){
       showToast('Could not record your decision (' + e.message + ').');
     }
+  }
+
+  // ---------- Approvals Center ----------
+  // Every "someone else has to sign off on this" workflow in the app
+  // (promotion/transfer/section requests, inventory changes, fee discounts,
+  // payroll drafts, deletion requests) used to live on its own page, so the
+  // only way an approver found out about a new one was a co-worker walking
+  // over to say so. This aggregates every queue a signed-in user is actually
+  // allowed to decide on into one bell + badge (see the button in
+  // .sb-user-footer) with a live poll, so a new request surfaces on its own:
+  //   - the badge count and the bell's ring animation update every poll;
+  //   - a genuinely NEW pending item (one this browser hasn't seen before —
+  //     see approvalsSeenIds) also gets a toast, a system Notification
+  //     (works even if this tab is in the background), and a short chime;
+  //   - Admin/Principal additionally get a real Web Push for deletion
+  //     requests and discount requests (server.js's notifyUsersByRole) —
+  //     that one reaches them even with the browser fully closed. The other
+  //     queues (promo/transfer/section, inventory, payroll) are plain
+  //     KV-array records with no per-write server hook today, so those rely
+  //     on this in-app poll — good enough while the ERP tab is open
+  //     somewhere, not a substitute for the two push-backed ones above.
+  // Nothing here invents new authorization: every item's Approve/Reject
+  // button calls the exact same function the item's own page already used
+  // (approveInventoryRequest, approveDiscountGroup, approvePayroll,
+  // decideDeletionRequest, ...) — this is a second place to reach them from,
+  // not a second way to decide them.
+  function userCanSeeApprovalsBell(){
+    if(!currentUser) return false;
+    if(['Admin','Principal'].includes(currentUser.role)) return true;
+    return ['staff','inventory','promotransfer'].some(m => getRolePermission(currentUser.role, m, 'approve'));
+  }
+  async function computeApprovalQueueItems(){
+    const items = [];
+    const canPromoTransfer = getRolePermission(currentUser.role, 'promotransfer', 'approve');
+    const canInventory = getRolePermission(currentUser.role, 'inventory', 'approve');
+    const REQUEST_TYPE_LABELS = { promote:['🎓','Promotion request'], transfer:['🚌','Transfer request'], section:['🔀','Section change request'], inventory_item:['📦','Inventory change request'] };
+    pendingApprovals.filter(a => a.status === 'Pending').forEach(a => {
+      const allowed = a.type === 'inventory_item' ? canInventory : canPromoTransfer;
+      if(!allowed) return;
+      const [icon, title] = REQUEST_TYPE_LABELS[a.type] || ['📄','Request'];
+      items.push({
+        id: 'pending_'+a.id, icon, title, sourceLabel:'Requests',
+        detail: `${escapeHtml(a.explanation||'')} — by ${escapeHtml(a.requestedBy)} (${escapeHtml(a.requestedByRole)}) on ${a.requestDate||''}`,
+        date: a.requestDate || '',
+        approveFn: a.type==='inventory_item' ? 'approveInventoryRequest' : 'approveRequest',
+        rejectFn: a.type==='inventory_item' ? 'rejectInventoryRequest' : 'rejectRequest',
+        args: [a.id],
+      });
+    });
+    if(currentUser.role === 'Admin'){
+      groupedDiscountRows().filter(r => r.status==='Pending').forEach(r => {
+        const s = students.find(x => x.id === r.studentId);
+        const name = s ? `${s.firstName} ${s.lastName}` : r.studentId;
+        const requestedDate = (r.records[0] && r.records[0].requestedDate) || '';
+        items.push({
+          id: 'discount_'+r.batchId+'_'+r.studentId, icon:'💸', title:'Fee discount request', sourceLabel:'Discounts',
+          detail: `${escapeHtml(name)} — ${escapeHtml(r.note||r.type||'')} — by ${escapeHtml(r.requestedBy)}`,
+          date: requestedDate,
+          approveFn:'approveDiscountGroup', rejectFn:'rejectDiscountGroup', args:[r.batchId, r.studentId],
+        });
+      });
+    }
+    if(getRolePermission(currentUser.role, 'staff', 'approve')){
+      staffPayrollRecords.filter(r => r.status === 'Draft').forEach(r => {
+        const st = staffList.find(x => x.id === r.staffId);
+        const name = st ? `${st.firstName} ${st.lastName}` : r.staffId;
+        items.push({
+          id: 'payroll_'+r.id, icon:'💰', title:'Payroll draft awaiting approval', sourceLabel:'Payroll',
+          detail: `${escapeHtml(name)} — ${r.month||''} — Net ${fmtMoney(r.netSalary)}`,
+          date: r.generatedDate || '',
+          approveFn:'approvePayroll', rejectFn:null, args:[r.staffId, r.month],
+        });
+      });
+    }
+    if(['Admin','Principal'].includes(currentUser.role)){
+      try{
+        const res = await fetch('/api/deletion-requests');
+        if(res.ok){
+          const rows = await res.json();
+          _deletionRequestsCache = rows; // keep decideDeletionRequest's own Step-3 lookup correct regardless of which UI triggered it
+          rows.filter(r => r.status==='Pending' || r.status==='Pending Final Approval').forEach(r => {
+            items.push({
+              id: 'deletion_'+r.id, icon:'🗑️',
+              title: r.status==='Pending' ? 'Deletion request (step 2 of 3)' : 'Deletion request (final step)',
+              sourceLabel:'Deletions',
+              detail: `${escapeHtml(r.recordLabel||r.recordId)} — ${escapeHtml(r.reason||'')} — by ${escapeHtml(r.requestedByName)}`,
+              date: r.requestedAt ? String(r.requestedAt).slice(0,10) : '',
+              approveFn:'decideDeletionRequest', rejectFn:'decideDeletionRequest',
+              approveArgs:[r.id,'Approve',r.status], rejectArgs:[r.id,'Reject',r.status],
+            });
+          });
+        }
+      }catch(e){ /* network hiccup — skip this source for this refresh, the next poll will pick it up */ }
+    }
+    items.sort((a,b) => (b.date||'').localeCompare(a.date||''));
+    return items;
+  }
+  function openApprovalsCenter(){
+    document.getElementById('approvalsCenterModalOverlay').classList.add('open');
+    renderApprovalsCenterModal();
+  }
+  function closeApprovalsCenter(){
+    document.getElementById('approvalsCenterModalOverlay').classList.remove('open');
+  }
+  async function renderApprovalsCenterModal(){
+    const body = document.getElementById('approvalsCenterBody');
+    if(!body) return;
+    body.innerHTML = `<div class="empty-state"><b>Loading…</b></div>`;
+    const items = await computeApprovalQueueItems();
+    if(!items.length){
+      body.innerHTML = `<div class="empty-state"><b>All caught up</b>Nothing is waiting on your approval right now.</div>`;
+      return;
+    }
+    body.innerHTML = items.map(it => `
+      <div class="approvals-item-card">
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <span style="font-size:1.15rem; line-height:1.3;">${it.icon}</span>
+          <div>
+            <div><span class="approvals-source-pill">${it.sourceLabel}</span><b>${it.title}</b></div>
+            <div class="approvals-item-meta">${it.detail}</div>
+          </div>
+        </div>
+        <div class="approvals-item-actions">
+          ${it.approveFn ? `<button class="btn btn-primary btn-sm" onclick='approvalsCenterAct(${JSON.stringify(it.approveFn)}, ${JSON.stringify(it.approveArgs||it.args)})'>Approve</button>` : ''}
+          ${it.rejectFn ? `<button class="btn-danger-text" onclick='approvalsCenterAct(${JSON.stringify(it.rejectFn)}, ${JSON.stringify(it.rejectArgs||it.args)})'>Reject</button>` : ''}
+        </div>
+      </div>
+    `).join('');
+  }
+  // Every item's buttons route through here so the modal (and the bell
+  // badge) always refresh afterward, regardless of which underlying
+  // function handled the actual decision — those functions already do their
+  // own confirm dialog, save, and toast, exactly as they do from their own
+  // page; this only adds the refresh.
+  async function approvalsCenterAct(fnName, args){
+    const fn = window[fnName];
+    if(typeof fn !== 'function') return;
+    await fn(...args);
+    await renderApprovalsCenterModal();
+    await refreshApprovalsBell({ notify:false });
+  }
+
+  // ---- Bell badge, live poll, and new-item alert ----
+  const APPROVALS_SEEN_KEY = 'rgv_seen_approval_ids';
+  let approvalsPollTimer = null;
+  function loadSeenApprovalIds(){
+    try{ return new Set(JSON.parse(localStorage.getItem(APPROVALS_SEEN_KEY) || '[]')); }catch(e){ return new Set(); }
+  }
+  function saveSeenApprovalIds(idSet){
+    try{
+      // Cap it — this is just "have I alerted for this one already", not a
+      // permanent audit log, so an unbounded list serves no purpose.
+      const arr = Array.from(idSet).slice(-500);
+      localStorage.setItem(APPROVALS_SEEN_KEY, JSON.stringify(arr));
+    }catch(e){}
+  }
+  // Two-tone chime via WebAudio — no audio file to fetch/host, so it never
+  // adds a network dependency or a missing-asset failure mode.
+  function playApprovalChime(){
+    try{
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [880, 660].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine'; osc.frequency.value = freq;
+        osc.connect(gain); gain.connect(ctx.destination);
+        const start = ctx.currentTime + i * 0.14;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.16, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
+        osc.start(start); osc.stop(start + 0.24);
+      });
+    }catch(e){ /* WebAudio unavailable — the toast + Notification are enough */ }
+  }
+  // opts.notify: false while re-rendering right after the user's own
+  // approve/reject click (nothing "new" just happened, so no chime/popup
+  // for the action they themselves just took).
+  async function refreshApprovalsBell(opts){
+    opts = opts || {};
+    const btn = document.getElementById('approvalsBellBtn');
+    const badge = document.getElementById('approvalsBellBadge');
+    if(!btn || !badge) return;
+    if(!userCanSeeApprovalsBell()){ btn.style.display = 'none'; return; }
+    btn.style.display = 'flex';
+    const items = await computeApprovalQueueItems();
+    const label = items.length > 9 ? '9+' : String(items.length);
+    if(items.length > 0){ badge.textContent = label; badge.style.display = 'flex'; btn.classList.add('has-pending'); }
+    else { badge.style.display = 'none'; btn.classList.remove('has-pending'); }
+
+    if(opts.notify === false){
+      // Still keep the seen-set current so a later real poll doesn't treat
+      // items visible in this refresh as "new".
+      saveSeenApprovalIds(new Set(items.map(it => it.id)));
+      return;
+    }
+    const seen = loadSeenApprovalIds();
+    const isFirstRun = !approvalsBaselineDone;
+    const freshItems = items.filter(it => !seen.has(it.id));
+    if(!isFirstRun && freshItems.length){
+      const first = freshItems[0];
+      const msg = freshItems.length === 1
+        ? `New approval needed: ${first.title.replace(' request','')} — ${first.detail.replace(/<[^>]*>/g,'')}`
+        : `${freshItems.length} new items need your approval.`;
+      showToast(msg, 'burst');
+      playApprovalChime();
+      if('Notification' in window && Notification.permission === 'granted'){
+        try{ new Notification('Approval needed', { body: msg, icon:'/icon-192.png', tag:'approvals-center' }); }catch(e){}
+      }
+    }
+    approvalsBaselineDone = true;
+    saveSeenApprovalIds(new Set(items.map(it => it.id)));
+  }
+  let approvalsBaselineDone = false;
+  function startApprovalsWatcher(){
+    if(!userCanSeeApprovalsBell()) return;
+    approvalsBaselineDone = false;
+    if('Notification' in window && Notification.permission === 'default'){
+      Notification.requestPermission().catch(()=>{});
+    }
+    refreshApprovalsBell();
+    if(approvalsPollTimer) clearInterval(approvalsPollTimer);
+    approvalsPollTimer = setInterval(refreshApprovalsBell, 30000);
+  }
+  function stopApprovalsWatcher(){
+    if(approvalsPollTimer){ clearInterval(approvalsPollTimer); approvalsPollTimer = null; }
+    const btn = document.getElementById('approvalsBellBtn');
+    if(btn) btn.style.display = 'none';
   }
 
   function openDuplicatesModal(){

@@ -1337,7 +1337,7 @@ function simpleToAppShape(row, fields) {
 // once a real request comes in, long after the whole module has loaded).
 // Deliberately not awaited by any caller: a slow or failing push/WhatsApp
 // send must never add latency to — or fail — the write itself.
-function notifyAfterResourceWrite(resourceName, body) {
+function notifyAfterResourceWrite(resourceName, body, method) {
   if (resourceName === 'payments') {
     notifyFeePayment({ studentId: body.studentId, amount: body.amount, mode: body.mode, receiptNo: body.receiptNo })
       .catch(err => console.error('fee payment notification failed:', err));
@@ -1347,6 +1347,12 @@ function notifyAfterResourceWrite(resourceName, body) {
   } else if (resourceName === 'exam-results') {
     notifyMarksIfComplete({ examId: body.examId, studentId: body.studentId })
       .catch(err => console.error('marks notification failed:', err));
+  } else if (resourceName === 'discounts' && method === 'POST' && body.status === 'Pending') {
+    // Only on the initial request, never on the later PUT that records the
+    // approve/reject decision — otherwise every decision would re-alert
+    // Admin about the request it had just finished acting on.
+    notifyPendingDiscountRequest({ studentId: body.studentId, requestedBy: body.requestedBy })
+      .catch(err => console.error('discount request notification failed:', err));
   }
 }
 async function handleSimple(req, res, config, resourceName) {
@@ -1373,13 +1379,13 @@ async function handleSimple(req, res, config, resourceName) {
     if (req.method === 'POST') {
       const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
       await sql.query(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`, vals);
-      notifyAfterResourceWrite(resourceName, body);
+      notifyAfterResourceWrite(resourceName, body, 'POST');
       return res.status(201).json({ ok: true });
     } else {
       const setClause = cols.filter(c => c !== 'id').map((c, i) => `${c} = $${i + 2}`).join(', ');
       const updateVals = [body.id, ...fields.filter(f => f.col !== 'id').map(f => (body[f.app] === undefined ? null : body[f.app]))];
       await sql.query(`UPDATE ${table} SET ${setClause} WHERE id = $1`, updateVals);
-      notifyAfterResourceWrite(resourceName, body);
+      notifyAfterResourceWrite(resourceName, body, 'PUT');
       return res.status(200).json({ ok: true });
     }
   }
@@ -1769,6 +1775,13 @@ async function handleDeletionRequests(req, res) {
       INSERT INTO deletion_requests (id, resource, record_id, record_label, reason, requested_by, requested_by_name)
       VALUES (${id}, ${targetResource}, ${String(recordId)}, ${target.label(rows[0])}, ${String(reason).trim()}, ${req.authUser.id}, ${req.authUser.name})
     `;
+    // Fire-and-forget, same as every other notify* call — a slow or failing
+    // push must never delay the response to the person who just filed this.
+    notifyUsersByRole(MANAGEMENT_ROLES, {
+      title: 'Deletion request needs approval',
+      body: `${req.authUser.name} asked to delete ${target.label(rows[0])}. Reason: ${String(reason).trim()}`,
+      tag: 'deletion-request', url: '/',
+    }).catch(err => console.error('deletion request notification failed:', err));
     return res.status(201).json({ ok: true, id });
   }
   if (req.method === 'PUT') {
@@ -2354,6 +2367,16 @@ async function sendPushToStudent(studentId, payload) {
   const userIds = await getStudentContactUserIds(studentId);
   for (const userId of userIds) await sendPushToUser(userId, payload);
 }
+// Alerts every login of the given role(s) — used for approval workflows,
+// where "who should be notified" is "whoever can act on this", not one
+// specific student/parent. Admin/Principal today; a school that delegates
+// approval to another role later just needs its name added at the call
+// site, not a new function.
+async function notifyUsersByRole(roles, payload) {
+  if (!webPushConfigured()) return;
+  const rows = await sql`SELECT id FROM users WHERE role IN (${roles})`;
+  for (const row of rows) await sendPushToUser(row.id, payload);
+}
 
 // ---------- Notification triggers: fee payment, attendance, marks ----------
 // Called (fire-and-forget — never awaited by the request that triggered
@@ -2419,6 +2442,18 @@ async function notifyMarksIfComplete({ examId, studentId }) {
     const phone = getStudentParentPhone(student);
     if (phone) await sendWhatsAppTemplate(phone, 'MARKS_PUBLISHED', [`${student.first_name} ${student.last_name}`, exam.name]);
   }
+}
+// Fires the moment a staff member files a fee-discount request — Admin is
+// the only role that can act on it (see Roles & Permissions matrix), so
+// that's who gets alerted, exactly like every other notify* here: never
+// awaited by the write that triggered it (see handleSimple's call site).
+async function notifyPendingDiscountRequest({ studentId, requestedBy }) {
+  if (!studentId) return;
+  const rows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
+  const student = rows[0];
+  const name = student ? `${student.first_name} ${student.last_name}` : 'a student';
+  const body = `${requestedBy || 'A staff member'} requested a fee discount for ${name} — needs your approval.`;
+  await notifyUsersByRole(['Admin'], { title: 'Discount approval needed', body, tag: 'discount-approval', url: '/' });
 }
 
 // ---------- Fee-due reminders: a server-side replica of computeDefaulters() ----------
