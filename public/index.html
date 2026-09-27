@@ -3421,6 +3421,49 @@
     reader.readAsDataURL(file);
   }
 
+  // Same size-limit check as readImageFileWithSizeLimit, but additionally
+  // downscales/re-compresses the image via canvas before handing back a data
+  // URL — used for photos (like the Website Gallery) that get stored as a
+  // base64 blob and displayed at screen resolution, where a phone-camera
+  // original (several MB, 4000px+) is both slow to load on the public site
+  // and needlessly bloats the database row. Caps the longer edge to maxDim
+  // and re-encodes as JPEG at the given quality; looks the same on screen,
+  // a fraction of the size on disk. Falls back to the untouched original if
+  // canvas re-encoding fails for any reason (e.g. a corrupt image).
+  function readAndCompressImage(e, onLoaded, opts){
+    opts = opts || {};
+    const maxDim = opts.maxDim || 1600;
+    const quality = opts.quality || 0.82;
+    const file = e.target.files[0];
+    if(!file) return;
+    if(file.size > PHOTO_UPLOAD_MAX_BYTES){
+      showToast(`That image is ${(file.size/1024/1024).toFixed(1)}MB — please choose one under ${(PHOTO_UPLOAD_MAX_BYTES/1024/1024).toFixed(0)}MB.`);
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = evt => {
+      const original = evt.target.result;
+      const img = new Image();
+      img.onload = () => {
+        try{
+          let { width, height } = img;
+          if(width > maxDim || height > maxDim){
+            if(width >= height){ height = Math.round(height * (maxDim / width)); width = maxDim; }
+            else { width = Math.round(width * (maxDim / height)); height = maxDim; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          onLoaded(canvas.toDataURL('image/jpeg', quality));
+        }catch(err){ onLoaded(original); }
+      };
+      img.onerror = () => onLoaded(original);
+      img.src = original;
+    };
+    reader.readAsDataURL(file);
+  }
+
   /* ===== Styled confirm / info dialogs (replace native window.confirm/alert) ===== */
   let _confirmDialogResolve = null;
   function showConfirmDialog(message, opts){
@@ -15966,7 +16009,9 @@
     `;
   }
   function onGalleryPhotoSelected(e){
-    readImageFileWithSizeLimit(e, dataUrl => {
+    // Resized/compressed (not the raw upload) — see readAndCompressImage's
+    // comment for why: this photo goes straight onto the public website.
+    readAndCompressImage(e, dataUrl => {
       galleryUploadData = dataUrl;
       renderWebsiteGallery(document.getElementById('websiteGalleryBody'));
     });
