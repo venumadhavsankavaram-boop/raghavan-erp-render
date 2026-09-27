@@ -17138,6 +17138,14 @@
     if(currentUser.role !== 'Admin'){ showToast('Only Admin can remove a student from a room.'); return; }
     const s = students.find(x => x.id === studentId);
     if(!s) return;
+    // Same guard as Bus Fee/Extra Fee: don't let a Hostel Fee payment already
+    // collected silently fall out of the ledger just because the room
+    // assignment (the thing that makes it "expected") gets cleared.
+    const paidHostel = payments.filter(p => p.studentId === studentId && p.category === 'hostel' && !p.voided).reduce((sum,p) => sum + (Number(p.amount)||0), 0);
+    if(paidHostel > 0){
+      showToast(`Can't remove — ${fmtMoney(paidHostel)} has already been collected as Hostel Fee for this student. Void or Refund that payment first (Fee ledger → Payment History), then remove them from the room.`);
+      return;
+    }
     if(!await showConfirmDialog(`Remove ${s.firstName} ${s.lastName} from their hostel room?`)) return;
     s.isBoarder = 'No';
     s.hostelRoomId = '';
@@ -23749,6 +23757,23 @@
       parent: g('fFatherName').trim() || g('fMotherName').trim(),
       contact: g('fFatherPhone').trim() || g('fMotherPhone').trim(),
     };
+
+    // Guard against silently orphaning an already-collected Bus Fee payment.
+    // Needs Transport isn't a separate assignment record like Extra Fee — it's
+    // this one profile field — so turning it off is the only way a wrongly
+    // enabled Bus Fee gets un-assigned. If money's already been collected
+    // under it, block here instead of letting the fee head quietly disappear
+    // from the ledger with a payment left behind uncategorized.
+    if(editId){
+      const existing = students.find(s => s.id === editId);
+      if(existing && existing.needsTransport === 'Yes' && data.needsTransport !== 'Yes'){
+        const paidBus = payments.filter(p => p.studentId === editId && p.category === 'bus' && !p.voided).reduce((sum,p) => sum + (Number(p.amount)||0), 0);
+        if(paidBus > 0){
+          showToast(`Can't turn off Needs Transport — ${fmtMoney(paidBus)} has already been collected as Bus Fee for this student. Void or Refund that payment first (Fee ledger → Payment History), then update Transport here.`);
+          return false;
+        }
+      }
+    }
 
     if(editId){
       const idx = students.findIndex(s => s.id === editId);
