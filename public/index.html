@@ -739,6 +739,55 @@
   .sec-pill:hover{border-color:var(--teal); background:var(--white); transform:translateY(-1px);}
   .sec-pill b{font-family:'Baloo 2',cursive; color:var(--magenta); font-size:0.92rem;}
 
+  /* ===== Manage Fees: modern class/section picker ===== */
+  .fee-modern-grid{
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:16px;
+  }
+  .fee-modern-card{
+    background:var(--white); border-radius:18px; box-shadow:var(--shadow-sm,var(--shadow));
+    position:relative; overflow:hidden; border:1px solid var(--border);
+    transition:transform .18s cubic-bezier(.4,0,.2,1), box-shadow .18s ease;
+  }
+  .fee-modern-card::before{
+    content:''; position:absolute; top:0; left:0; right:0; height:4px;
+    background:linear-gradient(90deg, var(--gold), var(--gold-soft));
+  }
+  .fee-modern-card[data-idx="1"]::before{background:linear-gradient(90deg, var(--magenta), var(--magenta-deep));}
+  .fee-modern-card[data-idx="2"]::before{background:linear-gradient(90deg, var(--teal), var(--success-ink));}
+  .fee-modern-card[data-idx="3"]::before{background:linear-gradient(90deg, var(--navy), var(--navy-deep));}
+  .fee-modern-card:hover{transform:translateY(-3px); box-shadow:var(--shadow-hover,var(--shadow));}
+  .fee-modern-header{
+    display:flex; align-items:center; gap:12px; padding:18px 16px 14px; cursor:pointer;
+  }
+  .fee-modern-icon{
+    flex-shrink:0; width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(135deg, rgba(24,143,134,0.14), rgba(24,143,134,0.05)); font-size:1.15rem;
+  }
+  .fee-modern-titlewrap{flex:1; min-width:0;}
+  .fee-modern-name{font-size:0.98rem; font-weight:700; color:var(--navy); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .fee-modern-meta{font-size:0.72rem; color:var(--ink-soft); margin-top:3px; font-weight:500;}
+  .fee-modern-pending{color:#b7791f; font-weight:700;}
+  .fee-modern-clear{color:var(--success-ink,#188f86); font-weight:700;}
+  .fee-modern-chevron{
+    color:var(--ink-soft); flex-shrink:0; box-sizing:border-box; width:28px; height:28px; padding:6px;
+    border-radius:50%; background:var(--cream); transition:transform .2s ease, background .15s ease, color .15s ease;
+  }
+  .fee-modern-card.expanded .fee-modern-chevron{transform:rotate(180deg); color:#fff; background:var(--magenta);}
+  .fee-modern-chips{
+    max-height:0; overflow:hidden; transition:max-height .22s ease, padding .22s ease;
+    display:flex; flex-wrap:wrap; gap:8px; padding:0 16px;
+  }
+  .fee-modern-card.expanded .fee-modern-chips{max-height:220px; padding:0 16px 16px;}
+  .fee-sec-chip{
+    display:flex; align-items:center; gap:7px; background:var(--cream); border:1.5px solid var(--border);
+    border-radius:999px; padding:7px 12px 7px 14px; font-size:0.76rem; font-weight:600; color:var(--navy);
+    cursor:pointer; transition:border-color .15s ease, background .15s ease, transform .15s ease; font-family:inherit;
+  }
+  .fee-sec-chip:hover{border-color:var(--teal); background:var(--white); transform:translateY(-1px);}
+  .fee-chip-count{font-family:'Baloo 2',cursive; color:var(--magenta); font-size:0.9rem;}
+  .fee-chip-dot{width:7px; height:7px; border-radius:50%; background:#e0a72e; box-shadow:0 0 0 2px rgba(224,167,46,0.25);}
+  .fee-chip-clear .fee-chip-count{color:var(--success-ink,#188f86);}
+
   /* ===== STUDENT PROFILE ===== */
   .profile-head{display:flex; gap:20px; align-items:center; background:var(--white); border-radius:18px; padding:24px; box-shadow:var(--shadow); margin-bottom:22px; flex-wrap:wrap;}
   .profile-photo{
@@ -5479,20 +5528,46 @@
   }
 
   /* --- Student Fees: class grid / section / ledger --- */
+  let expandedFeeClass = '';
+  function toggleFeeClassExpand(cls){
+    expandedFeeClass = (expandedFeeClass === cls) ? '' : cls;
+    renderFeeClassGrid(document.getElementById('feeBody'));
+  }
   function renderFeeClassGrid(body){
     const classF = document.getElementById('mfClassFilter').value;
-    const rows = CLASS_LEVELS.filter(c => !classF || c===classF).map(cls => {
-      const tiles = SECTIONS.map(sec => {
-        const count = students.filter(s => s.className===cls && s.section===sec && isActive(s)).length;
-        return `<div class="class-tile" onclick="openFeeSection('${cls}','${sec}')"><h4>${cls} — ${sec}</h4><div class="ct-count">${count}</div><div class="ct-label">student${count===1?'':'s'}</div></div>`;
-      }).join('');
+    let gradIdx = 0;
+    const cards = CLASS_LEVELS.filter(c => !classF || c===classF).map(cls => {
+      const secData = sectionsForClass(cls).map(sec => {
+        const list = students.filter(s => s.className===cls && s.section===sec && isActive(s));
+        let outstanding = 0;
+        list.forEach(s => { const { totals } = computeStudentFinance(s); if(totals.receivable > 0) outstanding++; });
+        return { sec, count: list.length, outstanding };
+      }).filter(x => x.count > 0);
+      if(!secData.length) return ''; // strictly follow school setup: no students → don't show this class at all
+      const total = secData.reduce((sum,x) => sum+x.count, 0);
+      const totalOutstanding = secData.reduce((sum,x) => sum+x.outstanding, 0);
+      const isOpen = expandedFeeClass === cls;
+      const idx = gradIdx % 4; gradIdx++;
+      const chips = secData.map(x => `
+        <button type="button" class="fee-sec-chip ${x.outstanding>0?'fee-chip-pending':'fee-chip-clear'}" onclick="event.stopPropagation(); openFeeSection('${cls}','${x.sec}')">
+          <span class="fee-chip-sec">Sec ${x.sec}</span>
+          <span class="fee-chip-count">${x.count}</span>
+          ${x.outstanding>0 ? `<span class="fee-chip-dot" title="${x.outstanding} pending"></span>` : ''}
+        </button>`).join('');
       return `
-        <div class="class-group">
-          <div class="class-group-title">${cls}</div>
-          <div class="class-sections-row">${tiles}</div>
+        <div class="fee-modern-card ${isOpen?'expanded':''}" data-idx="${idx}">
+          <div class="fee-modern-header" onclick="toggleFeeClassExpand('${cls}')">
+            <div class="fee-modern-icon">🎓</div>
+            <div class="fee-modern-titlewrap">
+              <div class="fee-modern-name">${cls}</div>
+              <div class="fee-modern-meta">${total} student${total===1?'':'s'} · ${totalOutstanding>0 ? `<span class="fee-modern-pending">${totalOutstanding} pending</span>` : `<span class="fee-modern-clear">all clear</span>`}</div>
+            </div>
+            <svg class="fee-modern-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="fee-modern-chips">${chips}</div>
         </div>`;
-    }).join('');
-    body.innerHTML = rows;
+    }).filter(Boolean).join('');
+    body.innerHTML = cards ? `<div class="fee-modern-grid">${cards}</div>` : `<div class="empty-state"><b>No students found for the selected class.</b></div>`;
   }
 
   function openFeeSection(cls, sec){
