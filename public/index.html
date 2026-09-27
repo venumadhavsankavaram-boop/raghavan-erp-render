@@ -5597,7 +5597,7 @@
     currentAcademicYearValue = document.getElementById('mfAySelect').value;
     await storageSet(CURRENT_AY_KEY, currentAcademicYearValue);
     document.getElementById('ayBadge').textContent = 'AY ' + currentAcademicYearValue;
-    showToast('Academic year updated.');
+    showToast('Academic year updated.', 'burst');
   }
 
   function switchFeeTab(tab){
@@ -6283,7 +6283,7 @@
     feeTypes.push(val);
     await storageSet(FEE_TYPES_KEY, feeTypes);
     renderFeeTypesTab(document.getElementById('feeBody'));
-    showToast('Fee type added.');
+    showToast('Fee type added.', 'burst');
   }
   async function removeFeeType(idx){
     feeTypes.splice(idx,1);
@@ -6676,7 +6676,7 @@
     await storageSet(STUDENT_DISCOUNTS_KEY, studentDiscounts);
     renderDiscListView(document.getElementById('feeBody'));
     renderDashboard();
-    showToast('Discount approved.');
+    showToast('Discount approved.', 'burst');
   }
   async function rejectDiscountGroup(batchId, studentId){
     studentDiscounts.filter(d => (d.batchId||d.id)===batchId && d.studentId===studentId).forEach(d => {
@@ -6685,7 +6685,7 @@
     await storageSet(STUDENT_DISCOUNTS_KEY, studentDiscounts);
     renderDiscListView(document.getElementById('feeBody'));
     renderDashboard();
-    showToast('Discount rejected.');
+    showToast('Discount rejected.', 'burst');
   }
   async function deleteDiscountGroup(batchId, studentId){
     if(!await showConfirmDialog('Remove this discount record?')) return;
@@ -6702,7 +6702,7 @@
     discountTypes.push({ id:'disc_'+Date.now(), name, amount });
     await storageSet(DISCOUNT_TYPES_KEY, discountTypes);
     renderDiscountsTab(document.getElementById('feeBody'));
-    showToast('Discount type added.');
+    showToast('Discount type added.', 'burst');
   }
   async function removeDiscountType(idx){
     discountTypes.splice(idx,1);
@@ -6736,7 +6736,7 @@
     extraFeeDefs.push({ id:'ef_'+Date.now(), name, amount });
     await storageSet(EXTRA_FEE_DEFS_KEY, extraFeeDefs);
     renderExtraFeesTab(document.getElementById('feeBody'));
-    showToast('Extra fee defined.');
+    showToast('Extra fee defined.', 'burst');
   }
   async function removeExtraFeeDef(idx){
     extraFeeDefs.splice(idx,1);
@@ -6773,7 +6773,7 @@
     await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
     closeExtraFeeAssignModal();
     renderFeeBody();
-    showToast('Extra fee assigned.');
+    showToast('Extra fee assigned.', 'burst');
     return false;
   }
   async function addAdmissionFeeForStudent(studentId){
@@ -6804,7 +6804,7 @@
     if(item) item.paid = true;
     await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
     renderFeeBody();
-    showToast('Marked as paid.');
+    showToast('Marked as paid.', 'burst');
   }
   function printReceiptForExtraFee(feeId){
     const fee = studentExtraFees.find(x => x.id === feeId);
@@ -6857,12 +6857,12 @@
       amount: Number(document.getElementById('lfAmount').value) || 0,
     };
     await storageSet(LATE_FEE_SETTINGS_KEY, lateFeeSettings);
-    showToast('Late fee rule saved.');
+    showToast('Late fee rule saved.', 'burst');
   }
   async function saveReceiptSettings(){
     receiptSettings = { startNumber: Number(document.getElementById('rsStart').value) || 1 };
     await storageSet(RECEIPT_SETTINGS_KEY, receiptSettings);
-    showToast('Receipt numbering updated.');
+    showToast('Receipt numbering updated.', 'burst');
   }
 
   /* --- Fee Defaulters --- */
@@ -7603,7 +7603,7 @@
     holidays.push({ id: date, date, name });
     await storageSet(HOLIDAYS_KEY, holidays);
     renderHolidaysTab(document.getElementById('attendanceBody'));
-    showToast('Holiday added.');
+    showToast('Holiday added.', 'burst');
   }
   async function removeHoliday(date){
     holidays = holidays.filter(h => h.date !== date);
@@ -7633,7 +7633,7 @@
     const workingDays = Array.from(document.querySelectorAll('.atWorkDay:checked')).map(el => Number(el.value));
     attSettings = { threshold, workingDays };
     await storageSet(ATT_SETTINGS_KEY, attSettings);
-    showToast('Attendance settings saved.');
+    showToast('Attendance settings saved.', 'burst');
   }
 
   /* --- Low Attendance + Notify (reuses Fee Defaulters' Notify modal) --- */
@@ -8073,7 +8073,7 @@
     examHolidays.push({ date, name, type, note });
     await storageSet(EXAM_HOLIDAYS_KEY, examHolidays);
     renderExamHolidaysTab(document.getElementById('examBody'));
-    showToast('Holiday added.');
+    showToast('Holiday added.', 'burst');
   }
   async function removeExamHoliday(date, name){
     examHolidays = examHolidays.filter(h => !(h.date===date && h.name===name));
@@ -8125,7 +8125,7 @@
     examTypes.push(val);
     await storageSet(EXAM_TYPES_KEY, examTypes);
     renderExamsListTab(document.getElementById('examBody'));
-    showToast('Exam type added.');
+    showToast('Exam type added.', 'burst');
   }
   async function removeExamType(idx){
     examTypes.splice(idx,1);
@@ -8289,7 +8289,7 @@
     });
     await storageSet(EXAM_DEFS_KEY, examDefs);
     renderExamBody();
-    showToast('Subject removed.');
+    showToast('Subject removed.', 'burst');
   }
 
   function openExamModal(id){
@@ -8341,7 +8341,7 @@
     await storageSet(EXAM_DEFS_KEY, examDefs);
     await storageSet(EXAM_RESULTS_KEY, examResults);
     renderExamBody();
-    showToast('Exam deleted.');
+    showToast('Exam deleted.', 'burst');
   }
 
   /* --- Tab: Enter Marks --- */
@@ -8493,7 +8493,7 @@
       else { examResults.push({ id:'res_'+studentId+'_'+exam.id+'_'+subject.replace(/\s/g,''), examId:exam.id, studentId, subject, marks: isAbsent ? null : val, absent: isAbsent }); }
     });
     await storageSet(EXAM_RESULTS_KEY, examResults);
-    showToast('Marks saved.');
+    showToast('Marks saved.', 'burst');
   }
 
   async function importMarksExcel(e){
@@ -9069,7 +9069,7 @@
     if(discEl) rec.discipline = discEl.value;
     examCoScholastic[coScholasticKeyFor(examId, studentId)] = rec;
     await storageSet(EXAM_COSCHOLASTIC_KEY, examCoScholastic);
-    showToast('Co-scholastic grades saved.');
+    showToast('Co-scholastic grades saved.', 'burst');
     loadReportCardPreview();
   }
   function renderReportTemplatesTab(body){
@@ -9117,7 +9117,7 @@
     reportTemplates.push(copy);
     await storageSet(REPORT_TEMPLATES_KEY, reportTemplates);
     renderReportTemplatesTab(document.getElementById('resultBody'));
-    showToast('Template duplicated — edit it to make it your own.');
+    showToast('Template duplicated — edit it to make it your own.', 'burst');
   }
   const INFO_FIELD_DEFS = [
     { key:'studentName', label:'Student Name' },
@@ -9251,7 +9251,7 @@
       reportTemplates.push(data);
     }
     await storageSet(REPORT_TEMPLATES_KEY, reportTemplates);
-    showToast('Template saved.');
+    showToast('Template saved.', 'burst');
     backToTemplatesList();
   }
   async function setDefaultTemplate(id){
@@ -9372,7 +9372,7 @@
     const copy = { ...src, id: (twKind==='admitcard'?'ac_':'tmpl_')+Date.now(), name: src.name+' (Copy)', isDefault:false };
     twTemplates().push(copy);
     await storageSet(twStorageKey(), twTemplates());
-    showToast('Template duplicated.');
+    showToast('Template duplicated.', 'burst');
     renderTemplateWizard();
   }
   async function twSetDefault(id){
@@ -9617,7 +9617,7 @@
       arr.push(twDraft);
     }
     await storageSet(twStorageKey(), arr);
-    showToast('Template saved.');
+    showToast('Template saved.', 'burst');
     twListView = true;
     renderTemplateWizard();
     if(document.getElementById('resultBody')) renderResultBody();
@@ -9686,7 +9686,7 @@
       examGroups.push({ id:'eg_'+Date.now(), name, examIds });
     }
     await storageSet(EXAM_GROUPS_KEY, examGroups);
-    showToast('Exam template saved.');
+    showToast('Exam template saved.', 'burst');
     backToExamTemplatesList();
   }
   async function deleteExamGroup(id){
@@ -9743,7 +9743,7 @@
       grade: el.value.trim(), minPct: Number(mins[i].value)||0, maxPct: Number(maxs[i].value)||0,
     })).filter(g => g.grade);
     await storageSet(CONSOLIDATION_SCALE_KEY, consolidationScale);
-    showToast('Consolidation scale saved.');
+    showToast('Consolidation scale saved.', 'burst');
   }
   function gradeForConsolPct(pct){
     const band = consolidationScale.find(g => pct >= g.minPct && pct <= g.maxPct);
@@ -9796,7 +9796,7 @@
       grade: el.value.trim(), minPct: Number(mins[i].value)||0, maxPct: Number(maxs[i].value)||0,
     })).filter(g => g.grade);
     await storageSet(GRADING_SCALE_KEY, gradingScale);
-    showToast('Grading scale saved.');
+    showToast('Grading scale saved.', 'burst');
   }
 
   /* ===== ROOM ALLOTMENT MODULE (Hall Ticket Numbers, Class Selection, Rooms & Matrix, Final Printout, Notice Board) ===== */
@@ -10423,7 +10423,7 @@
     readImageFileWithSizeLimit(e, async dataUrl => {
       schoolInfo.principalSignature = dataUrl;
       await storageSet(SCHOOL_INFO_KEY, schoolInfo);
-      showToast('Principal / Correspondent signature saved.');
+      showToast('Principal / Correspondent signature saved.', 'burst');
       renderRoomAllotSubBody();
     });
   }
@@ -10431,7 +10431,7 @@
     if(!await showConfirmDialog('Remove the Principal / Correspondent signature? It will need to be re-uploaded before it appears on Admit Cards or Progress Reports again.')) return;
     schoolInfo.principalSignature = '';
     await storageSet(SCHOOL_INFO_KEY, schoolInfo);
-    showToast('Signature removed.');
+    showToast('Signature removed.', 'burst');
     renderRoomAllotSubBody();
   }
 
@@ -12924,7 +12924,7 @@
     subjectsList = subjectsList.filter(s => s.id !== id);
     await storageSet(SUBJECTS_KEY, subjectsList);
     renderSubjectsBody();
-    showToast('Subject deleted.');
+    showToast('Subject deleted.', 'burst');
   }
 
   /* ===== STAFF MODULE ===== */
@@ -13343,7 +13343,7 @@
     }
     if(!appliedAny){ return; }
     await storageSet(SUBJECTS_KEY, subjectsList);
-    showToast('Assigned.');
+    showToast('Assigned.', 'burst');
     saAddClass = ''; saAddSubjectId = '';
     renderSaTeacherDetail();
   }
@@ -13439,7 +13439,7 @@
     await storageSet(SUBJECTS_KEY, subjectsList);
     saEditingCell = null;
     renderSubjectsMainBody();
-    showToast('Updated.');
+    showToast('Updated.', 'burst');
   }
 
   function renderStaffSubjectsChecklistHtml(staffId){
@@ -13541,7 +13541,7 @@
     staffDepartments.push(val);
     await storageSet(STAFF_DEPTS_KEY, staffDepartments);
     renderStaffDeptsTab(document.getElementById('staffBody'));
-    showToast('Department added.');
+    showToast('Department added.', 'burst');
   }
   async function removeStaffDept(idx){
     staffDepartments.splice(idx,1);
@@ -13554,7 +13554,7 @@
     staffDesignations.push(val);
     await storageSet(STAFF_DESIGNATIONS_KEY, staffDesignations);
     renderStaffDeptsTab(document.getElementById('staffBody'));
-    showToast('Designation added.');
+    showToast('Designation added.', 'burst');
   }
   async function removeStaffDesignation(idx){
     staffDesignations.splice(idx,1);
@@ -13567,7 +13567,7 @@
     staffJobTypes.push(val);
     await storageSet(STAFF_JOB_TYPES_KEY, staffJobTypes);
     renderStaffDeptsTab(document.getElementById('staffBody'));
-    showToast('Job type added.');
+    showToast('Job type added.', 'burst');
   }
   async function removeStaffJobType(idx){
     staffJobTypes.splice(idx,1);
@@ -13951,7 +13951,7 @@
     await storageSet(STAFF_KEY, staffList);
     staffView = 'table';
     renderStaffBody();
-    showToast('Staff record deleted.');
+    showToast('Staff record deleted.', 'burst');
   }
 
   /* ===== PAYROLL =====
@@ -14064,7 +14064,7 @@
       staffPayrollRecords.push({ id:'pay_'+staffId+'_'+monthStr, ...calc, status:'Draft', generatedDate: new Date().toISOString().slice(0,10) });
     }
     await storageSet(STAFF_PAYROLL_KEY, staffPayrollRecords);
-    showToast('Payroll draft saved.');
+    showToast('Payroll draft saved.', 'burst');
     renderStaffBody();
   }
   async function approvePayroll(staffId, monthStr){
@@ -14076,7 +14076,7 @@
     rec.approvedBy = currentUser.name;
     rec.approvedDate = new Date().toISOString().slice(0,10);
     await storageSet(STAFF_PAYROLL_KEY, staffPayrollRecords);
-    showToast('Payroll approved and locked in.');
+    showToast('Payroll approved and locked in.', 'burst');
     renderStaffBody();
   }
   async function reopenPayroll(staffId, monthStr){
@@ -15162,7 +15162,7 @@
         headers: { 'Content-Type': 'application/json', ...actorHeaders() },
         body: JSON.stringify({ subject, message, type, priority })
       }));
-      showToast('Sent to your vendor — they will respond from their dashboard.');
+      showToast('Sent to your vendor — they will respond from their dashboard.', 'burst');
       resetContactVendorForm();
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not send your request. Please try again.');
@@ -15202,7 +15202,7 @@
     noticeTypes.push({ name, icon:'📣', body:'' });
     await storageSet(NOTICE_TYPES_KEY, noticeTypes);
     renderNoticeBoard(document.getElementById('noticeBoardBody'));
-    showToast('Heading added.');
+    showToast('Heading added.', 'burst');
   }
   async function removeNoticeType(idx){
     const t = noticeTypes[idx];
@@ -15238,7 +15238,7 @@
     });
     await storageSet(COMMS_MESSAGES_KEY, commsMessages);
     renderNoticeBoard(document.getElementById('noticeBoardBody'));
-    showToast('Notice posted to the website.');
+    showToast('Notice posted to the website.', 'burst');
   }
 
   /* --- Compose --- */
@@ -15571,7 +15571,7 @@
     await storageSet(COMMS_MESSAGES_KEY, commsMessages);
     editingNoticeId = '';
     renderNoticeBoard(document.getElementById('noticeBoardBody'));
-    showToast('Notice updated.');
+    showToast('Notice updated.', 'burst');
   }
   async function deleteNotice(id){
     if(!await showConfirmDialog('Take this notice down from the website\'s notice board? It stays in the Message Log for your records.')) return;
@@ -15580,7 +15580,7 @@
     n.boardRemoved = true;
     await storageSet(COMMS_MESSAGES_KEY, commsMessages);
     renderNoticeBoard(document.getElementById('noticeBoardBody'));
-    showToast('Notice taken down.');
+    showToast('Notice taken down.', 'burst');
   }
 
   /* --- Message Log: everything sent, all channels --- */
@@ -15633,7 +15633,7 @@
     if(!q) return;
     q.status = status;
     await storageSet(ADMISSION_INQUIRIES_KEY, admissionInquiries);
-    showToast('Status updated.');
+    showToast('Status updated.', 'burst');
   }
   function convertInquiryToStudent(id){
     const q = admissionInquiries.find(x => x.id === id);
@@ -15703,7 +15703,7 @@
     await storageSet(WEBSITE_GALLERY_KEY, websiteGallery);
     galleryUploadData = '';
     renderWebsiteGallery(document.getElementById('websiteGalleryBody'));
-    showToast('Photo added to website gallery.');
+    showToast('Photo added to website gallery.', 'burst');
   }
   async function deleteGalleryPhoto(id){
     if(!await showConfirmDialog('Remove this photo from the website gallery?')) return;
@@ -16313,7 +16313,7 @@
     if(!name){ showToast('Enter an account name.'); return; }
     acctOtherLedgers.push({ id:'ledger_'+Date.now(), name, type, openingBalance, openingDate, active:true });
     await storageSet(ACCT_OTHER_LEDGERS_KEY, acctOtherLedgers);
-    showToast('Account added.');
+    showToast('Account added.', 'burst');
     renderAcctChartTab(document.getElementById('accountingBody'));
   }
   async function toggleAcctOtherLedgerActive(id){
@@ -16328,7 +16328,7 @@
     if(!await showConfirmDialog('Delete this account? This cannot be undone.')) return;
     acctOtherLedgers = acctOtherLedgers.filter(x => x.id !== id);
     await storageSet(ACCT_OTHER_LEDGERS_KEY, acctOtherLedgers);
-    showToast('Account deleted.');
+    showToast('Account deleted.', 'burst');
     renderAcctChartTab(document.getElementById('accountingBody'));
   }
 
@@ -16526,7 +16526,7 @@
     if(!name){ showToast('Enter an account name.'); return; }
     acctBankAccounts.push({ id:'bnk_'+Date.now(), name, type, bankName, accountNo, ifsc, openingBalance, openingDate, active:true });
     await storageSet(ACCT_BANK_ACCOUNTS_KEY, acctBankAccounts);
-    showToast('Account added.');
+    showToast('Account added.', 'burst');
     renderAcctBankTab(document.getElementById('accountingBody'));
   }
   async function toggleAcctBankActive(id){
@@ -16545,7 +16545,7 @@
     b.lastStatementBalance = val === '' ? null : Number(val);
     b.lastStatementDate = acctToday();
     await storageSet(ACCT_BANK_ACCOUNTS_KEY, acctBankAccounts);
-    showToast('Statement balance saved.');
+    showToast('Statement balance saved.', 'burst');
     renderAcctBankTab(document.getElementById('accountingBody'));
   }
 
@@ -16601,7 +16601,7 @@
     if(usefulLifeYears <= 0){ showToast('Enter the useful life in years.'); return; }
     acctFixedAssets.push({ id:'asset_'+Date.now(), name, category, purchaseDate, purchaseCost, salvageValue, usefulLifeYears, active:true, addedBy:currentUser.name });
     await storageSet(ACCT_FIXED_ASSETS_KEY, acctFixedAssets);
-    showToast('Asset added.');
+    showToast('Asset added.', 'burst');
     renderDashboard();
     renderAcctAssetsTab(document.getElementById('accountingBody'));
   }
@@ -16612,7 +16612,7 @@
     a.disposedDate = acctToday();
     await storageSet(ACCT_FIXED_ASSETS_KEY, acctFixedAssets);
     renderDashboard();
-    showToast('Asset marked disposed.');
+    showToast('Asset marked disposed.', 'burst');
     renderAcctAssetsTab(document.getElementById('accountingBody'));
   }
 
@@ -16664,14 +16664,14 @@
     if(budgetedAmount <= 0){ showToast('Enter a budgeted amount.'); return; }
     acctBudgets.push({ id:'budget_'+Date.now(), label, startDate, endDate, accountKey, budgetedAmount });
     await storageSet(ACCT_BUDGETS_KEY, acctBudgets);
-    showToast('Budget line added.');
+    showToast('Budget line added.', 'burst');
     renderAcctBudgetTab(document.getElementById('accountingBody'));
   }
   async function deleteAcctBudget(id){
     if(!await showConfirmDialog('Delete this budget line?')) return;
     acctBudgets = acctBudgets.filter(x => x.id !== id);
     await storageSet(ACCT_BUDGETS_KEY, acctBudgets);
-    showToast('Budget line deleted.');
+    showToast('Budget line deleted.', 'burst');
     renderAcctBudgetTab(document.getElementById('accountingBody'));
   }
 
@@ -16799,7 +16799,7 @@
     }
     await storageSet(HOSTEL_ROOMS_KEY, hostelRooms);
     renderDashboard();
-    showToast('Room saved.');
+    showToast('Room saved.', 'burst');
     backToRoomsList();
   }
   async function deleteRoom(id){
@@ -17056,7 +17056,7 @@
       libraryBooks.push({ id:'book_'+Date.now(), title, author, category, isbn, publisher, shelfLocation, totalCopies, availableCopies:totalCopies, addedDate:new Date().toISOString().slice(0,10) });
     }
     await storageSet(LIBRARY_BOOKS_KEY, libraryBooks);
-    showToast('Book saved.');
+    showToast('Book saved.', 'burst');
     backToCatalogList();
   }
   async function deleteBook(id){
@@ -17266,7 +17266,7 @@
   async function saveLibrarySettings(){
     librarySettings = { loanPeriodDays: Number(document.getElementById('libLoanPeriod').value)||14, finePerDay: Number(document.getElementById('libFinePerDay').value)||0 };
     await storageSet(LIBRARY_SETTINGS_KEY, librarySettings);
-    showToast('Settings saved.');
+    showToast('Settings saved.', 'burst');
   }
 
   const TRANSPORT_TAB_PERM_KEYS = { routes:'transport_routes', assign:'transport_assign', roster:'transport_roster' };
@@ -17424,7 +17424,7 @@
     }
     await storageSet(TRANSPORT_ROUTES_KEY, transportRoutes);
     renderDashboard();
-    showToast('Route saved.');
+    showToast('Route saved.', 'burst');
     backToRoutesList();
   }
   async function deleteRoute(id){
@@ -17707,7 +17707,7 @@
     await storageSet(TIMETABLE_KEY, timetableEntries);
     closeTtCellModal();
     renderTimetableBody();
-    showToast('Timetable updated.');
+    showToast('Timetable updated.', 'burst');
   }
   async function clearTtCell(){
     const idx = timetableEntries.findIndex(e => e.className===ttClass && e.section===ttSection && e.day===ttEditDay && e.period===ttEditPeriod);
@@ -17715,7 +17715,7 @@
       timetableEntries.splice(idx,1);
       await storageSet(TIMETABLE_KEY, timetableEntries);
       renderTimetableBody();
-      showToast('Slot cleared.');
+      showToast('Slot cleared.', 'burst');
     }
     closeTtCellModal();
   }
@@ -17909,7 +17909,7 @@
     if(timetableActiveDays.length === 0){ showToast('Select at least one day.'); return; }
     await storageSet(TIMETABLE_PERIODS_KEY, timetablePeriods);
     await storageSet(TIMETABLE_DAYS_KEY, timetableActiveDays);
-    showToast('Periods and days updated.');
+    showToast('Periods and days updated.', 'burst');
     renderTimetableBody();
   }
 
@@ -18023,7 +18023,7 @@
     await storageSet(SYLLABUS_KEY, syllabusTopics);
     closeSyllabusTopicModal();
     renderSyllabusBody();
-    showToast('Saved.');
+    showToast('Saved.', 'burst');
     return false;
   }
   async function deleteSyllabusTopic(id){
@@ -18105,7 +18105,7 @@
     await storageSet(HOMEWORK_KEY, homeworkItems);
     closeHomeworkModal();
     renderSyllabusBody();
-    showToast('Saved.');
+    showToast('Saved.', 'burst');
     return false;
   }
   async function deleteHomework(id){
@@ -18177,7 +18177,7 @@
     currentUser.name = name;
     document.getElementById('sbUserName').textContent = name;
     updateSidebarAvatar();
-    showToast('Profile updated.');
+    showToast('Profile updated.', 'burst');
   }
   async function changePasswordFromMyAccount(){
     const current = document.getElementById('myCpCurrent').value;
@@ -18192,7 +18192,7 @@
     document.getElementById('myCpCurrent').value = '';
     document.getElementById('myCpNew').value = '';
     document.getElementById('myCpConfirm').value = '';
-    showToast('Password updated.');
+    showToast('Password updated.', 'burst');
   }
 
   function initInventoryView(){
@@ -18450,12 +18450,12 @@
         requestDate:new Date().toISOString().slice(0,10), explanation, payload, status:'Pending',
       });
       await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
-      showToast('Submitted for Admin approval.');
+      showToast('Submitted for Admin approval.', 'burst');
       backToInventoryItemsList();
       return;
     }
     await applyInventoryItemSave(payload);
-    showToast('Product saved.');
+    showToast('Product saved.', 'burst');
     backToInventoryItemsList();
   }
   async function applyInventoryItemSave(p){
@@ -18787,7 +18787,7 @@
     a.status = 'Approved';
     await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
     renderInventoryBody();
-    showToast('Approved and applied.');
+    showToast('Approved and applied.', 'burst');
   }
   async function rejectInventoryRequest(id){
     const a = pendingApprovals.find(x => x.id === id);
@@ -18796,7 +18796,7 @@
     a.status = 'Rejected';
     await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
     renderInventoryBody();
-    showToast('Request rejected.');
+    showToast('Request rejected.', 'burst');
   }
 
   /* --- Sales History --- */
@@ -19284,7 +19284,7 @@
         acctExpenses = []; await storageSet(ACCT_EXPENSES_KEY, acctExpenses);
         acctIncome = []; await storageSet(ACCT_INCOME_KEY, acctIncome);
       }
-      showToast('Selected records have been permanently deleted.');
+      showToast('Selected records have been permanently deleted.', 'burst');
       renderAdminToolsTab(document.getElementById('adminTools2Body'));
     }catch(e){
       showToast('Reset failed: ' + e.message);
@@ -19305,7 +19305,7 @@
     document.getElementById('cpCurrent').value = '';
     document.getElementById('cpNew').value = '';
     document.getElementById('cpConfirm').value = '';
-    showToast('Password updated.');
+    showToast('Password updated.', 'burst');
   }
   function previewDownloadFile(e){
     const file = e.target.files[0];
@@ -19321,7 +19321,7 @@
       adminDownloads.push({ title, filename: file.name, data: evt.target.result, date: new Date().toISOString().slice(0,10) });
       await storageSet(DOWNLOADS_KEY, adminDownloads);
       renderAdminToolsTab(document.getElementById('adminTools2Body'));
-      showToast('Download added.');
+      showToast('Download added.', 'burst');
     };
     reader.readAsDataURL(file);
   }
@@ -19395,7 +19395,7 @@
     const role = { id:'role_'+Date.now(), name, permissions: emptyPermSet() };
     customRoles.push(role);
     await storageSet(CUSTOM_ROLES_KEY, customRoles);
-    showToast('Role created — now set its permissions.');
+    showToast('Role created — now set its permissions.', 'burst');
     editRolePermissions(name);
   }
   function editRolePermissions(roleName){
@@ -19414,7 +19414,7 @@
     customRoles = customRoles.filter(r => r.name !== roleName);
     await storageSet(CUSTOM_ROLES_KEY, customRoles);
     renderPermissionsTab(document.getElementById('rolesPermissionsBody'));
-    showToast('Reset to default.');
+    showToast('Reset to default.', 'burst');
   }
   function backToPermissionsList(){
     window.scrollTo({top:0,left:0,behavior:'instant'});
@@ -19747,7 +19747,7 @@
     const nameSpan = document.getElementById('sbBrandName');
     if(nameSpan) nameSpan.innerHTML = schoolInfo.name.split(' ').slice(0,2).join(' ') + '<span>ERP Portal</span>';
     if(schoolInfo.name) document.title = schoolInfo.name + ' — ERP';
-    showToast('School profile saved.');
+    showToast('School profile saved.', 'burst');
   }
 
   /* --- Classes management --- */
@@ -19825,7 +19825,7 @@
     SECTIONS.push(val);
     await storageSet(SECTIONS_KEY, SECTIONS);
     renderClassesTab(document.getElementById('classesSetupBody'));
-    showToast('Section added.');
+    showToast('Section added.', 'burst');
   }
   async function removeSectionLevel(idx){
     if(SECTIONS.length <= 1){ showToast('At least one section is required.'); return; }
@@ -19852,7 +19852,7 @@
     CLASS_LEVELS.push(val);
     await storageSet(CLASS_LEVELS_KEY, CLASS_LEVELS);
     renderClassesTab(document.getElementById('classesSetupBody'));
-    showToast('Class added.');
+    showToast('Class added.', 'burst');
   }
   async function removeClassLevel(idx){
     if(!await showConfirmDialog(`Remove "${CLASS_LEVELS[idx]}"? This won't delete existing student records, but the class will no longer appear in dropdowns and grids.`)) return;
@@ -20009,7 +20009,7 @@
     users = users.filter(u => u.id !== id);
     await storageSet(USERS_KEY, users);
     refreshUserListViews();
-    showToast('User removed.');
+    showToast('User removed.', 'burst');
   }
   // Users can be edited/created/removed from either the full Users & Roles page or
   // the filtered Student/Parent Logins page — refresh whichever one is on screen
@@ -20084,7 +20084,7 @@
     if(!val) return;
     if(!academicYears.includes(val)) academicYears.push(val);
     await storageSet(ACADEMIC_YEARS_KEY, academicYears);
-    showToast('Academic year added.');
+    showToast('Academic year added.', 'burst');
     renderAcademicYearTab(document.getElementById('academicYearBody'));
   }
 
@@ -20092,7 +20092,7 @@
     currentAcademicYearValue = document.getElementById('ayCurrentSelect').value;
     await storageSet(CURRENT_AY_KEY, currentAcademicYearValue);
     document.getElementById('ayBadge').textContent = 'AY ' + currentAcademicYearValue;
-    showToast('Current academic year updated.');
+    showToast('Current academic year updated.', 'burst');
   }
 
   /* --- Fee Structure --- */
@@ -20139,7 +20139,7 @@
     financeSettings.hostel = Number(document.getElementById('fsHostel').value) || 0;
     await storageSet(FEE_STRUCTURE_KEY, classFeeStructure);
     await storageSet(SETTINGS_KEY, financeSettings);
-    showToast('Fee structure saved.');
+    showToast('Fee structure saved.', 'burst');
     renderDashboard();
   }
 
@@ -20320,7 +20320,7 @@
       });
       await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
       renderPromoTransferBody();
-      showToast('Submitted for Admin approval.');
+      showToast('Submitted for Admin approval.', 'burst');
       return;
     }
 
@@ -20372,7 +20372,7 @@
       });
       await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
       renderPromoTransferBody();
-      showToast('Submitted for Admin approval.');
+      showToast('Submitted for Admin approval.', 'burst');
       return;
     }
 
@@ -20420,7 +20420,7 @@
       });
       await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
       renderPromoTransferBody();
-      showToast('Submitted for Admin approval.');
+      showToast('Submitted for Admin approval.', 'burst');
       return;
     }
 
@@ -20482,7 +20482,7 @@
     a.status = 'Approved';
     await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
     renderPromoTransferBody();
-    showToast('Approved and applied.');
+    showToast('Approved and applied.', 'burst');
   }
   async function rejectRequest(id){
     const a = pendingApprovals.find(x => x.id === id);
@@ -20491,7 +20491,7 @@
     a.status = 'Rejected';
     await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
     renderPromoTransferBody();
-    showToast('Request rejected.');
+    showToast('Request rejected.', 'burst');
   }
 
   function renderPromotionsTab(body){
@@ -21240,7 +21240,7 @@
         method: 'POST', headers: { 'Content-Type': 'application/json', ...actorHeaders() },
         body: JSON.stringify({ recipientType: parsed.recipientType, recipientStaffId: parsed.recipientStaffId || null, recipientName, subjectName: parsed.subjectName, message }),
       }));
-      showToast('Sent.');
+      showToast('Sent.', 'burst');
       await loadMyContactData();
       const s = myProfileStudent();
       if(s && myProfileTab === 'contact') renderMyContactTab(document.getElementById('myProfileBody'), s);
@@ -21394,7 +21394,7 @@
         method: 'PUT', headers: { 'Content-Type': 'application/json', ...actorHeaders() },
         body: JSON.stringify({ replyMessage }),
       }));
-      showToast('Reply sent.');
+      showToast('Reply sent.', 'burst');
       await loadInboxConcerns();
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not send reply.');
@@ -21450,7 +21450,7 @@
         method: 'PUT', headers: { 'Content-Type': 'application/json', ...actorHeaders() },
         body: JSON.stringify({ feedback }),
       }));
-      showToast('Marked reviewed.');
+      showToast('Marked reviewed.', 'burst');
       await loadInboxSubmissions();
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not update.');
@@ -22516,7 +22516,7 @@
     const cfg = TRASH_CONFIG[_trashResource];
     try{
       await throwIfNotOk(await fetch(cfg.apiPath + '?id=' + encodeURIComponent(id) + '&restore=1', { method:'PUT', headers: actorHeaders() }));
-      showToast('Restored.');
+      showToast('Restored.', 'burst');
       await cfg.onRestored();
       await renderTrashModal();
     }catch(e){
@@ -22544,7 +22544,7 @@
       await throwIfNotOk(await fetch(cfg.apiPath + '?id=' + encodeURIComponent(id) + '&purge=1', {
         method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body: JSON.stringify({ confirmText: typed.trim() })
       }));
-      showToast('Permanently deleted.');
+      showToast('Permanently deleted.', 'burst');
       await renderTrashModal();
     }catch(e){
       showToast('Could not permanently delete (' + e.message + ').');
@@ -22651,7 +22651,7 @@
       }));
       const data = await res.json().catch(() => ({}));
       if(decision === 'Approve' && data.status === 'Pending Final Approval'){
-        showToast('Step 2 of 3 confirmed — one final, typed confirmation step remains.');
+        showToast('Step 2 of 3 confirmed — one final, typed confirmation step remains.', 'burst');
       }else if(decision === 'Approve' && data.status === 'Approved'){
         showToast('Final step confirmed — record removed (recoverable from Recently Deleted).');
         await loadStudents(); renderDashboard(); renderAdmissionsBody();
@@ -22718,7 +22718,7 @@
     try{
       await throwIfNotOk(await fetch('/api/deletion-requests', { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify({ resource:'students', recordId:id, reason:'Duplicate record (flagged from Find Duplicate Students)' }) }));
       renderDuplicatesModal();
-      showToast('Step 1 of 3 recorded — open Pending Deletion Requests to continue.');
+      showToast('Step 1 of 3 recorded — open Pending Deletion Requests to continue.', 'burst');
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast('Could not send the deletion request (' + e.message + ').');
     }
@@ -23439,7 +23439,7 @@
     if(!await showConfirmDialog(`Start a 3-step deletion request for this record? This is step 1 of 3 — nothing is deleted yet.`)) return;
     try{
       await throwIfNotOk(await fetch('/api/deletion-requests', { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify({ resource:'students', recordId:id, reason:reason.trim() }) }));
-      showToast('Step 1 of 3 recorded — open Pending Deletion Requests to continue.');
+      showToast('Step 1 of 3 recorded — open Pending Deletion Requests to continue.', 'burst');
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast('Could not send the deletion request (' + e.message + ').');
     }
@@ -23591,7 +23591,7 @@
           await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
         }
       }
-      showToast('New student admitted.');
+      showToast('New student admitted.', 'burst');
     }
     await persist();
     renderDashboard();
