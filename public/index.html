@@ -2811,6 +2811,26 @@
   </div>
 </div>
 
+<!-- Refund Payment modal (Admin only) — voids the original payment record
+     (voidType:'refund') AND posts a real Expense Voucher (Dr "Fee Refund"
+     expense / Cr the chosen Bank-or-Cash account) so a student leaving the
+     school and getting money back is reflected honestly in the books, not
+     just silently erased. See openRefundPaymentModal()/submitRefundPayment(). -->
+<div class="modal-overlay" id="refundPaymentModalOverlay">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-inner" onkeydown="submitOnEnter(event, submitRefundPayment)">
+      <button class="modal-close" onclick="closeRefundPaymentModal()">&times;</button>
+      <h2>Refund Payment</h2>
+      <p class="modal-sub" id="refundModalSub">Marks the original payment as refunded and posts a matching Expense Voucher so Accounting reflects the money actually going back out.</p>
+      <div id="refundModalBody"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeRefundPaymentModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="submitRefundPayment()">💸 Confirm Refund</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Bulk Import Wizard (Students & Staff) — a 4-step guided import modeled on
      how top school ERPs / the UDISE+ government portal handle first-time
      bulk data dumping: download a template, upload it, match your sheet's
@@ -4625,7 +4645,7 @@
     const activeStudents = students.filter(s => isActive(s));
     const perCat = {};
     Object.keys(CATS).forEach(c => {
-      const catPayments = payments.filter(p => p.category === c);
+      const catPayments = payments.filter(p => p.category === c && !p.voided);
       const collected = catPayments.reduce((s,p) => s + (Number(p.amount)||0), 0);
       const discount = c === 'stock' ? 0 : catPayments.reduce((s,p) => s + (Number(p.discount)||0), 0);
 
@@ -4659,7 +4679,8 @@
     const perCat = {};
     Object.keys(CATS).forEach(c => {
       // Payments carry a classAtPayment snapshot so a promoted student's old-class payments never get miscounted against their new class's fee.
-      const catPayments = payments.filter(p => p.studentId === s.id && p.category === c && (p.classAtPayment === s.className || !p.classAtPayment));
+      // A voided/refunded payment (see voidPayment/submitRefundPayment) is excluded here so a wrongly-assigned or refunded fee stops counting as collected.
+      const catPayments = payments.filter(p => p.studentId === s.id && p.category === c && (p.classAtPayment === s.className || !p.classAtPayment) && !p.voided);
       const collected = catPayments.reduce((sum,p) => sum + (Number(p.amount)||0), 0);
       let discount = c === 'stock' ? 0 : catPayments.reduce((sum,p) => sum + (Number(p.discount)||0), 0);
       let expected = 0;
@@ -4776,7 +4797,7 @@
     }
     const byKey = {};
     months.forEach(m => byKey[m.key] = m);
-    payments.forEach(p => {
+    payments.filter(pBookedInLedger).forEach(p => {
       if(!p.date) return;
       const key = String(p.date).slice(0,7);
       if(byKey[key]) byKey[key].total += Number(p.amount) || 0;
@@ -5982,8 +6003,17 @@
         }).join('')}
       </tbody></table></div>` : ``}
       <div class="dash-section-title"><div><h3>Payment History</h3></div></div>
-      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Category</th><th>Mode</th><th>Amount</th><th>Discount</th><th></th></tr></thead><tbody>
-        ${studentPayments.length ? studentPayments.map(p => `<tr><td>${p.date||'—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${p.mode||'—'}</td><td>${fmtMoney(p.amount)}</td><td>${fmtMoney(p.discount)}</td><td>${canSub('managefee_collection','managefee','print') ? `<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="6"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
+      <div class="table-wrap"><table><thead><tr><th>Date</th><th>Category</th><th>Mode</th><th>Amount</th><th>Discount</th><th>Status</th><th></th></tr></thead><tbody>
+        ${studentPayments.length ? studentPayments.map(p => {
+          const statusHtml = p.voided
+            ? `<span class="balance-tag due" title="${(p.voidReason||'').replace(/"/g,'&quot;')}">${p.voidType==='refund'?'REFUNDED':'VOIDED'}</span>`
+            : `<span class="pill">Recorded</span>`;
+          const actions = [];
+          if(!p.voided && canSub('managefee_collection','managefee','print')) actions.push(`<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button>`);
+          if(currentUser.role==='Admin' && !p.voided) actions.push(`<button class="btn-danger-text" onclick="voidPayment('${p.id}')">Void</button>`);
+          if(currentUser.role==='Admin' && !p.voided) actions.push(`<button class="btn-danger-text" onclick="openRefundPaymentModal('${p.id}')">Refund</button>`);
+          return `<tr${p.voided?' style="opacity:.6;"':''}><td>${p.date||'—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${p.mode||'—'}</td><td>${p.voided?`<s>${fmtMoney(p.amount)}</s>`:fmtMoney(p.amount)}</td><td>${fmtMoney(p.discount)}</td><td>${statusHtml}</td><td>${actions.join('&nbsp;·&nbsp;')}</td></tr>`;
+        }).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
       </tbody></table></div>
     `;
   }
@@ -6070,6 +6100,137 @@
     if(lastId && await showConfirmDialog('Payment(s) recorded. Print receipt now?')){
       printReceipt(lastId);
     }
+  }
+
+  // Admin-only correction for a wrongly-recorded payment — e.g. collected
+  // against the wrong fee head or the wrong student. Never deletes the row
+  // (that would shift every later receipt's number, since nextReceiptNo()
+  // counts payments.length) — instead flags it 'voided', the same
+  // never-delete convention already used for Income/Expense/Journal
+  // vouchers (see voidAccountingEntry). Every total that must exclude it
+  // (computeFinance, computeStudentFinance, acctFeeIncomeTotal,
+  // acctAllPostings) already filters on !p.voided.
+  // For a genuine refund to a leaving/withdrawing student, use
+  // openRefundPaymentModal() instead — that also posts a real Expense
+  // Voucher so the money leaving is visible in Accounting; this plain void
+  // is only for correcting a mis-entered payment, so no accounting outflow
+  // is posted here.
+  async function voidPayment(id){
+    if(currentUser.role !== 'Admin'){ showToast('Only Admin can void a payment.'); return; }
+    const p = payments.find(x => x.id === id);
+    if(!p || p.voided) return;
+    const reason = prompt(`Void this payment of ${fmtMoney(p.amount)}?\n\nEnter a reason (it stays visible, marked VOIDED, for audit — the receipt number is never reused):`);
+    if(reason === null) return;
+    if(!reason.trim()){ showToast('A reason is required to void a payment.'); return; }
+    p.voided = true;
+    p.voidType = 'correction';
+    p.voidReason = reason.trim();
+    p.voidedBy = currentUser.name;
+    p.voidedAt = new Date().toISOString();
+    // Extra Fee amounts track paidAmount directly (not just via payments[]),
+    // so a voided extra-fee payment must also roll that back or the Extra
+    // Fees table would still show it as paid.
+    if(p.category === 'extra' && p.extraFeeId){
+      const fee = studentExtraFees.find(f => f.id === p.extraFeeId);
+      if(fee){
+        fee.paidAmount = Math.max(0, (Number(fee.paidAmount)||0) - (Number(p.amount)||0));
+        fee.paid = fee.paidAmount >= fee.amount && fee.amount > 0;
+        await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
+      }
+    }
+    await storageSet(PAYMENTS_KEY, payments);
+    renderDashboard();
+    renderFeeBody();
+    showToast('Payment voided.', 'burst');
+  }
+
+  /* ===== Refund a payment (Admin only) =====
+     For a student who is withdrawing and needs money actually paid back —
+     not just a bookkeeping correction. Does two things atomically:
+       1. Marks the original payment record 'voided' (voidType:'refund') so
+          it stops counting as collected everywhere (ledger, dashboards,
+          Trial Balance/Income&Expenditure via acctAllPostings).
+       2. Posts a real Expense Voucher (Dr Expense:"Fee Refund" / Cr the
+          chosen Bank-or-Cash account) using the exact same mechanism as
+          Accounting → Payment Voucher (saveExpenseVoucher), so the cash/bank
+          outflow is genuinely visible in the Chart of Accounts, Ledgers,
+          Trial Balance and Income & Expenditure Statement — never a silent
+          delete. */
+  let refundPaymentId = null;
+  const FEE_REFUND_CATEGORY = 'Fee Refund';
+  function openRefundPaymentModal(paymentId){
+    if(currentUser.role !== 'Admin'){ showToast('Only Admin can issue a refund.'); return; }
+    const p = payments.find(x => x.id === paymentId);
+    if(!p || p.voided){ showToast('This payment can\'t be refunded.'); return; }
+    refundPaymentId = paymentId;
+    const student = students.find(x => x.id === p.studentId);
+    document.getElementById('refundModalSub').textContent = `${student ? student.firstName + ' ' + student.lastName : (p.studentName||'')} — originally paid ${fmtMoney(p.amount)} (${feeLabelFor(p)}) on ${p.date||'—'}.`;
+    document.getElementById('refundModalBody').innerHTML = `
+      <div class="f-field" style="margin-bottom:12px;"><label>Refund Amount (₹)</label><input type="number" min="0" max="${p.amount}" class="input" id="refundAmount" value="${p.amount}" style="width:100%;"></div>
+      <div class="f-field" style="margin-bottom:12px;"><label>Refund Mode</label><select class="input" id="refundMode" style="width:100%;"><option>Cash</option><option>Online</option><option>Cheque</option></select></div>
+      <div class="f-field" style="margin-bottom:12px;"><label>Refund From (Bank/Cash Account)</label><select class="input" id="refundBankAccount" style="width:100%;">${acctBankAccounts.filter(b=>b.active!==false).map(b => `<option value="${b.id}" ${b.id===defaultBankAccountForMode('Cash')?'selected':''}>${b.name}</option>`).join('')}</select></div>
+      <div class="f-field" style="margin-bottom:6px;"><label>Reason (e.g. student withdrawn/TC issued)</label><textarea class="input" id="refundReason" rows="2" style="width:100%;"></textarea></div>
+    `;
+    document.getElementById('refundPaymentModalOverlay').classList.add('open');
+  }
+  function closeRefundPaymentModal(){
+    refundPaymentId = null;
+    document.getElementById('refundPaymentModalOverlay').classList.remove('open');
+  }
+  async function submitRefundPayment(){
+    const p = payments.find(x => x.id === refundPaymentId);
+    if(!p){ closeRefundPaymentModal(); return; }
+    const amount = Number(document.getElementById('refundAmount').value) || 0;
+    const mode = document.getElementById('refundMode').value;
+    const bankAccountId = document.getElementById('refundBankAccount').value;
+    const reason = document.getElementById('refundReason').value.trim();
+    if(amount <= 0){ showToast('Enter a refund amount.'); return; }
+    if(amount > p.amount){ showToast("Refund amount can't exceed the original payment."); return; }
+    if(!reason){ showToast('A reason is required to issue a refund.'); return; }
+    const student = students.find(x => x.id === p.studentId);
+    let voucherNo;
+    try{
+      voucherNo = await issueDocNumber('payment_voucher');
+    }catch(e){
+      showToast("Could not get a voucher number from the server (" + e.message + ") — refund not saved. Try again once you're back online.");
+      return;
+    }
+    // 1. Void the original payment so it stops counting as collected.
+    p.voided = true;
+    p.voidType = 'refund';
+    p.voidReason = reason;
+    p.voidedBy = currentUser.name;
+    p.voidedAt = new Date().toISOString();
+    p.refundAmount = amount;
+    p.refundVoucherNo = voucherNo;
+    if(p.category === 'extra' && p.extraFeeId){
+      const fee = studentExtraFees.find(f => f.id === p.extraFeeId);
+      if(fee){
+        fee.paidAmount = Math.max(0, (Number(fee.paidAmount)||0) - (Number(p.amount)||0));
+        fee.paid = fee.paidAmount >= fee.amount && fee.amount > 0;
+        await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
+      }
+    }
+    await storageSet(PAYMENTS_KEY, payments);
+    // 2. Post a real Expense Voucher so Accounting shows the cash/bank
+    // outflow — auto-creating the "Fee Refund" category the first time.
+    if(!acctExpenseCategories.includes(FEE_REFUND_CATEGORY)){
+      acctExpenseCategories.push(FEE_REFUND_CATEGORY);
+      await storageSet(ACCT_EXPENSE_CATS_KEY, acctExpenseCategories);
+    }
+    acctExpenses.push({
+      id: 'exp_' + Date.now(), voucherNo, date: new Date().toISOString().slice(0,10),
+      category: FEE_REFUND_CATEGORY, costCenter: feePaymentCostCenter(p),
+      amount, party: student ? (student.firstName + ' ' + student.lastName) : (p.studentName||''),
+      mode, referenceNo: '', bankAccountId,
+      description: `Fee refund — ${feeLabelFor(p)} originally paid ${p.date||''} (receipt ${p.receiptNo||'—'}). ${reason}`,
+      addedBy: currentUser.name, voided: false,
+    });
+    await storageSet(ACCT_EXPENSES_KEY, acctExpenses);
+    closeRefundPaymentModal();
+    renderDashboard();
+    renderFeeBody();
+    showToast('Refund voucher ' + voucherNo + ' issued for ' + fmtMoney(amount) + '.', 'burst');
   }
 
   // Records one family member's share of a Collect Family Fees payment.
@@ -6825,6 +6986,16 @@
   }
   async function removeExtraFee(id){
     if(currentUser.role !== 'Admin'){ showToast('Only Admin can remove an assigned fee.'); return; }
+    const fee = studentExtraFees.find(e => e.id === id);
+    if(!fee) return;
+    // Removing the assignment outright would silently orphan any payment(s)
+    // already recorded against it (payments[] rows with extraFeeId===id
+    // would keep counting as collected with nothing left to attach a receipt
+    // to). Block it here instead of deleting data underneath a payment.
+    if((Number(fee.paidAmount)||0) > 0){
+      showToast(`Can't remove — ${fmtMoney(fee.paidAmount)} is already paid against "${fee.name}". Void or Refund that payment first (Payment History below), then remove the assignment.`);
+      return;
+    }
     if(!await showConfirmDialog('Remove this extra fee?')) return;
     studentExtraFees = studentExtraFees.filter(e => e.id !== id);
     await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
@@ -14866,8 +15037,19 @@
     // rows. Kept as a single, clean bucket instead.
     return 'General / Other';
   }
+  // A voided payment is excluded from the books only when it's a plain
+  // 'correction' (mis-entered — no real money ever moved, so it should
+  // never have counted). A 'refund' void is different: that cash genuinely
+  // arrived at the time, and really matches the bank statement — erasing it
+  // here would understate historical Fee Income and permanently break Bank
+  // Reconciliation against that real deposit. The refund itself is booked
+  // as its own Expense Voucher (see submitRefundPayment), so the original
+  // inflow + the refund outflow together net to the correct real effect
+  // (zero for a full refund, the retained amount for a partial one) instead
+  // of the payment vanishing and only the outflow being recorded.
+  function pBookedInLedger(p){ return !p.voided || p.voidType === 'refund'; }
   function acctFeeIncomeTotal(){
-    return payments.reduce((sum,p) => sum + (Number(p.amount)||0), 0);
+    return payments.filter(pBookedInLedger).reduce((sum,p) => sum + (Number(p.amount)||0), 0);
   }
   function acctOtherIncomeTotal(){
     return acctIncome.filter(i => !i.voided).reduce((sum,i) => sum + (Number(i.amount)||0), 0);
@@ -15006,7 +15188,7 @@
       push(l.openingDate, 'ledger:'+l.id, debit, credit, 'Opening Balance', 'Opening', l.id);
       push(l.openingDate, ACCT_OPENING_EQUITY_KEY, credit, debit, 'Opening Balance — '+l.name, 'Opening', l.id);
     });
-    payments.forEach(p => {
+    payments.filter(pBookedInLedger).forEach(p => {
       const amt = Number(p.amount)||0; if(!amt) return;
       const bankKey = 'bank:'+acctBankAccountIdFor(p), incAcct = feeIncomeAccountFor(p);
       const narr = 'Fee collected — ' + (p.studentName||'Student') + (p.receiptNo?' (Receipt '+p.receiptNo+')':'');
@@ -15769,7 +15951,7 @@
     // Income by source — fee collections broken into their real sub-types (Fee/Bus/Stock/Hostel/Extra), not lumped
     const FEE_CAT_LABELS = { fee:'Tuition Fee', bus:'Bus Fee', stock:'Stock Fee', hostel:'Hostel Fee', extra:'Extra Fees (Admission, Inventory, Fines, etc.)' };
     const incomeByCat = {};
-    payments.forEach(p => {
+    payments.filter(pBookedInLedger).forEach(p => {
       const label = FEE_CAT_LABELS[p.category] || (CATS[p.category]||p.category);
       if(!incomeByCat[label]) incomeByCat[label] = {amt:0,count:0};
       incomeByCat[label].amt += Number(p.amount)||0;
@@ -15780,13 +15962,13 @@
 
     // Cash position by payment mode — what's actually cash-in-hand vs bank vs UPI etc.
     const modeNet = {};
-    payments.forEach(p => { const m=p.mode||'Unspecified'; modeNet[m]=(modeNet[m]||0)+(Number(p.amount)||0); });
+    payments.filter(pBookedInLedger).forEach(p => { const m=p.mode||'Unspecified'; modeNet[m]=(modeNet[m]||0)+(Number(p.amount)||0); });
     liveIncome.forEach(i => { const m=i.mode||'Unspecified'; modeNet[m]=(modeNet[m]||0)+(Number(i.amount)||0); });
     liveExpenses.forEach(e => { const m=e.mode||'Unspecified'; modeNet[m]=(modeNet[m]||0)-(Number(e.amount)||0); });
     const modeRows = Object.entries(modeNet).sort((a,b) => b[1]-a[1]);
 
     const recentTx = [
-      ...payments.map(p => ({ date:p.date, type:'Fee Income', party:p.studentName||'Student', category:FEE_CAT_LABELS[p.category]||CATS[p.category]||p.category, amount:Number(p.amount)||0, sign:1 })),
+      ...payments.filter(pBookedInLedger).map(p => ({ date:p.date, type: p.voided?'Fee Income (Refunded)':'Fee Income', party:p.studentName||'Student', category:FEE_CAT_LABELS[p.category]||CATS[p.category]||p.category, amount:Number(p.amount)||0, sign:1 })),
       ...liveIncome.map(i => ({ date:i.date, type:'Other Income', party:i.party, category:i.category, amount:Number(i.amount)||0, sign:1 })),
       ...liveExpenses.map(e => ({ date:e.date, type:'Expense', party:e.party, category:e.category, amount:Number(e.amount)||0, sign:-1 })),
     ].sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0,25);
@@ -16122,7 +16304,7 @@
     // to the actual inventory sale it came from (via extraFeeId → sefId) and
     // count it as Inventory income instead.
     const inventorySefIds = new Set(inventorySales.filter(s => s.sefId).map(s => s.sefId));
-    payments.forEach(p => {
+    payments.filter(pBookedInLedger).forEach(p => {
       const key = (p.category === 'extra' && inventorySefIds.has(p.extraFeeId)) ? 'Inventory' : feePaymentCostCenter(p);
       seg(key).income += Number(p.amount)||0;
     });
@@ -16934,14 +17116,35 @@
         return `
         <div class="dash-section-title"><div><h3>${r.blockName} — Room ${r.roomNumber} <span style="font-weight:400; color:var(--ink-soft); font-size:0.8rem;">— ${r.roomType||''} · ${occupants.length}/${r.capacity} beds · ${fmtMoney(r.fee)}${r.wardenName?' · Warden: '+r.wardenName:''}</span></h3></div></div>
         <div class="table-wrap" style="margin-bottom:24px;">
-          <table><thead><tr><th>Student</th><th>Admission No</th><th>Class</th><th>Section</th></tr></thead>
+          <table><thead><tr><th>Student</th><th>Admission No</th><th>Class</th><th>Section</th><th></th></tr></thead>
           <tbody>
-          ${occupants.length ? occupants.map(s => `<tr><td class="name-cell">${s.firstName} ${s.lastName}</td><td>${s.admissionNo}</td><td>${s.className}</td><td>${s.section}</td></tr>`).join('') : `<tr><td colspan="4"><div class="empty-state"><b>No students in this room yet</b></div></td></tr>`}
+          ${occupants.length ? occupants.map(s => `<tr><td class="name-cell">${s.firstName} ${s.lastName}</td><td>${s.admissionNo}</td><td>${s.className}</td><td>${s.section}</td><td>${currentUser.role==='Admin' ? `<button class="btn-danger-text" onclick="removeStudentFromHostel('${s.id}')">Remove from Room</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No students in this room yet</b></div></td></tr>`}
           </tbody></table>
         </div>
       `;
       }).join('')}
     `;
+  }
+  // Admin-only un-assignment for a wrongly-allotted hostel student. Bed
+  // occupancy is always computed live from s.isBoarder/s.hostelRoomId (see
+  // hostelOccupants above), so there's no separate counter to decrement —
+  // clearing these two fields and persisting is the whole fix, freeing the
+  // bed immediately for re-allotment. Hostel Fee already charged simply
+  // stops accruing further (computeStudentFinance only counts it while
+  // isBoarder==='Yes'); any amount already collected is untouched here —
+  // use Void/Refund on that specific payment (Payment History) if it needs
+  // to be reversed too.
+  async function removeStudentFromHostel(studentId){
+    if(currentUser.role !== 'Admin'){ showToast('Only Admin can remove a student from a room.'); return; }
+    const s = students.find(x => x.id === studentId);
+    if(!s) return;
+    if(!await showConfirmDialog(`Remove ${s.firstName} ${s.lastName} from their hostel room?`)) return;
+    s.isBoarder = 'No';
+    s.hostelRoomId = '';
+    await persist();
+    renderDashboard();
+    renderHostelBody();
+    showToast('Removed from room.', 'burst');
   }
 
   const LIB_TAB_PERM_KEYS = { catalog:'library_catalog', issue:'library_issuereturn', overdue:'library_overdue', settings:'library_settings' };
