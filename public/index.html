@@ -544,6 +544,16 @@
   .perm-locked-row{display:flex; align-items:center; gap:10px; padding:6px 0; border-top:1px solid rgba(203,154,46,0.25); font-size:0.8rem; color:var(--ink-soft);}
   .perm-locked-row:first-of-type{border-top:none;}
   .perm-locked-row .perm-locked-always{margin-left:auto; font-size:0.62rem; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:#8a6a17; background:rgba(203,154,46,0.22); padding:3px 9px; border-radius:999px;}
+  .perm-toolbar{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px;}
+  .perm-search{flex:1; min-width:200px; max-width:340px; padding:9px 14px; border-radius:10px; border:1.5px solid var(--border); font-size:0.85rem;}
+  .perm-toolbar-btn{background:var(--white); border:1.5px solid var(--border); border-radius:9px; padding:7px 13px; font-size:0.76rem; font-weight:600; color:var(--ink); cursor:pointer; white-space:nowrap;}
+  .perm-toolbar-btn:hover{border-color:var(--magenta); color:var(--magenta);}
+  .perm-auto-hint{font-size:0.62rem; font-weight:600; color:#0f6a63; background:rgba(24,143,134,0.13); padding:2px 8px; border-radius:999px; margin-left:6px; vertical-align:middle; white-space:nowrap;}
+  .perm-preset-row{display:flex; gap:4px; margin-top:4px;}
+  .perm-preset-btn{font-size:0.6rem; font-weight:700; text-transform:uppercase; letter-spacing:0.02em; border:1px solid var(--border); background:var(--white); color:var(--ink-soft); border-radius:6px; padding:2px 7px; cursor:pointer;}
+  .perm-preset-btn:hover{border-color:var(--teal,#188F86); color:var(--teal,#188F86);}
+  .perm-table tr.perm-row-hidden{display:none;}
+  .perm-category.perm-cat-hidden{display:none;}
   #admissionFeeNote{
     background:rgba(203,154,46,0.13); border-radius:10px; padding:10px 14px; margin-bottom:16px;
     font-size:0.8rem; color:#8a6a1f; font-weight:600;
@@ -3629,6 +3639,29 @@
 
   const PERMISSION_ACTIONS = ['view','create','edit','delete','print','approve'];
   const PERMISSION_CATEGORY_COLORS = { Overview:'#544C6B', Academics:'#2a4d8f', Communication:'#a02463', Finance:'#1f7a4d', Staff:'#b8621b', Facilities:'#6b4fa0', Reports:'#188F86', Configuration:'#CB9A2E' };
+  // Built once from each module's own `parent` field, so every place that
+  // needs "what are this module's children" (the bug fix below, and the
+  // editor UI) reads off one source of truth instead of the many separate
+  // hand-maintained *_SUBMODULE_KEYS lists further down (those still exist
+  // for their own named helpers, but this is the generic version).
+  const CHILDREN_OF_PARENT = {};
+  PERMISSION_MODULES.forEach(m => { if(m.parent) (CHILDREN_OF_PARENT[m.parent] = CHILDREN_OF_PARENT[m.parent] || []).push(m.key); });
+  // A parent module's own "View" checkbox used to be the ONLY thing that
+  // decided whether its sidebar entry appeared at all — so granting a
+  // custom role "Fee Collection & Receipts" (a child of Manage Fee) did
+  // nothing until an admin ALSO remembered to separately tick "View" on the
+  // unrelated-looking "Manage Fee" parent row. That's the bug reported:
+  // "unless I allow full permission for the module it's not being viewed."
+  // Fix: a parent is implicitly viewable the moment ANY of its children has
+  // ANY permission at all — granting the child is now sufficient by itself.
+  function moduleHasAnyChildPermission(ov, parentKey){
+    const children = CHILDREN_OF_PARENT[parentKey];
+    if(!children || !children.length) return false;
+    return children.some(ck => {
+      const cp = ov.permissions[ck];
+      return cp && PERMISSION_ACTIONS.some(a => cp[a]);
+    });
+  }
   // Pages that manage who can log in and what every role can do are never
   // delegable through this matrix, no matter how a role is customized —
   // otherwise a role could grant itself (or anyone) more access than it
@@ -3668,7 +3701,7 @@
     const ov = findRoleOverride(role);
     if(ov){
       return PERMISSION_MODULES.filter(m => {
-        if(ov.permissions[m.key] !== undefined) return !!ov.permissions[m.key].view;
+        if(ov.permissions[m.key] !== undefined) return !!ov.permissions[m.key].view || moduleHasAnyChildPermission(ov, m.key);
         // This module didn't exist yet when the override was saved — fall back to the role's built-in default instead of silently hiding it.
         return ROLE_VIEWS[role] ? ROLE_VIEWS[role].includes(m.key) : false;
       }).map(m => m.key);
@@ -3678,7 +3711,10 @@
   function getRolePermission(role, moduleKey, action){
     const ov = findRoleOverride(role);
     if(ov){
-      if(ov.permissions[moduleKey] !== undefined) return !!ov.permissions[moduleKey][action];
+      if(ov.permissions[moduleKey] !== undefined){
+        if(action === 'view') return !!ov.permissions[moduleKey].view || moduleHasAnyChildPermission(ov, moduleKey);
+        return !!ov.permissions[moduleKey][action];
+      }
       return ROLE_VIEWS[role] ? ROLE_VIEWS[role].includes(moduleKey) : false;
     }
     return ROLE_VIEWS[role] ? ROLE_VIEWS[role].includes(moduleKey) : false; // built-in default: full access to any view they can see
@@ -19633,6 +19669,17 @@
     renderPermissionsTab(document.getElementById('rolesPermissionsBody'));
   }
 
+  // Named per-row shortcuts — each sets the row's 6 action checkboxes in one
+  // click instead of hunting through 6 columns. "Entry" is deliberately the
+  // one that matches "can do the day-to-day job, can't modify/delete/approve
+  // anything" — the shape almost every non-Admin support role actually needs
+  // (fee collection, attendance, marks entry, POS sales, etc.).
+  const PERM_PRESETS = {
+    none:  { view:false, create:false, edit:false, delete:false, print:false, approve:false },
+    view:  { view:true,  create:false, edit:false, delete:false, print:false, approve:false },
+    entry: { view:true,  create:true,  edit:false, delete:false, print:true,  approve:false },
+    full:  { view:true,  create:true,  edit:true,  delete:true,  print:true,  approve:true  },
+  };
   function renderPermissionEditor(body){
     const roleName = permEditingRoleName;
     const existing = findRoleOverride(roleName);
@@ -19649,8 +19696,15 @@
         <div class="perm-legend-item">🖨️ <b>Print</b> — print / export</div>
         <div class="perm-legend-item">✅ <b>Approve</b> — approve a workflow (payroll, admissions, etc.)</div>
       </div>
+      <p style="font-size:0.78rem; color:var(--ink-soft); margin:-6px 0 14px; max-width:760px;">
+        A parent row (like "Manage Fee" or "Manage Exams") shows up in the sidebar the moment <b>any</b> item nested under it has any permission at all — you no longer need to separately tick "View" on the parent row too. Use the <b>None / View / Entry / Full</b> buttons under each row's name for the most common combinations, or tick individual boxes for anything more specific.
+      </p>
+      <div class="perm-toolbar">
+        <input type="text" class="perm-search" id="permSearchBox" placeholder="🔍 Search modules (e.g. fee, attendance, inventory)…" oninput="filterPermRows(this.value)">
+        <button type="button" class="perm-toolbar-btn" onclick="applyPermPresetToAll('none')">🚫 Clear All</button>
+      </div>
       ${categories.map(cat => `
-        <div class="perm-category">
+        <div class="perm-category" data-category="${cat}">
           <div class="perm-category-head" style="background:${PERMISSION_CATEGORY_COLORS[cat]||'#555'};" onclick="togglePermCategory(this)">
             <span class="perm-chevron">▾</span> ${cat} <span class="perm-cat-count">(${visibleModules.filter(m=>m.category===cat).length} features)</span>
           </div>
@@ -19661,8 +19715,17 @@
               ${visibleModules.filter(m => m.category===cat).map(m => {
                 const p = permissions[m.key] || Object.fromEntries(PERMISSION_ACTIONS.map(a => [a, false]));
                 const full = PERMISSION_ACTIONS.every(a => p[a]);
-                return `<tr class="${m.parent ? 'perm-row-sub' : ''}">
-                  <td>${m.icon} ${m.label}${m.comingSoon ? ' <span class="pill" style="font-size:0.62rem; vertical-align:middle;">Coming Soon</span>' : ''}${m.isNew ? ' <span class="perm-new-pill">New</span>' : ''}</td>
+                const hasChildren = (CHILDREN_OF_PARENT[m.key]||[]).length > 0;
+                return `<tr class="${m.parent ? 'perm-row-sub' : ''}" data-search="${(m.label+' '+cat).toLowerCase().replace(/"/g,'')}">
+                  <td>
+                    <div>${m.icon} ${m.label}${m.comingSoon ? ' <span class="pill" style="font-size:0.62rem; vertical-align:middle;">Coming Soon</span>' : ''}${m.isNew ? ' <span class="perm-new-pill">New</span>' : ''}${hasChildren ? ' <span class="perm-auto-hint">Auto-visible from items below</span>' : ''}</div>
+                    <div class="perm-preset-row">
+                      <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${m.key}','none')">None</button>
+                      <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${m.key}','view')">View</button>
+                      <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${m.key}','entry')">Entry</button>
+                      <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${m.key}','full')">Full</button>
+                    </div>
+                  </td>
                   <td><input type="checkbox" class="perm-full" data-module="${m.key}" ${full?'checked':''} onchange="onPermFullToggle(this)"></td>
                   ${PERMISSION_ACTIONS.map(a => `<td><input type="checkbox" class="perm-action" data-module="${m.key}" data-action="${a}" ${p[a]?'checked':''} onchange="onPermActionToggle(this)"></td>`).join('')}
                 </tr>`;
@@ -19682,6 +19745,47 @@
         <button class="btn btn-primary" onclick="saveRolePermissions()">Save Permissions</button>
       </div>
     `;
+  }
+  // Sets one module row's 6 checkboxes to a named preset shape, then keeps
+  // the "Full Access" master checkbox and search filter both in sync.
+  function applyPermPreset(moduleKey, presetName){
+    const preset = PERM_PRESETS[presetName];
+    if(!preset) return;
+    PERMISSION_ACTIONS.forEach(a => {
+      const box = document.querySelector(`.perm-action[data-module="${moduleKey}"][data-action="${a}"]`);
+      if(box) box.checked = preset[a];
+    });
+    const fullBox = document.querySelector(`.perm-full[data-module="${moduleKey}"]`);
+    if(fullBox) fullBox.checked = PERMISSION_ACTIONS.every(a => preset[a]);
+  }
+  // Bulk action across every row currently rendered (search filter doesn't
+  // limit this — it always applies to the whole role, so it stays predictable
+  // regardless of what's currently typed into the search box).
+  function applyPermPresetToAll(presetName){
+    document.querySelectorAll('#rolesPermissionsBody .perm-table tbody tr').forEach(tr => {
+      const box = tr.querySelector('.perm-action');
+      if(box) applyPermPreset(box.dataset.module, presetName);
+    });
+  }
+  // Client-side search across module name + category — hides non-matching
+  // rows and collapses any category left with nothing visible, so finding
+  // one module among ~70 doesn't mean scrolling through every category.
+  function filterPermRows(query){
+    const q = (query||'').trim().toLowerCase();
+    document.querySelectorAll('#rolesPermissionsBody .perm-category').forEach(catEl => {
+      let anyVisible = false;
+      catEl.querySelectorAll('tbody tr').forEach(tr => {
+        const match = !q || (tr.dataset.search||'').includes(q);
+        tr.classList.toggle('perm-row-hidden', !match);
+        if(match) anyVisible = true;
+      });
+      catEl.classList.toggle('perm-cat-hidden', !anyVisible);
+      // Searching should surface the answer immediately rather than making
+      // the person also remember to expand a collapsed category.
+      const bodyEl = catEl.querySelector('.perm-category-body');
+      const chevEl = catEl.querySelector('.perm-chevron');
+      if(bodyEl && q && anyVisible){ bodyEl.style.display = 'block'; if(chevEl) chevEl.textContent = '▾'; }
+    });
   }
   function togglePermCategory(headEl){
     const bodyEl = headEl.nextElementSibling;
