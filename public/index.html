@@ -2277,6 +2277,10 @@
           </div>
           <div id="siblingSearchResults" class="sibling-search-results"></div>
           <div id="siblingList" style="margin-top:8px;"></div>
+          <div id="siblingInheritedWrap" style="display:none; margin-top:10px;">
+            <div style="font-size:0.72rem; color:var(--ink-soft); margin-bottom:4px;">Already linked as a sibling from their own record — no need to add again here:</div>
+            <div id="siblingInheritedList"></div>
+          </div>
         </div>
 
         <div class="wtab-panel" id="panel-transport" style="display:none;">
@@ -21572,6 +21576,12 @@
   let admissionsView = 'grid'; // grid | section | profile | search
   let currentClass = '', currentSection = '', currentStudentId = '';
   let wizardSiblings = [];
+  // Siblings linked the OTHER way round — the other student's own record
+  // lists this one as their sibling, not the other way. Shown read-only in
+  // the wizard (see renderSiblingList) so staff can see the link is already
+  // there without re-adding it; editable only from that other student's own
+  // record, since that's where it's actually stored.
+  let wizardInheritedSiblingIds = [];
   let wizardPhotoData = '';
 
   function isActive(s){
@@ -24687,7 +24697,7 @@
       return;
     }
     const matches = students
-      .filter(s => s.id !== wizardSiblingExcludeId && !wizardSiblings.includes(s.id))
+      .filter(s => s.id !== wizardSiblingExcludeId && !wizardSiblings.includes(s.id) && !wizardInheritedSiblingIds.includes(s.id))
       .filter(s => !classFilter || s.className === classFilter)
       .filter(s => !sectionFilter || s.section === sectionFilter)
       .map(s => ({ s, rank: siblingSearchRank(s, q) }))
@@ -24717,6 +24727,17 @@
       if(!s) return '';
       return `<span class="sibling-chip">${s.firstName} ${s.lastName}<button type="button" onclick="removeSibling('${id}')">&times;</button></span>`;
     }).join('');
+
+    const inheritedWrap = document.getElementById('siblingInheritedWrap');
+    const inheritedEl = document.getElementById('siblingInheritedList');
+    if(inheritedWrap && inheritedEl){
+      const names = wizardInheritedSiblingIds.map(id => {
+        const s = students.find(x => x.id === id);
+        return s ? `${s.firstName} ${s.lastName} (${s.className||'—'}${s.section?' — '+s.section:''})` : null;
+      }).filter(Boolean);
+      inheritedWrap.style.display = names.length ? 'block' : 'none';
+      inheritedEl.innerHTML = names.map(n => `<span class="sibling-chip" style="opacity:0.75; cursor:default;">${n}</span>`).join('');
+    }
   }
 
   function addSiblingFromSearch(id){
@@ -24757,6 +24778,7 @@
     document.getElementById('fSection').innerHTML = '<option value="" disabled selected>Select section</option>' + SECTIONS.map(s => `<option>${s}</option>`).join('');
     document.getElementById('editId').value = '';
     wizardSiblings = [];
+    wizardInheritedSiblingIds = [];
     wizardPhotoData = '';
     document.getElementById('photoPreview').style.display = 'none';
     document.getElementById('photoPreview').src = '';
@@ -24856,6 +24878,12 @@
     document.getElementById('fPrevClass').value = s.prevClass || '';
     document.getElementById('fPrevYear').value = s.prevYear || '';
     wizardSiblings = (s.siblingIds || []).slice();
+    // Reverse-linked siblings — added on the OTHER student's own record,
+    // not this one — shown read-only below the editable list so staff can
+    // see the link already exists without re-adding it from this side too.
+    wizardInheritedSiblingIds = students
+      .filter(o => o.id !== s.id && (o.siblingIds||[]).includes(s.id) && !wizardSiblings.includes(o.id))
+      .map(o => o.id);
     renderSiblingList();
 
     document.getElementById('fNeedsTransport').value = s.needsTransport || 'No';
