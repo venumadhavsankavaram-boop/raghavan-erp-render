@@ -21687,7 +21687,10 @@
   }
 
   function buildProfileCardsHTML(s){
-    const siblingNames = (s.siblingIds||[]).map(sid => {
+    // Bidirectional: shows a sibling whether the link was entered on THIS
+    // student's own record or on the sibling's record (see getFamilyIds),
+    // so staff never have to add the same sibling pair from both sides.
+    const siblingNames = getFamilyIds(s).filter(id => id !== s.id).map(sid => {
       const sib = students.find(x => x.id === sid);
       return sib ? (sib.firstName + ' ' + sib.lastName) : null;
     }).filter(Boolean);
