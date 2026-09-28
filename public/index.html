@@ -13586,6 +13586,32 @@
   // just with plain integer counts on the labels instead of money — reused
   // here for "homework assigned per day" rather than duplicating that whole
   // function just to swap the formatter.
+  // A tiny shared floating tooltip used by every chart on this dashboard
+  // (the trend chart's hover columns, the leaderboard's bars) — one element,
+  // reused and repositioned at the cursor, instead of a native title tooltip
+  // that only shows after a long hover delay.
+  function showChartTip(evt, text){
+    let tip = document.getElementById('chartHoverTip');
+    if(!tip){
+      tip = document.createElement('div');
+      tip.id = 'chartHoverTip';
+      tip.style.cssText = 'position:fixed; z-index:9999; pointer-events:none; background:var(--navy); color:#fff; font-size:0.72rem; font-weight:600; padding:6px 10px; border-radius:7px; box-shadow:var(--shadow); white-space:nowrap; transform:translate(-50%,-135%);';
+      document.body.appendChild(tip);
+    }
+    tip.textContent = text;
+    tip.style.left = evt.clientX + 'px';
+    tip.style.top = evt.clientY + 'px';
+    tip.style.display = 'block';
+  }
+  function hideChartTip(){
+    const tip = document.getElementById('chartHoverTip');
+    if(tip) tip.style.display = 'none';
+  }
+  // Day-by-day line/area chart with a per-point hover column (a wide
+  // invisible hit target, bigger than the dot itself) that lights up a
+  // dashed guide line and shows the exact value in the shared floating
+  // tooltip — same hand-drawn-SVG style as the Fee dashboard's
+  // trendChartSVG, generalized to plain counts instead of money.
   function countTrendChartSVG(points, color, ariaLabel){
     const W = 680, H = 160, padL = 30, padR = 30, padT = 26, padB = 26;
     const plotW = W - padL - padR, plotH = H - padT - padB;
@@ -13599,6 +13625,7 @@
       + ` L${coords[coords.length-1].x.toFixed(1)},${(padT+plotH).toFixed(1)}`
       + ` L${coords[0].x.toFixed(1)},${(padT+plotH).toFixed(1)} Z`;
     const gradId = 'cnt' + Math.round(Math.random()*1e6);
+    const colWidth = n > 1 ? plotW / n : plotW;
     return `
       <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" role="img" aria-label="${ariaLabel||'Trend'}">
         <defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
@@ -13607,19 +13634,33 @@
         </linearGradient></defs>
         ${allZero ? '' : `<path d="${areaPath}" fill="url(#${gradId})" stroke="none"/>`}
         ${allZero ? '' : `<path d="${linePath}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`}
-        ${coords.map(c => `
-          <circle cx="${c.x.toFixed(1)}" cy="${allZero ? (padT+plotH) : c.y.toFixed(1)}" r="4" fill="${color}" stroke="var(--white)" stroke-width="2">
-            <title>${c.label}: ${c.total}</title>
-          </circle>
+        ${coords.map((c,i) => `
+          <line id="cntGuide${i}" x1="${c.x.toFixed(1)}" y1="${padT}" x2="${c.x.toFixed(1)}" y2="${padT+plotH}" stroke="${color}" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
+          <circle cx="${c.x.toFixed(1)}" cy="${allZero ? (padT+plotH) : c.y.toFixed(1)}" r="4" fill="${color}" stroke="var(--white)" stroke-width="2"/>
           <text class="trend-value-label" x="${c.x.toFixed(1)}" y="${(allZero ? (padT+plotH) : c.y) - 12}" text-anchor="middle">${c.total > 0 ? c.total : ''}</text>
           <text class="trend-month-label" x="${c.x.toFixed(1)}" y="${H - 6}" text-anchor="middle">${c.label}</text>
+          <rect x="${(c.x - colWidth/2).toFixed(1)}" y="0" width="${colWidth.toFixed(1)}" height="${H}" fill="transparent" style="cursor:pointer;"
+            onmouseenter="document.getElementById('cntGuide${i}').setAttribute('opacity','1'); showChartTip(event,'${escapeHtml(String(c.label))}: ${c.total}')"
+            onmousemove="showChartTip(event,'${escapeHtml(String(c.label))}: ${c.total}')"
+            onmouseleave="document.getElementById('cntGuide${i}').setAttribute('opacity','0'); hideChartTip()"/>
         `).join('')}
       </svg>
     `;
   }
+  // Green/gold/red by how healthy the number is — the same status colors
+  // (--success/--warning/--danger) used everywhere else in the ERP, so a
+  // ring's color always means "how are we doing" rather than being an
+  // arbitrary per-card hue.
+  function healthColor(pct){
+    if(pct >= 90) return 'var(--success)';
+    if(pct >= 60) return 'var(--warning)';
+    return 'var(--danger)';
+  }
   // One ring gauge + label, in the same hand-drawn style as the Dashboard's
-  // overview rings — reuses the existing ringSVG() helper.
-  function ringStatHtml(pct, color, label, sub){
+  // overview rings — reuses the existing ringSVG() helper, colored by
+  // healthColor() rather than a fixed hue per metric.
+  function ringStatHtml(pct, label, sub){
+    const color = healthColor(pct);
     return `
       <div style="display:flex; flex-direction:column; align-items:center; gap:8px;">
         <div style="position:relative; width:108px; height:108px;">
@@ -13633,23 +13674,28 @@
       </div>`;
   }
   // Horizontal bar leaderboard of the staff with the most combined pending
-  // submissions + open concerns right now — the "who most needs a nudge"
-  // view, complementing the row-by-row table below it.
+  // submissions + open concerns right now — thin rounded bars with a
+  // per-bar hover tooltip via the same shared floating-tooltip layer as the
+  // trend chart, complementing the row-by-row table below it.
   function staffActivityLeaderboardHtml(rows){
     const ranked = rows.map(r => ({ r, score: r.pendingSubmissions + r.openConcerns })).filter(x => x.score > 0).sort((a,b) => b.score-a.score).slice(0,6);
     if(!ranked.length) return `<div class="empty-state" style="padding:16px 0;"><b>Nothing pending</b>No staff currently have unreviewed submissions or open concerns.</div>`;
     const max = Math.max(...ranked.map(x => x.score));
-    return ranked.map(x => `
+    return ranked.map(x => {
+      const pct = Math.round((x.score/max)*100);
+      const name = escapeHtml(x.r.staff.firstName+' '+x.r.staff.lastName);
+      const tipText = name+': '+x.r.pendingSubmissions+' submissions, '+x.r.openConcerns+' concerns';
+      return `
       <div style="margin-bottom:12px;">
         <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:4px;">
-          <span style="font-weight:600; color:var(--navy);">${escapeHtml(x.r.staff.firstName+' '+x.r.staff.lastName)}</span>
+          <span style="font-weight:600; color:var(--navy);">${name}</span>
           <span style="color:var(--ink-soft);">${x.r.pendingSubmissions} submissions · ${x.r.openConcerns} concerns</span>
         </div>
-        <div style="background:var(--cream); border-radius:6px; height:10px; overflow:hidden;">
-          <div style="width:${Math.round((x.score/max)*100)}%; height:100%; background:var(--magenta); border-radius:6px;"></div>
+        <div style="background:var(--cream); border-radius:6px; height:10px; overflow:hidden; cursor:pointer;" onmousemove="showChartTip(event,'${tipText}')" onmouseleave="hideChartTip()">
+          <div style="width:${pct}%; height:100%; background:var(--danger); border-radius:6px; transition:width .3s ease;"></div>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   }
   function renderStaffActivityBody(body){
     if(!body) return;
@@ -13691,21 +13737,21 @@
 
       <div class="profile-card" style="margin-bottom:18px;">
         <div style="display:flex; flex-wrap:wrap; gap:28px; justify-content:space-around;">
-          ${ringStatHtml(homeroomPct, 'var(--teal)', 'Homeroom Attendance', homeroomsDone+' / '+classTeacherRows.length+' classes today')}
-          ${ringStatHtml(submissionsReviewedPct, 'var(--navy)', 'Submissions Reviewed', (totalSubmissionsAll - inboxSubmissions.filter(s=>s.status==='submitted').length)+' / '+totalSubmissionsAll+' all-time')}
-          ${ringStatHtml(concernsResolvedPct, 'var(--gold-soft,#cb9a2e)', 'Concerns Resolved', (totalConcernsAll - inboxConcerns.filter(c=>c.status==='open').length)+' / '+totalConcernsAll+' all-time')}
-          ${ringStatHtml(presentPct, 'var(--magenta)', 'Staff Present Today', presentToday+' / '+allRows.length+' active staff')}
+          ${ringStatHtml(homeroomPct, 'Homeroom Attendance', homeroomsDone+' / '+classTeacherRows.length+' classes today')}
+          ${ringStatHtml(submissionsReviewedPct, 'Submissions Reviewed', (totalSubmissionsAll - inboxSubmissions.filter(s=>s.status==='submitted').length)+' / '+totalSubmissionsAll+' all-time')}
+          ${ringStatHtml(concernsResolvedPct, 'Concerns Resolved', (totalConcernsAll - inboxConcerns.filter(c=>c.status==='open').length)+' / '+totalConcernsAll+' all-time')}
+          ${ringStatHtml(presentPct, 'Staff Present Today', presentToday+' / '+allRows.length+' active staff')}
         </div>
       </div>
 
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px;">
-        <div class="stat-card"><span>Homework Assigned (${staffActivityRange}d)</span><b>${totalHomeworkRecent}</b></div>
-        <div class="stat-card"><span>Submissions Pending</span><b style="${totalPendingSubs>0?'color:var(--magenta);':''}">${totalPendingSubs}</b></div>
-        <div class="stat-card"><span>Concerns Open</span><b style="${totalOpenConcerns>0?'color:var(--magenta);':''}">${totalOpenConcerns}</b></div>
-        <div class="stat-card"><span>Marks Entry Complete</span><b>${marksComplete}/${marksRows.length}</b></div>
-        <div class="stat-card"><span>Staff Absent Today</span><b style="${absentToday>0?'color:var(--magenta);':''}">${absentToday}</b></div>
-        <div class="stat-card"><span>Staff Not Marked Today</span><b>${notMarkedToday}</b></div>
-        <div class="stat-card"><span>Needing Attention</span><b style="${flaggedCount>0?'color:var(--magenta);':''}">${flaggedCount}</b></div>
+        <div class="stat-card"><span>📋 Homework Assigned (${staffActivityRange}d)</span><b>${totalHomeworkRecent}</b></div>
+        <div class="stat-card"><span>📥 Submissions Pending</span><b style="${totalPendingSubs>0?'color:var(--danger);':''}">${totalPendingSubs}</b></div>
+        <div class="stat-card"><span>💬 Concerns Open</span><b style="${totalOpenConcerns>0?'color:var(--danger);':''}">${totalOpenConcerns}</b></div>
+        <div class="stat-card"><span>📝 Marks Entry Complete</span><b>${marksComplete}/${marksRows.length}</b></div>
+        <div class="stat-card"><span>🚫 Staff Absent Today</span><b style="${absentToday>0?'color:var(--danger);':''}">${absentToday}</b></div>
+        <div class="stat-card"><span>❔ Staff Not Marked Today</span><b>${notMarkedToday}</b></div>
+        <div class="stat-card"><span>🔔 Needing Attention</span><b style="${flaggedCount>0?'color:var(--danger);':''}">${flaggedCount}</b></div>
       </div>
 
       <div style="display:grid; grid-template-columns:1.4fr 1fr; gap:16px; margin-bottom:20px; align-items:stretch;">
@@ -13745,17 +13791,17 @@
   function renderStaffActivityRow(r){
     const st = r.staff;
     const name = `${st.firstName} ${st.lastName}`;
-    const rowStyle = r.needsAttention ? 'border-left:4px solid var(--magenta);' : '';
+    const rowStyle = r.needsAttention ? 'border-left:4px solid var(--danger);' : '';
     const pendingSubHtml = r.pendingSubmissions > 0
-      ? `<span class="balance-tag due">${r.pendingSubmissions}</span>${r.oldestPendingSubmissionDays>=2?` <span class="pill" style="font-size:0.6rem; background:rgba(209,16,115,0.15); color:var(--magenta);">⚠️ ${r.oldestPendingSubmissionDays}d</span>`:''}`
+      ? `<span class="balance-tag due">${r.pendingSubmissions}</span>${r.oldestPendingSubmissionDays>=2?` <span class="pill" style="font-size:0.6rem; background:var(--danger-bg); color:var(--danger-ink);">⚠️ ${r.oldestPendingSubmissionDays}d</span>`:''}`
       : `<span class="balance-tag zero">0</span>`;
     const openConcernHtml = r.openConcerns > 0
-      ? `<span class="balance-tag due">${r.openConcerns}</span>${r.oldestOpenConcernDays>=2?` <span class="pill" style="font-size:0.6rem; background:rgba(209,16,115,0.15); color:var(--magenta);">⚠️ ${r.oldestOpenConcernDays}d</span>`:''}`
+      ? `<span class="balance-tag due">${r.openConcerns}</span>${r.oldestOpenConcernDays>=2?` <span class="pill" style="font-size:0.6rem; background:var(--danger-bg); color:var(--danger-ink);">⚠️ ${r.oldestOpenConcernDays}d</span>`:''}`
       : `<span class="balance-tag zero">0</span>`;
     let marksHtml = '<span style="color:var(--ink-soft);">—</span>';
     if(r.marksEntry){
       marksHtml = r.marksEntry.done === r.marksEntry.total
-        ? `<span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">✅ ${r.marksEntry.done}/${r.marksEntry.total}</span>`
+        ? `<span class="pill" style="background:var(--success-bg); color:var(--success-ink);">✅ ${r.marksEntry.done}/${r.marksEntry.total}</span>`
         : `<span class="balance-tag due">${r.marksEntry.done}/${r.marksEntry.total}</span>`;
     }
     let homeroomHtml = '<span style="color:var(--ink-soft);">— Not a Class Teacher</span>';
@@ -13764,10 +13810,10 @@
       homeroomHtml = h.isHoliday
         ? `<span class="pill">Holiday</span>`
         : h.done
-          ? `<span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">✅ Marked (${h.markedCount}/${h.totalStudents})</span>`
+          ? `<span class="pill" style="background:var(--success-bg); color:var(--success-ink);">✅ Marked (${h.markedCount}/${h.totalStudents})</span>`
           : `<span class="balance-tag due">⚠️ Not marked (${h.markedCount}/${h.totalStudents})</span>`;
     }
-    const attColor = r.ownAttStatus==='Present' ? 'var(--teal)' : (r.ownAttStatus==='Absent' ? 'var(--magenta)' : 'var(--ink-soft)');
+    const attColor = r.ownAttStatus==='Present' ? 'var(--success)' : (r.ownAttStatus==='Absent' ? 'var(--danger)' : 'var(--ink-soft)');
     return `
       <tr style="${rowStyle}">
         <td class="name-cell">${escapeHtml(name)}${r.needsAttention?' 🔴':''}<div style="font-size:0.72rem; color:var(--ink-soft); font-weight:400;">${escapeHtml(st.designation||'')}${st.classTeacherClass?' · Class Teacher: '+escapeHtml(st.classTeacherClass)+' — '+escapeHtml(st.classTeacherSection):''}</div></td>
