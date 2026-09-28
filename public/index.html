@@ -15648,7 +15648,7 @@
   const INVENTORY_SUBCATEGORIES = {
     'Student Supplies': ['Bag','Water Bottle','Lunch Box','ID Card Holder','Other'],
     'Uniforms': ['Shirt','Trousers','Skirt','Pinafore','Tie','Belt','Sweater','Shoes','Other'],
-    'Books': ['Textbook','Notebook','Workbook','Guide','Other'],
+    'Books': ['Textbook','Notebook','Workbook','Guide','Govt Text Books','Materials','IIT Books','Diary','Other'],
     'Stationery': ['Pen','Pencil','Eraser','Geometry Box','Crayons','Other'],
     'Sports': ['Ball','Kit','Equipment','Other'],
     'Other': ['Other'],
@@ -19605,17 +19605,32 @@
   /* --- Sell: cart-based 2-step flow --- */
   let invCart = [];
   let invCartCategory = 'All';
+  // Second-level filter, within the chosen category — lets staff narrow
+  // "Books" down to just "Govt Text Books" or "IIT Books" etc. instead of
+  // scrolling through every book to find the right one. Uses each item's
+  // own subCategory (see invSubCategoryOptions/INVENTORY_SUBCATEGORIES),
+  // not a fixed list, so it always reflects what's actually stocked.
+  let invCartSubCategory = 'All';
   let invCartSearch = '';
   let invCheckoutBuyerType = 'Student', invCheckoutStudentId = '', invCheckoutPaymentMode = 'Cash';
   let invCheckoutSearchMode = 'name', invCheckoutBrowseClass = '', invCheckoutBrowseSection = '';
   function openInventorySellCart(){
     invCart = [];
-    invCartCategory = 'All'; invCartSearch = '';
+    invCartCategory = 'All'; invCartSubCategory = 'All'; invCartSearch = '';
     invCheckoutBuyerType = 'Student'; invCheckoutStudentId = ''; invCheckoutSearchMode = 'name';
     invCheckoutBrowseClass = ''; invCheckoutBrowseSection = '';
     inventoryTab = 'sellcart';
     invQuickOpen = false;
     renderInventoryBody();
+  }
+  function setInvCartCategory(c){
+    invCartCategory = c;
+    invCartSubCategory = 'All'; // picking a new top-level category always clears the sub-filter
+    renderInventorySellCart(document.getElementById('inventoryBody'));
+  }
+  function setInvCartSubCategory(sc){
+    invCartSubCategory = sc;
+    renderInventorySellCart(document.getElementById('inventoryBody'));
   }
   function quickSellItem(itemId){
     openInventorySellCart();
@@ -19630,7 +19645,21 @@
     const q = invCartSearch.toLowerCase();
     const sellablePool = inventoryItems.filter(it => (it.type||'Sellable')==='Sellable' && it.active!==false);
     const cats = ['All', ...Array.from(new Set(sellablePool.map(it => it.category||'General')))];
-    const pool = sellablePool.filter(it => (invCartCategory==='All'||(it.category||'General')===invCartCategory) && (!q || it.name.toLowerCase().includes(q)));
+    // Items within the currently-selected category — the pool the sub-category
+    // row is built from, so "Books" only offers sub-categories that Books
+    // actually has stock in (Govt Text Books, IIT Books, Diary, etc.), never a
+    // stale list left over from another category.
+    const categoryPool = invCartCategory==='All' ? [] : sellablePool.filter(it => (it.category||'General')===invCartCategory);
+    const subcats = Array.from(new Set(categoryPool.map(it => it.subCategory||'Other')));
+    // Only worth showing when there's actually more than one sub-category to
+    // choose between — a single-subcategory (or no-subcategory) category like
+    // Sports shouldn't grow an extra, pointless filter row.
+    const showSubcats = invCartCategory!=='All' && subcats.length > 1;
+    const pool = sellablePool.filter(it =>
+      (invCartCategory==='All'||(it.category||'General')===invCartCategory) &&
+      (!showSubcats||invCartSubCategory==='All'||(it.subCategory||'Other')===invCartSubCategory) &&
+      (!q || it.name.toLowerCase().includes(q))
+    );
     const cartTotal = invCart.reduce((sum,c) => sum+(c.price*c.qty - c.discount), 0);
     body.innerHTML = `
       <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap;">
@@ -19640,9 +19669,15 @@
       <div style="display:grid; grid-template-columns:1fr 300px; gap:20px; align-items:start;">
         <div>
           <input class="input" style="margin-bottom:12px; max-width:100%;" placeholder="Search products by name..." value="${invCartSearch}" oninput="invCartSearch=this.value; renderInventorySellCart(document.getElementById('inventoryBody'));">
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
-            ${cats.map(c => `<button style="border:none; border-radius:999px; padding:7px 14px; font-size:0.78rem; font-weight:600; cursor:pointer; ${invCartCategory===c?'background:#211A4E; color:#fff;':'background:#F2EDE1; color:var(--ink-soft);'}" onclick="invCartCategory='${c}'; renderInventorySellCart(document.getElementById('inventoryBody'));">${c} (${c==='All'?sellablePool.length:sellablePool.filter(it=>(it.category||'General')===c).length})</button>`).join('')}
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:${showSubcats?'8px':'16px'};">
+            ${cats.map(c => `<button style="border:none; border-radius:999px; padding:7px 14px; font-size:0.78rem; font-weight:600; cursor:pointer; ${invCartCategory===c?'background:#211A4E; color:#fff;':'background:#F2EDE1; color:var(--ink-soft);'}" onclick="setInvCartCategory('${c.replace(/'/g,"\\'")}')">${c} (${c==='All'?sellablePool.length:sellablePool.filter(it=>(it.category||'General')===c).length})</button>`).join('')}
           </div>
+          ${showSubcats ? `
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; padding:8px 10px; background:#F8F5EE; border-radius:10px;">
+            <span style="font-size:0.72rem; color:var(--ink-soft); font-weight:600; align-self:center; margin-right:2px;">${invCartCategory}:</span>
+            ${['All', ...subcats].map(sc => `<button style="border:1px solid var(--border); border-radius:999px; padding:5px 12px; font-size:0.74rem; font-weight:600; cursor:pointer; ${invCartSubCategory===sc?'background:var(--navy); color:#fff; border-color:var(--navy);':'background:var(--white); color:var(--ink-soft);'}" onclick="setInvCartSubCategory('${sc.replace(/'/g,"\\'")}')">${sc}${sc!=='All'?' ('+categoryPool.filter(it=>(it.subCategory||'Other')===sc).length+')':''}</button>`).join('')}
+          </div>
+          ` : ''}
           <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:12px;">
             ${pool.length ? pool.map(it => {
               const out = it.quantity <= 0;
