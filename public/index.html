@@ -2402,7 +2402,7 @@
       </div>
       <div class="table-wrap" style="overflow-x:auto; margin-bottom:14px;">
         <table><thead><tr>
-          <th style="width:36px;"></th><th>Student</th><th>Type</th><th>Due Date</th><th>Outstanding</th><th>Amount to Pay</th>
+          <th style="width:36px;"></th><th>Student / Fee Head</th><th>Due Date</th><th>Outstanding</th><th>Amount to Pay</th>
         </tr></thead>
         <tbody id="familyFeeRows"></tbody></table>
       </div>
@@ -6408,38 +6408,36 @@
   }
 
   // Records one family member's share of a Collect Family Fees payment.
-  // Allocates `amountToPay` across that student's own pending fee rows,
-  // oldest/first row first (same order Quick Pay already fills in), each
-  // becoming its own payment record — so accounting still sees every fee
-  // head (Tuition, Transport, etc.) posted to its own income account —
-  // but every record created here shares ONE receipt number, so printReceipt
-  // shows them as a single itemized receipt for that student. A different
-  // family member always gets a different receipt number, since they're
-  // billed as separate students. Pushes into the in-memory `payments` /
-  // `studentExtraFees` arrays but does not persist — the caller saves once
-  // after every selected family member has been recorded.
-  function recordFamilyPayment(studentId, amountToPay, mode, date, note){
+  // `heads` is the exact set of fee heads (Tuition, Transport, an Extra Fee,
+  // etc.) the collector chose to pay for this student, each with its own
+  // amount — no oldest-first auto-allocation, since the modal now shows and
+  // lets the collector edit every head individually. Each head becomes its
+  // own payment record — so accounting still sees every fee head posted to
+  // its own income account — but every record created here shares ONE
+  // receipt number, so printReceipt shows them as a single itemized receipt
+  // for that student. A different family member always gets a different
+  // receipt number, since they're billed as separate students. Pushes into
+  // the in-memory `payments` / `studentExtraFees` arrays but does not
+  // persist — the caller saves once after every selected family member has
+  // been recorded.
+  function recordFamilyPayment(studentId, heads, mode, date, note){
     const student = students.find(x => x.id === studentId);
-    if(!student || !(amountToPay > 0)) return null;
-    const { pendingRows } = computePendingFeeRows(student);
-    let remaining = amountToPay;
+    if(!student || !Array.isArray(heads) || !heads.length) return null;
     const receiptNo = nextReceiptNo();
     const created = [];
-    for(const r of pendingRows){
-      if(remaining <= 0) break;
-      const take = Math.min(remaining, r.outstanding);
-      if(take <= 0) continue;
-      remaining -= take;
-      if(r.type === 'extra'){
-        const fee = studentExtraFees.find(x => x.id === r.key);
+    heads.forEach(h => {
+      const take = Number(h.amount) || 0;
+      if(take <= 0) return;
+      if(h.type === 'extra'){
+        const fee = studentExtraFees.find(x => x.id === h.key);
         if(fee){
           fee.paidAmount = (Number(fee.paidAmount)||0) + take;
           if(fee.paidAmount >= fee.amount) fee.paid = true;
         }
         const record = {
-          id: 'pay_' + Date.now() + '_' + studentId + '_' + r.key,
+          id: 'pay_' + Date.now() + '_' + studentId + '_' + h.key,
           receiptNo, studentId, studentName: student.name,
-          category: 'extra', extraFeeName: fee ? fee.name : r.label, extraFeeId: r.key,
+          category: 'extra', extraFeeName: fee ? fee.name : h.label, extraFeeId: h.key,
           mode, amount: take, discount: 0, instalment: '', date, note: note || '',
           classAtPayment: student.className,
         };
@@ -6447,19 +6445,25 @@
         created.push(record);
       } else {
         const record = {
-          id: 'pay_' + Date.now() + '_' + studentId + '_' + r.key,
+          id: 'pay_' + Date.now() + '_' + studentId + '_' + h.key,
           receiptNo, studentId, studentName: student.name,
-          category: r.key, mode, amount: take, discount: 0, instalment: '', date, note: note || '',
+          category: h.key, mode, amount: take, discount: 0, instalment: '', date, note: note || '',
           classAtPayment: student.className,
         };
         payments.push(record);
         created.push(record);
       }
-    }
-    return created.length ? { studentId, receiptNo, records: created, unapplied: remaining } : null;
+    });
+    return created.length ? { studentId, receiptNo, records: created } : null;
   }
 
   /* --- Collect Family Fees modal --- */
+  // Shows every family member with their fee heads (Tuition, Bus Fee, Stock,
+  // Hostel, any Extra Fee, etc.) broken out as its own line — each with its
+  // own checkbox and editable amount — instead of one combined figure per
+  // student, so the collector can see and control exactly what's being paid
+  // toward what, per student, in one batch.
+  let ffHeadCounter = 0;
   function openFamilyFeeModal(anchorStudentId){
     const s = students.find(x => x.id === anchorStudentId);
     if(!s) return;
@@ -6469,25 +6473,35 @@
     document.getElementById('ffNote').value = '';
     document.getElementById('ffFamilyTotal').value = '';
     document.getElementById('ffUnallocatedWrap').style.display = 'none';
+    ffHeadCounter = 0;
     const rowsEl = document.getElementById('familyFeeRows');
     rowsEl.innerHTML = familyIds.map(id => {
       const m = students.find(x => x.id === id);
       if(!m) return '';
       const { pendingRows, totalPendingOutstanding } = computePendingFeeRows(m);
-      const typeHtml = pendingRows.length
-        ? pendingRows.map(r => `<span class="pill">${r.label}</span>`).join(' ')
-        : `<span class="pill" style="background:var(--success-bg,#e5f6ee); color:var(--success-ink,#1E8E5A);">All Paid</span>`;
-      const dueDate = pendingRows.length ? pendingRows.map(r=>r.dueDate).sort()[0] : '—';
       const payable = totalPendingOutstanding > 0;
-      return `
-        <tr class="ff-student-row" data-student-id="${m.id}" data-outstanding="${totalPendingOutstanding}">
-          <td><input type="checkbox" id="ffChk_${m.id}" ${payable?'checked':''} ${payable?'':'disabled'} onchange="onFamilyRowToggle()"></td>
-          <td class="name-cell">${m.firstName} ${m.lastName}<div style="font-size:0.72rem; color:var(--ink-soft); font-weight:400;">${m.className} - Section ${m.section}${m.id===s.id?' · Self':''}</div></td>
-          <td>${typeHtml}</td>
-          <td>${dueDate}</td>
-          <td class="balance-tag ${payable?'due':'zero'}">${fmtMoney(totalPendingOutstanding)}</td>
-          <td><input type="number" min="0" max="${totalPendingOutstanding}" id="ffAmt_${m.id}" value="0" ${payable?'':'disabled'} oninput="onFamilyAmountInput()" style="width:110px; padding:6px 8px; border-radius:7px; border:1.5px solid var(--border);"></td>
+      const headerRow = `
+        <tr class="ff-student-header-row" data-student-id="${m.id}">
+          <td><input type="checkbox" id="ffStudentChk_${m.id}" ${payable?'checked':''} ${payable?'':'disabled'} onchange="onFamilyStudentToggle('${m.id}')"></td>
+          <td class="name-cell"><b>${m.firstName} ${m.lastName}</b><div style="font-size:0.72rem; color:var(--ink-soft); font-weight:400;">${m.className} - Section ${m.section}${m.id===s.id?' · Self':''}</div></td>
+          <td></td>
+          <td class="balance-tag ${payable?'due':'zero'}"><b>${fmtMoney(totalPendingOutstanding)}</b></td>
+          <td></td>
         </tr>`;
+      const headRows = pendingRows.length ? pendingRows.map(r => {
+        ffHeadCounter++;
+        const hid = 'h' + ffHeadCounter;
+        return `
+          <tr class="ff-head-row" data-student-id="${m.id}" data-type="${r.type}" data-key="${escapeHtml(String(r.key))}" data-label="${escapeHtml(r.label)}" data-outstanding="${r.outstanding}" data-hid="${hid}">
+            <td><input type="checkbox" id="ffChk_${hid}" checked onchange="onFamilyRowToggle()"></td>
+            <td class="name-cell" style="padding-left:28px; color:var(--ink-soft); font-size:0.86rem;">↳ ${escapeHtml(r.label)}</td>
+            <td>${r.dueDate}</td>
+            <td class="balance-tag due">${fmtMoney(r.outstanding)}</td>
+            <td><input type="number" min="0" max="${r.outstanding}" id="ffAmt_${hid}" value="${r.outstanding}" oninput="onFamilyAmountInput()" style="width:110px; padding:6px 8px; border-radius:7px; border:1.5px solid var(--border);"></td>
+          </tr>`;
+      }).join('') : `
+        <tr><td></td><td colspan="4" style="color:var(--ink-soft); font-size:0.82rem; padding-left:28px;">All fee heads paid</td></tr>`;
+      return headerRow + headRows;
     }).join('');
     document.getElementById('familyFeeModalOverlay').classList.add('open');
     updateFamilyTotalToPay();
@@ -6495,14 +6509,46 @@
   function closeFamilyFeeModal(){
     document.getElementById('familyFeeModalOverlay').classList.remove('open');
   }
+  // Select-all/none for one student's fee heads, triggered by that
+  // student's own header checkbox.
+  function onFamilyStudentToggle(studentId){
+    const headerChk = document.getElementById('ffStudentChk_'+studentId);
+    if(!headerChk) return;
+    const checked = headerChk.checked;
+    document.querySelectorAll('.ff-head-row[data-student-id="'+studentId+'"]').forEach(row => {
+      const hid = row.dataset.hid;
+      const chk = document.getElementById('ffChk_'+hid);
+      const amt = document.getElementById('ffAmt_'+hid);
+      if(!chk || !amt) return;
+      chk.checked = checked;
+      if(!checked){ amt.value = 0; amt.disabled = true; }
+      else { amt.disabled = false; amt.value = row.dataset.outstanding; }
+    });
+    headerChk.indeterminate = false;
+    updateFamilyTotalToPay();
+  }
+  // Fired by an individual fee-head checkbox; also keeps that student's
+  // header checkbox in sync (checked/unchecked/indeterminate) with however
+  // many of their own heads are currently selected.
   function onFamilyRowToggle(){
-    document.querySelectorAll('.ff-student-row').forEach(row => {
-      const id = row.dataset.studentId;
-      const chk = document.getElementById('ffChk_'+id);
-      const amtInput = document.getElementById('ffAmt_'+id);
-      if(!chk || !amtInput) return;
-      if(!chk.checked){ amtInput.value = 0; amtInput.disabled = true; }
-      else if(Number(row.dataset.outstanding) > 0){ amtInput.disabled = false; }
+    document.querySelectorAll('.ff-head-row').forEach(row => {
+      const hid = row.dataset.hid;
+      const chk = document.getElementById('ffChk_'+hid);
+      const amt = document.getElementById('ffAmt_'+hid);
+      if(!chk || !amt) return;
+      if(!chk.checked){ amt.value = 0; amt.disabled = true; }
+      else { amt.disabled = false; if(!(Number(amt.value) > 0)) amt.value = row.dataset.outstanding; }
+    });
+    const studentIds = new Set(Array.from(document.querySelectorAll('.ff-head-row')).map(r => r.dataset.studentId));
+    studentIds.forEach(sid => {
+      const rows = Array.from(document.querySelectorAll('.ff-head-row[data-student-id="'+sid+'"]'));
+      const headerChk = document.getElementById('ffStudentChk_'+sid);
+      if(!headerChk || !rows.length) return;
+      const checks = rows.map(r => document.getElementById('ffChk_'+r.dataset.hid)).filter(Boolean);
+      const allChecked = checks.every(c => c.checked);
+      const noneChecked = checks.every(c => !c.checked);
+      headerChk.checked = allChecked;
+      headerChk.indeterminate = !allChecked && !noneChecked;
     });
     updateFamilyTotalToPay();
   }
@@ -6511,25 +6557,26 @@
   }
   function updateFamilyTotalToPay(){
     let total = 0;
-    document.querySelectorAll('.ff-student-row').forEach(row => {
-      const id = row.dataset.studentId;
-      const chk = document.getElementById('ffChk_'+id);
-      const amtInput = document.getElementById('ffAmt_'+id);
+    document.querySelectorAll('.ff-head-row').forEach(row => {
+      const hid = row.dataset.hid;
+      const chk = document.getElementById('ffChk_'+hid);
+      const amtInput = document.getElementById('ffAmt_'+hid);
       if(chk && chk.checked && amtInput) total += Number(amtInput.value) || 0;
     });
     const el = document.getElementById('ffTotalToPay');
     if(el) el.textContent = fmtMoney(total);
   }
-  // Splits the entered Family Total equally across the checked siblings,
-  // capping each at what they actually owe and carrying any leftover from a
-  // capped sibling on to the ones who still have room — so nobody is ever
-  // auto-allocated more than their own outstanding balance. Whatever still
-  // can't be placed once everyone's fully covered is shown as "Not allocated"
-  // rather than silently applied or dropped.
+  // Splits the entered Family Total equally across every checked fee head
+  // (across every checked student), capping each at what that head still
+  // owes and carrying any leftover from a capped head on to the ones who
+  // still have room — so no single fee head is ever auto-allocated more
+  // than its own outstanding balance. Whatever still can't be placed once
+  // every head is fully covered is shown as "Not allocated" rather than
+  // silently applied or dropped.
   function autoDivideFamilyTotal(){
     const totalInput = Number(document.getElementById('ffFamilyTotal').value) || 0;
-    const rows = Array.from(document.querySelectorAll('.ff-student-row')).filter(row => {
-      const chk = document.getElementById('ffChk_'+row.dataset.studentId);
+    const rows = Array.from(document.querySelectorAll('.ff-head-row')).filter(row => {
+      const chk = document.getElementById('ffChk_'+row.dataset.hid);
       return chk && chk.checked && Number(row.dataset.outstanding) > 0;
     });
     const unallocWrap = document.getElementById('ffUnallocatedWrap');
@@ -6540,7 +6587,7 @@
       updateFamilyTotalToPay();
       return;
     }
-    const pool = rows.map(row => ({ id: row.dataset.studentId, due: Number(row.dataset.outstanding)||0, alloc:0, capped:false }));
+    const pool = rows.map(row => ({ hid: row.dataset.hid, due: Number(row.dataset.outstanding)||0, alloc:0, capped:false }));
     let remaining = totalInput;
     let guard = 0;
     while(remaining > 0.01 && pool.some(p => !p.capped) && guard < 100){
@@ -6556,7 +6603,7 @@
       remaining = leftover;
     }
     pool.forEach(p => {
-      const amtInput = document.getElementById('ffAmt_'+p.id);
+      const amtInput = document.getElementById('ffAmt_'+p.hid);
       if(amtInput) amtInput.value = Math.round(p.alloc);
     });
     const unallocated = Math.max(0, Math.round(remaining));
@@ -6568,16 +6615,24 @@
     const mode = document.getElementById('ffMode').value;
     const date = document.getElementById('ffDate').value || new Date().toISOString().slice(0,10);
     const note = document.getElementById('ffNote').value.trim();
-    const toPay = Array.from(document.querySelectorAll('.ff-student-row')).map(row => {
-      const id = row.dataset.studentId;
-      const chk = document.getElementById('ffChk_'+id);
-      const amtInput = document.getElementById('ffAmt_'+id);
-      return { studentId: id, amount: Number(amtInput ? amtInput.value : 0) || 0, checked: chk ? chk.checked : false };
-    }).filter(r => r.checked && r.amount > 0);
-    if(!toPay.length){ showToast('Select at least one student and enter an amount to pay.'); return; }
+    const byStudent = {};
+    document.querySelectorAll('.ff-head-row').forEach(row => {
+      const hid = row.dataset.hid;
+      const chk = document.getElementById('ffChk_'+hid);
+      const amtInput = document.getElementById('ffAmt_'+hid);
+      if(!chk || !chk.checked) return;
+      const amount = Number(amtInput ? amtInput.value : 0) || 0;
+      if(amount <= 0) return;
+      const sid = row.dataset.studentId;
+      (byStudent[sid] = byStudent[sid] || []).push({
+        type: row.dataset.type, key: row.dataset.key, label: row.dataset.label, amount,
+      });
+    });
+    const studentIds = Object.keys(byStudent);
+    if(!studentIds.length){ showToast('Select at least one fee head and enter an amount to pay.'); return; }
     const results = [];
-    toPay.forEach(t => {
-      const res = recordFamilyPayment(t.studentId, t.amount, mode, date, note);
+    studentIds.forEach(sid => {
+      const res = recordFamilyPayment(sid, byStudent[sid], mode, date, note);
       if(res) results.push(res);
     });
     if(!results.length){ showToast('Nothing was recorded — check the amounts entered.'); return; }
@@ -6586,7 +6641,7 @@
     closeFamilyFeeModal();
     renderDashboard();
     renderFeeBody();
-    const totalPaid = toPay.reduce((sum,t) => sum + t.amount, 0);
+    const totalPaid = studentIds.reduce((sum,sid) => sum + byStudent[sid].reduce((s,h)=>s+h.amount,0), 0);
     showToast(results.length + ' receipt(s) generated for ' + results.length + ' student(s).', 'radial', totalPaid);
     if(await showConfirmDialog('Payment(s) recorded. Print receipt(s) now?')){
       results.forEach(r => printReceiptByNo(r.receiptNo));
