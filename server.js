@@ -4293,6 +4293,17 @@ app.all('/api/:resource', async (req, res) => {
     if (resource === 'students' && req.method === 'POST' && req.query.action === 'delete-duplicates') {
       return await handleDeleteDuplicateStudents(req, res);
     }
+    // Belt-and-braces alongside the client-side block in renderAttRoster:
+    // school policy is that attendance isn't taken on a holiday, so refuse a
+    // write here too rather than trusting every caller of this generic
+    // resource endpoint to have applied that rule client-side first.
+    if (resource === 'attendance' && (req.method === 'POST' || req.method === 'PUT')) {
+      const dateStr = req.body && req.body.date;
+      if (dateStr) {
+        const isHoliday = (await sql`SELECT 1 FROM holidays WHERE date = ${dateStr} LIMIT 1`).length > 0;
+        if (isHoliday) return res.status(400).json({ error: "Attendance isn't taken on a holiday." });
+      }
+    }
     if (SIMPLE_RESOURCES[resource]) return await handleSimple(req, res, SIMPLE_RESOURCES[resource], resource);
     if (HYBRID_RESOURCES[resource]) return await handleHybrid(req, res, HYBRID_RESOURCES[resource]);
     if (resource === 'subjects') return await handleSubjects(req, res);
