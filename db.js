@@ -43,6 +43,18 @@ const ssl = /^true$/i.test(process.env.DB_SSL || '')
   ? { rejectUnauthorized: !/^false$/i.test(process.env.DB_SSL_REJECT_UNAUTHORIZED || 'true') }
   : undefined;
 
+// connectionLimit was 5 — far too low for how this app actually loads.
+// Every login fires ~33 API requests in parallel (see index.html's
+// loadAllAppData(), already parallelized once before for the same reason),
+// each one grabbing its own connection from this pool for the life of its
+// query. With only 5 available, the other ~28 requests queue up waiting
+// for one to free, so a login's total time became several serialized
+// batches instead of one real parallel batch — and it keeps getting worse
+// as attendance_records/students grow, since each queued query also takes
+// a bit longer. Raised to comfortably cover that fan-out with headroom for
+// a few staff logging in at once; if GoDaddy's MySQL plan ever reports "Too
+// many connections", lower this to whatever max_connections it allows
+// minus some slack for other clients, rather than going all the way back to 5.
 export const pool = mysql.createPool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT || 3306),
@@ -50,8 +62,8 @@ export const pool = mysql.createPool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   waitForConnections: true,
-  connectionLimit: 5,
-  maxIdle: 5,
+  connectionLimit: 30,
+  maxIdle: 10,
   idleTimeout: 60000,
   // Without this, mysql2 has no upper bound on how long it will wait for
   // the initial TCP/TLS handshake — a wrong host, a DNS name that doesn't
