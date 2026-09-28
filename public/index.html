@@ -3317,6 +3317,17 @@
 
   let students = [];
 
+  // Promise cache for datasets that load lazily (on first actual use) instead
+  // of eagerly at login — see loadAllAppData() and the split-out loaders below
+  // it. Calling ensureDataLoaded() a second time for the same key returns the
+  // SAME promise (doesn't re-fetch), so any number of call sites can await it
+  // safely without duplicate network requests.
+  const _lazyDataPromises = {};
+  function ensureDataLoaded(key, loaderFn){
+    if(!_lazyDataPromises[key]) _lazyDataPromises[key] = loaderFn();
+    return _lazyDataPromises[key];
+  }
+
   // Your uploaded "Loading" Lottie file, inlined so the page stays a single
   // file — played wherever a data fetch needs a real loading indicator
   // instead of a plain "Loading…" label.
@@ -4806,11 +4817,18 @@
 
   async function loadFinance(){
     financeSettings = await storageGet(SETTINGS_KEY, { hostel: 0 });
-    payments = await storageGet(PAYMENTS_KEY, []);
     classFeeStructure = await storageGet(FEE_STRUCTURE_KEY, {});
     academicYears = await storageGet(ACADEMIC_YEARS_KEY, [autoAcademicYear()]);
     currentAcademicYearValue = await storageGet(CURRENT_AY_KEY, autoAcademicYear());
     document.getElementById('ayBadge').textContent = 'AY ' + currentAcademicYearValue;
+  }
+  // payments (fee collection history) is large and ever-growing — loaded
+  // lazily on first actual use instead of at login. See ensureDataLoaded().
+  // Read very widely (Fees tab, Accounting, Dashboard, Admissions profile,
+  // Reports) — every one of those entry points guards with
+  // ensureDataLoaded('payments', loadPaymentsData) before reading it.
+  async function loadPaymentsData(){
+    payments = await storageGet(PAYMENTS_KEY, []);
   }
 
   function autoAcademicYear(){
@@ -5188,7 +5206,14 @@
     `;
   }
 
-  function renderDashboard(){
+  async function renderDashboard(){
+    // Dashboard summary cards + trend charts read payments, attendanceRecords
+    // and staffAttendanceRecords — all three lazily-loaded.
+    await Promise.all([
+      ensureDataLoaded('payments', loadPaymentsData),
+      ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData),
+      ensureDataLoaded('staffAttendanceRecords', loadStaffAttendance),
+    ]);
     const el = document.getElementById('view-dashboard');
     const { perCat, totals } = computeFinance();
 
@@ -5582,6 +5607,7 @@
   }
   async function savePayment(e){
     e.preventDefault();
+    await ensureDataLoaded('payments', loadPaymentsData);
     const studentId = document.getElementById('pStudent').value;
     const student = students.find(s => s.id === studentId);
     if(!student){ showToast('Please select a student.'); return false; }
@@ -5637,7 +5663,8 @@
 
   // Prints one payment record exactly as before — unchanged for every
   // existing single-category payment, which is still the vast majority.
-  function printReceipt(paymentIdOrRecord){
+  async function printReceipt(paymentIdOrRecord){
+    await ensureDataLoaded('payments', loadPaymentsData);
     const p = (typeof paymentIdOrRecord === 'object' && paymentIdOrRecord !== null)
       ? paymentIdOrRecord
       : payments.find(x => x.id === paymentIdOrRecord);
@@ -5652,12 +5679,14 @@
   }
   // Prints every payment record sharing one receipt number (e.g. from
   // recordFamilyPayment) as a single itemized receipt.
-  function printReceiptByNo(receiptNo){
+  async function printReceiptByNo(receiptNo){
+    await ensureDataLoaded('payments', loadPaymentsData);
     const recs = payments.filter(p => p.receiptNo === receiptNo);
     if(!recs.length) return;
     printReceiptRecords(recs);
   }
-  function printReceiptRecords(recs){
+  async function printReceiptRecords(recs){
+    await ensureDataLoaded('payments', loadPaymentsData);
     const p = recs[0];
     if(!p) return;
     const s = students.find(x => x.id === p.studentId);
@@ -5787,7 +5816,8 @@
   let defaulterFilters = { className:'', section:'', name:'', phone:'' };
 
   const MF_TAB_PERM_KEYS = { fees:'managefee_collection', structure:'managefee_structure', types:'managefee_types', discounts:'managefee_discounts', extra:'managefee_extra', late:'managefee_late', defaulters:'managefee_defaulters' };
-  function initManageFeeView(){
+  async function initManageFeeView(){
+    await ensureDataLoaded('payments', loadPaymentsData);
     populateMfAyBadgeAndSelect();
     const classSel = document.getElementById('mfClassFilter');
     if(classSel.options.length <= 1){
@@ -5831,7 +5861,8 @@
     renderFeeBody();
   }
 
-  function renderFeeBody(){
+  async function renderFeeBody(){
+    await ensureDataLoaded('payments', loadPaymentsData);
     const body = document.getElementById('feeBody');
     if(!body) return;
     if(!getManageFeeTabAccess(currentUser.role, MF_TAB_PERM_KEYS[feeTab])){
@@ -6252,6 +6283,7 @@
     if(el) el.textContent = fmtMoney(total);
   }
   async function submitLedgerPayments(studentId){
+    await ensureDataLoaded('payments', loadPaymentsData);
     const modeSel = document.getElementById('ledgerPayMode');
     const mode = modeSel ? modeSel.value : 'Cash';
     const entries = Array.from(document.querySelectorAll('.ledger-pay-input'))
@@ -6315,6 +6347,7 @@
   // is posted here.
   async function voidPayment(id){
     if(currentUser.role !== 'Admin'){ showToast('Only Admin can void a payment.'); return; }
+    await ensureDataLoaded('payments', loadPaymentsData);
     const p = payments.find(x => x.id === id);
     if(!p || p.voided) return;
     const reason = prompt(`Void this payment of ${fmtMoney(p.amount)}?\n\nEnter a reason (it stays visible, marked VOIDED, for audit — the receipt number is never reused):`);
@@ -6356,8 +6389,15 @@
           delete. */
   let refundPaymentId = null;
   const FEE_REFUND_CATEGORY = 'Fee Refund';
-  function openRefundPaymentModal(paymentId){
+  async function openRefundPaymentModal(paymentId){
     if(currentUser.role !== 'Admin'){ showToast('Only Admin can issue a refund.'); return; }
+    // Needs both: the payment itself, and the Accounting ledger's bank/cash
+    // accounts for the "Refund From" dropdown — a genuine cross-module read
+    // from outside the Accounting tab.
+    await Promise.all([
+      ensureDataLoaded('payments', loadPaymentsData),
+      ensureDataLoaded('acctLedger', loadAccountingLedgerData),
+    ]);
     const p = payments.find(x => x.id === paymentId);
     if(!p || p.voided){ showToast('This payment can\'t be refunded.'); return; }
     refundPaymentId = paymentId;
@@ -6376,6 +6416,13 @@
     document.getElementById('refundPaymentModalOverlay').classList.remove('open');
   }
   async function submitRefundPayment(){
+    // Voids the original fee payment AND posts a new Accounting expense
+    // voucher (acctExpenses) — both lazily-loaded datasets, needed even when
+    // this is reached from the Fees tab without ever opening Accounting.
+    await Promise.all([
+      ensureDataLoaded('payments', loadPaymentsData),
+      ensureDataLoaded('acctTransactions', loadAcctTransactionsData),
+    ]);
     const p = payments.find(x => x.id === refundPaymentId);
     if(!p){ closeRefundPaymentModal(); return; }
     const amount = Number(document.getElementById('refundAmount').value) || 0;
@@ -6488,7 +6535,8 @@
   // student, so the collector can see and control exactly what's being paid
   // toward what, per student, in one batch.
   let ffHeadCounter = 0;
-  function openFamilyFeeModal(anchorStudentId){
+  async function openFamilyFeeModal(anchorStudentId){
+    await ensureDataLoaded('payments', loadPaymentsData);
     const s = students.find(x => x.id === anchorStudentId);
     if(!s) return;
     const familyIds = getFamilyIds(s);
@@ -6636,6 +6684,7 @@
     updateFamilyTotalToPay();
   }
   async function submitFamilyPayments(){
+    await ensureDataLoaded('payments', loadPaymentsData);
     const mode = document.getElementById('ffMode').value;
     const date = document.getElementById('ffDate').value || new Date().toISOString().slice(0,10);
     const note = document.getElementById('ffNote').value.trim();
@@ -7220,7 +7269,8 @@
     renderFeeBody();
     showToast('Marked as paid.', 'burst');
   }
-  function printReceiptForExtraFee(feeId){
+  async function printReceiptForExtraFee(feeId){
+    await ensureDataLoaded('payments', loadPaymentsData);
     const fee = studentExtraFees.find(x => x.id === feeId);
     if(!fee) return;
     const realPayment = payments.find(p => p.category === 'extra' && p.extraFeeId === feeId);
@@ -7492,9 +7542,14 @@
   const ATT_SESSIONS = ['Morning', 'Afternoon'];
 
   async function loadAttendance(){
-    attendanceRecords = await storageGet(ATTENDANCE_KEY, []);
     holidays = await storageGet(HOLIDAYS_KEY, []);
     attSettings = await storageGet(ATT_SETTINGS_KEY, { threshold: 75, workingDays: [1,2,3,4,5,6] });
+  }
+  // attendanceRecords is large and ever-growing (one row per student per
+  // day) — loaded lazily on first actual use instead of at login. See
+  // ensureDataLoaded().
+  async function loadAttendanceRecordsData(){
+    attendanceRecords = await storageGet(ATTENDANCE_KEY, []);
   }
 
   let attTab = 'mark';
@@ -7505,7 +7560,8 @@
   let attMarkSession = 'Morning';
   let pendingMarks = {};
 
-  function initAttendanceView(){
+  async function initAttendanceView(){
+    await ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData);
     document.getElementById('atAyBadge').textContent = 'AY ' + currentAcademicYearValue;
     const classSel = document.getElementById('atClassFilter');
     const secSel = document.getElementById('atSectionFilter');
@@ -7543,7 +7599,8 @@
     renderAttendanceBody();
   }
 
-  function renderAttendanceBody(){
+  async function renderAttendanceBody(){
+    await ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData);
     const body = document.getElementById('attendanceBody');
     if(!body) return;
     if(attTab === 'mark'){
@@ -7592,6 +7649,9 @@
       biometricPunchLog = [];
     }
   }
+  // staffAttendanceRecords is large and ever-growing (one row per staff
+  // member per day) — loaded lazily on first actual use instead of at login.
+  // See ensureDataLoaded().
   async function loadStaffAttendance(){
     staffAttendanceRecords = await storageGet(STAFF_ATTENDANCE_KEY, []);
   }
@@ -7608,9 +7668,15 @@
     document.getElementById('stAtSearchRow').style.display = tab==='reports' ? 'flex' : 'none';
     renderStaffAttendanceContent();
   }
-  function renderStaffAttendanceContent(){
+  async function renderStaffAttendanceContent(){
     const body = document.getElementById('staffAttContentBody');
     if(!body) return;
+    if(staffAttTab === 'mark' || staffAttTab === 'reports'){
+      const requestedTab = staffAttTab;
+      body.innerHTML = '<div class="empty-state">Loading…</div>';
+      await ensureDataLoaded('staffAttendanceRecords', loadStaffAttendance);
+      if(staffAttTab !== requestedTab) return; // tab changed while loading
+    }
     if(staffAttTab === 'mark') return renderStaffAttMark(body);
     if(staffAttTab === 'reports') return renderStaffAttReports(body);
     if(staffAttTab === 'biometric'){
@@ -7714,6 +7780,7 @@
     renderStaffAttendanceContent();
   }
   async function saveStaffAttendance(){
+    await ensureDataLoaded('staffAttendanceRecords', loadStaffAttendance);
     Object.keys(staffPendingMarks).forEach(staffId => {
       const status = staffPendingMarks[staffId];
       let rec = staffAttendanceRecords.find(r => r.staffId===staffId && r.date===staffAttMarkDate && r.session===staffAttMarkSession);
@@ -7910,6 +7977,7 @@
     renderAttendanceBody();
   }
   async function saveAttendance(){
+    await ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData);
     if(holidays.some(h => h.date===attMarkDate)){ showToast("Attendance isn't taken on a holiday."); return; }
     Object.keys(pendingMarks).forEach(studentId => {
       const status = pendingMarks[studentId];
@@ -8211,7 +8279,6 @@
 
   async function loadExams(){
     examDefs = await storageGet(EXAM_DEFS_KEY, []);
-    examResults = await storageGet(EXAM_RESULTS_KEY, []);
     examTypes = await storageGet(EXAM_TYPES_KEY, ['Unit Test 1','Unit Test 2','Quarterly Exam','Half Yearly Exam','Annual Exam']);
     examGroups = await storageGet(EXAM_GROUPS_KEY, []);
     consolidationScale = await storageGet(CONSOLIDATION_SCALE_KEY, [
@@ -8234,6 +8301,14 @@
       {grade:'D',  minPct:33, maxPct:40},
       {grade:'E',  minPct:0,  maxPct:32},
     ]);
+  }
+  // examResults is large and ever-growing (one row per student per subject
+  // per exam) — loaded lazily on first actual use instead of at login. See
+  // ensureDataLoaded(). Read from the Exams/Results tab, report card and
+  // admit card generation, and the Staff Activity dashboard's marks-entry
+  // tracker — each guards independently.
+  async function loadExamResultsData(){
+    examResults = await storageGet(EXAM_RESULTS_KEY, []);
   }
 
   /* ===== ROOM ALLOTMENT MODULE (exam room master list + hall ticket numbers) ===== */
@@ -8307,7 +8382,9 @@
     renderExamBody();
   }
 
-  function renderExamBody(){
+  async function renderExamBody(){
+    // Marks entry, entry-status and results tabs all read examResults.
+    await ensureDataLoaded('examResults', loadExamResultsData);
     const body = document.getElementById('examBody');
     if(!body) return;
     if(!getExamsTabAccess(currentUser.role, EXAMS_TAB_PERM_KEYS[examTab])){
@@ -8419,7 +8496,13 @@
     if(tab === 'admitcards') admitCardsView = 'grid';
     renderResultBody();
   }
-  function renderResultBody(){
+  async function renderResultBody(){
+    // Report Card / Consolidated tabs read examResults (marks) and
+    // attendanceRecords (the attendance summary on a report card).
+    await Promise.all([
+      ensureDataLoaded('examResults', loadExamResultsData),
+      ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData),
+    ]);
     const body = document.getElementById('resultBody');
     if(!body) return;
     if(!getResultTabAccess(currentUser.role, RESULT_TAB_PERM_KEYS[resultTab])){
@@ -8763,6 +8846,7 @@
   }
   async function deleteExam(id){
     if(!await showConfirmDialog('Delete this exam? Any marks entered for it will also be removed.')) return;
+    await ensureDataLoaded('examResults', loadExamResultsData);
     examDefs = examDefs.filter(e => e.id !== id);
     examResults = examResults.filter(r => r.examId !== id);
     await storageSet(EXAM_DEFS_KEY, examDefs);
@@ -8893,6 +8977,7 @@
   }
 
   async function saveMarksSheet(){
+    await ensureDataLoaded('examResults', loadExamResultsData);
     const exam = examDefs.find(e => e.id === examCurrentExamId);
     const markInputs = document.querySelectorAll('.marks-input');
     for(const inp of markInputs){
@@ -8924,6 +9009,7 @@
   }
 
   async function importMarksExcel(e){
+    await ensureDataLoaded('examResults', loadExamResultsData);
     if(!(await ensureXLSX())) { e.target.value=''; return; }
     const file = e.target.files[0];
     if(!file) return;
@@ -9309,7 +9395,11 @@
       </div>
     `;
   }
-  function printReportCard(studentId, examId){
+  async function printReportCard(studentId, examId){
+    await Promise.all([
+      ensureDataLoaded('examResults', loadExamResultsData),
+      ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData),
+    ]);
     const s = students.find(x => x.id === studentId);
     const exam = examDefs.find(e => e.id === examId);
     if(!s || !exam) return;
@@ -12130,7 +12220,19 @@
     if(format === 'excel') exportRowsToExcel(fileBase+'.xlsx', names[kind], rows);
     else exportRowsToPDF(title, '', rows);
   }
-  function generateLibraryReport(id, format, filtersOverride){
+  async function generateLibraryReport(id, format, filtersOverride){
+    // Reports can pull from any of the lazily-loaded datasets (payments,
+    // attendance, exam results, accounting) depending on which report was
+    // picked — load them all up front rather than special-casing every
+    // report definition.
+    await Promise.all([
+      ensureDataLoaded('payments', loadPaymentsData),
+      ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData),
+      ensureDataLoaded('staffAttendanceRecords', loadStaffAttendance),
+      ensureDataLoaded('examResults', loadExamResultsData),
+      ensureDataLoaded('acctTransactions', loadAcctTransactionsData),
+      ensureDataLoaded('acctLedger', loadAccountingLedgerData),
+    ]);
     const r = REPORT_LIBRARY.find(x => x.id === id);
     if(!r) return;
     const filters = filtersOverride || getReportScopeFilters();
@@ -13077,7 +13179,14 @@
     if(src.hasDateRange){ f.fromDate = document.getElementById('crFromDate').value; f.toDate = document.getElementById('crToDate').value; }
     return f;
   }
-  function generateCustomReport(format){
+  async function generateCustomReport(format){
+    // The "Fee Payments" and "Attendance" custom-report sources read the
+    // lazily-loaded payments/attendanceRecords globals — make sure they're
+    // in before pulling rows, regardless of which source is selected.
+    await Promise.all([
+      ensureDataLoaded('payments', loadPaymentsData),
+      ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData),
+    ]);
     const src = REPORT_SOURCES[customReportSource];
     const selectedCols = Array.from(document.querySelectorAll('.cr-col-check:checked')).map(c => c.value);
     if(selectedCols.length === 0){ showToast('Select at least one column.'); return; }
@@ -13445,7 +13554,7 @@
     if(tab === 'activity') return renderStaffActivityTab(document.getElementById('stfActivityBody'));
   }
 
-  function renderStaffBody(){
+  async function renderStaffBody(){
     const body = document.getElementById('staffBody');
     if(!body) return;
     if(staffTab === 'directory'){
@@ -13457,7 +13566,14 @@
       if(!idCardsDept) return renderIdCardsDeptGrid(body);
       return renderIdCardsList(body);
     }
-    if(staffTab === 'payroll') return renderStaffPayrollTab(body);
+    if(staffTab === 'payroll'){
+      // Loss-of-Pay calculation reads staffAttendanceRecords — must be the
+      // real data, not an empty array, before computing anyone's payroll.
+      body.innerHTML = '<div class="empty-state">Loading…</div>';
+      await ensureDataLoaded('staffAttendanceRecords', loadStaffAttendance);
+      if(staffTab === 'payroll') return renderStaffPayrollTab(body);
+      return;
+    }
   }
 
   /* --- Staff Activity (Admin/Principal monitoring dashboard) ---
@@ -13478,7 +13594,16 @@
   function renderStaffActivityTab(body){
     if(!body) return;
     body.innerHTML = `<div class="empty-state"><b>Loading staff activity…</b></div>`;
-    Promise.all([loadInboxConcerns(), loadInboxSubmissions()]).then(() => renderStaffActivityBody(body));
+    // Marks-entry progress (examResults), homeroom attendance and each
+    // staff member's own attendance today (attendanceRecords /
+    // staffAttendanceRecords) are all lazily-loaded — needed even when
+    // this dashboard is opened without ever visiting Exams or Attendance.
+    Promise.all([
+      loadInboxConcerns(), loadInboxSubmissions(),
+      ensureDataLoaded('examResults', loadExamResultsData),
+      ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData),
+      ensureDataLoaded('staffAttendanceRecords', loadStaffAttendance),
+    ]).then(() => renderStaffActivityBody(body));
   }
   function refreshStaffActivityTab(){ renderStaffActivityTab(document.getElementById('stfActivityBody')); }
   function onStaffActivitySearch(v){ staffActivitySearch = v; renderStaffActivityBody(document.getElementById('stfActivityBody')); }
@@ -14840,6 +14965,7 @@
     return { rec, preview: computeStaffPayroll(staffId, monthStr, overrides), locked };
   }
   async function saveDraftPayroll(staffId, monthStr){
+    await ensureDataLoaded('staffAttendanceRecords', loadStaffAttendance);
     const existing = findPayrollRecord(staffId, monthStr);
     if(existing && existing.status === 'Approved'){ showToast('This month is already Approved — reopen it first to make changes.'); return; }
     const bonusInput = document.getElementById('payBonus_'+staffId+'_'+monthStr);
@@ -15488,9 +15614,13 @@
     if(currentUser.role !== 'Admin'){ body.innerHTML = `<div class="empty-state"><b>Admin access only</b>This section is restricted to the Admin role.</div>`; return; }
     renderPermissionsTab(body);
   }
-  function initAdminTools2Page(){
+  async function initAdminTools2Page(){
     const body = document.getElementById('adminTools2Body');
     if(currentUser.role !== 'Admin'){ body.innerHTML = `<div class="empty-state"><b>Admin access only</b>This section is restricted to the Admin role.</div>`; return; }
+    // The "Reset Inventory / Accounting Data" panel shows and deletes
+    // acctExpenses/acctIncome counts — must be the real numbers, not an
+    // unloaded empty array, before the admin sees the checkbox counts.
+    await ensureDataLoaded('acctTransactions', loadAcctTransactionsData);
     renderAdminToolsTab(body);
   }
 
@@ -15641,11 +15771,17 @@
   [ACCT_EXPENSE_CATS_KEY, ACCT_INCOME_CATS_KEY, ACCT_COST_CENTERS_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
   let acctExpenses = [], acctIncome = [], acctExpenseCategories = [], acctIncomeCategories = [], acctCostCenters = [];
   async function loadAccounting(){
-    acctExpenses = await storageGet(ACCT_EXPENSES_KEY, []);
-    acctIncome = await storageGet(ACCT_INCOME_KEY, []);
     acctExpenseCategories = await storageGet(ACCT_EXPENSE_CATS_KEY, ['Salaries','Utilities (Electricity/Water)','Maintenance & Repairs','Stationery & Supplies','Transport Fuel','Furniture & Equipment','Miscellaneous']);
     acctIncomeCategories = await storageGet(ACCT_INCOME_CATS_KEY, ['Donation','Government Grant','Rental Income','Interest Income','Miscellaneous']);
     acctCostCenters = await storageGet(ACCT_COST_CENTERS_KEY, ['Tuition Fee','Vehicle Fee (Transport)','Inventory','Hostel Fee','General / Other']);
+  }
+  // acctExpenses / acctIncome (the accounting ledger's transaction history)
+  // are large and ever-growing — loaded lazily on first actual use instead
+  // of at login. See ensureDataLoaded(). This whole Accounting module is
+  // fairly self-contained (mostly only its own tabs read these).
+  async function loadAcctTransactionsData(){
+    acctExpenses = await storageGet(ACCT_EXPENSES_KEY, []);
+    acctIncome = await storageGet(ACCT_INCOME_KEY, []);
   }
   // Asks the server for the next number in a series — never guessed
   // client-side. See server.js's /api/next-doc-number: it's a single atomic
@@ -15718,7 +15854,11 @@
   const ACCT_RECONCILED_KEY = "acct-reconciled";
   [ACCT_BANK_ACCOUNTS_KEY, ACCT_FIXED_ASSETS_KEY, ACCT_OTHER_LEDGERS_KEY, ACCT_JOURNAL_KEY, ACCT_BUDGETS_KEY, ACCT_RECONCILED_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
   let acctBankAccounts = [], acctFixedAssets = [], acctOtherLedgers = [], acctJournalVouchers = [], acctBudgets = [], acctReconciled = {};
-  async function loadAccountingLedger(){
+  // The whole Accounting ledger module (bank accounts, fixed assets, other
+  // ledgers, journal vouchers, budgets, reconciliation state) is large and
+  // ever-growing / self-contained — loaded lazily on first actual use
+  // instead of at login. See ensureDataLoaded().
+  async function loadAccountingLedgerData(){
     acctBankAccounts = await storageGet(ACCT_BANK_ACCOUNTS_KEY, [
       { id:'bnk_cash', name:'Cash in Hand', bankName:'', accountNo:'', ifsc:'', type:'Cash', openingBalance:0, openingDate:'', active:true },
       { id:'bnk_main', name:'Bank Account — Primary', bankName:'', accountNo:'', ifsc:'', type:'Bank', openingBalance:0, openingDate:'', active:true },
@@ -16223,7 +16363,10 @@
   function commsTargetName(target){
     return target.kind==='student' ? target.student.firstName+' '+target.student.lastName : target.staff.firstName+' '+target.staff.lastName;
   }
-  function prepareCommsRecipients(){
+  async function prepareCommsRecipients(){
+    // The "defaulters" audience scope needs `payments` (via
+    // computeDefaulters) — only load it, no need to block every other scope.
+    if(commsAudienceScope === 'defaulters') await ensureDataLoaded('payments', loadPaymentsData);
     const title = document.getElementById('commsTitle').value.trim();
     const bodyText = document.getElementById('commsBodyText').value.trim();
     const inApp = document.getElementById('commsChannelInApp').checked;
@@ -16547,7 +16690,16 @@
 
   const ACCT_TAB_PERM_KEYS = { overview:'accounting_overview', income:'accounting_income', expense:'accounting_expenses', segments:'accounting_segments', categories:'accounting_categories', chartofaccounts:'accounting_chartofaccounts', journal:'accounting_journal', bank:'accounting_bank', assets:'accounting_assets', budget:'accounting_budget' };
   const ACCT_TABS = ['overview','income','expense','segments','categories','chartofaccounts','journal','bank','assets','budget'];
-  function initAccountingView(){
+  async function initAccountingView(){
+    // The Accounting module's own transactions/ledger, PLUS `payments` (fee
+    // income is read directly in the Overview tab, feePaymentCostCenter,
+    // acctFeeIncomeTotal etc.) — a real cross-module dependency even though
+    // Accounting is otherwise self-contained.
+    await Promise.all([
+      ensureDataLoaded('acctTransactions', loadAcctTransactionsData),
+      ensureDataLoaded('acctLedger', loadAccountingLedgerData),
+      ensureDataLoaded('payments', loadPaymentsData),
+    ]);
     const accessibleTabs = ACCT_TABS.filter(t => getAccountingTabAccess(currentUser.role, ACCT_TAB_PERM_KEYS[t]));
     ACCT_TABS.forEach(t => {
       const btn = document.getElementById('acttab-'+t);
@@ -16563,7 +16715,12 @@
     ACCT_TABS.forEach(t => document.getElementById('acttab-'+t).classList.toggle('active', t===tab));
     renderAccountingBody();
   }
-  function renderAccountingBody(){
+  async function renderAccountingBody(){
+    await Promise.all([
+      ensureDataLoaded('acctTransactions', loadAcctTransactionsData),
+      ensureDataLoaded('acctLedger', loadAccountingLedgerData),
+      ensureDataLoaded('payments', loadPaymentsData),
+    ]);
     const body = document.getElementById('accountingBody');
     if(!body) return;
     if(!getAccountingTabAccess(currentUser.role, ACCT_TAB_PERM_KEYS[accountingTab])){
@@ -17787,6 +17944,10 @@
   // to be reversed too.
   async function removeStudentFromHostel(studentId){
     if(currentUser.role !== 'Admin'){ showToast('Only Admin can remove a student from a room.'); return; }
+    // Must see the real payment history before deciding it's safe to
+    // remove — an unloaded `payments` array would wrongly allow removal
+    // even when a Hostel Fee payment already exists.
+    await ensureDataLoaded('payments', loadPaymentsData);
     const s = students.find(x => x.id === studentId);
     if(!s) return;
     // Same guard as Bus Fee/Extra Fee: don't let a Hostel Fee payment already
@@ -19666,6 +19827,9 @@
     if(box) box.classList.remove('open');
   }
   async function completeInventorySale(){
+    // A stock-purchase sale to a student becomes its own `payments` row
+    // (category:'extra') — must not push onto an unloaded array.
+    await ensureDataLoaded('payments', loadPaymentsData);
     if(invCheckoutBuyerType==='Student' && !invCheckoutStudentId){ showToast('Select a student.'); return; }
     for(const c of invCart){
       const it = inventoryItems.find(x => x.id === c.itemId);
@@ -19883,6 +20047,8 @@
     }
   }
   async function submitInventoryReturn(){
+    // A cash refund on a return can push a new `payments` row too.
+    await ensureDataLoaded('payments', loadPaymentsData);
     const saleId = document.getElementById('invRetSaleId').value;
     const s = inventorySales.find(x => x.id === saleId);
     if(!s) return;
@@ -20201,6 +20367,7 @@
   // bespoke delete-all endpoint was needed. Categories/cost-centers are left
   // alone on purpose — they're pick-lists, not transactional data.
   async function resetInventoryAccountingData(){
+    await ensureDataLoaded('acctTransactions', loadAcctTransactionsData);
     const opts = {
       items: document.getElementById('ridInvItems').checked,
       sales: document.getElementById('ridInvSales').checked,
@@ -21187,7 +21354,9 @@
     ptView = 'grid';
     renderPromoTransferBody();
   }
-  function renderPromoTransferBody(){
+  async function renderPromoTransferBody(){
+    // The roster view shows each student's fee-due amount (computeStudentFinance -> payments).
+    await ensureDataLoaded('payments', loadPaymentsData);
     const body = document.getElementById('promoTransferBody');
     if(!body) return;
     if(!getPromoTransferTabAccess(currentUser.role, PT_TAB_PERM_KEYS[promoTransferTab])){
@@ -21353,6 +21522,10 @@
     showToast(`${result.promotedCount} student(s) promoted${result.graduatedCount ? ', '+result.graduatedCount+' graduated' : ''}${result.carriedCount ? ', '+result.carriedCount+' due(s) carried forward' : ''}.`);
   }
   async function executePromotions(payloadStudents){
+    // Locks each promoted student's existing payments to their old class —
+    // needs the real `payments` array loaded, not an empty placeholder,
+    // regardless of which of this function's 3 call sites got here.
+    await ensureDataLoaded('payments', loadPaymentsData);
     let graduatedCount = 0, promotedCount = 0, carriedCount = 0;
     let extraFeesChanged = false, paymentsChanged = false;
     payloadStudents.forEach(p => {
@@ -21853,7 +22026,7 @@
   function myProfileStudent(){
     return currentUser.linkedStudentId ? students.find(x => x.id === currentUser.linkedStudentId) : null;
   }
-  function renderMyProfileBody(){
+  async function renderMyProfileBody(){
     const body = document.getElementById('myProfileBody');
     document.getElementById('myProfileTitle').textContent = currentUser.role === 'Parent' ? "Child's Portal" : "My Portal";
     const s = myProfileStudent();
@@ -21861,17 +22034,36 @@
       body.innerHTML = `<div class="empty-state"><b>No student linked to this login yet</b>Ask the Admin to link this account to a student under Initial Setup → Users &amp; Roles.</div>`;
       return;
     }
-    if(myProfileTab === 'notifications') return renderMyNotificationsTab(body, s);
+    if(myProfileTab === 'notifications'){
+      // Builds a merged feed from payments, attendanceRecords and
+      // examResults — all three lazily-loaded.
+      body.innerHTML = '<div class="empty-state">Loading…</div>';
+      await Promise.all([
+        ensureDataLoaded('payments', loadPaymentsData),
+        ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData),
+        ensureDataLoaded('examResults', loadExamResultsData),
+      ]);
+      if(myProfileTab === 'notifications') return renderMyNotificationsTab(body, s);
+      return;
+    }
     if(myProfileTab === 'profile') return renderMyProfileProfileTab(body, s);
     if(myProfileTab === 'fees'){
+      body.innerHTML = '<div class="empty-state">Loading…</div>';
+      await ensureDataLoaded('payments', loadPaymentsData);
       if(onlinePaymentAvailable === null){
         body.innerHTML = '<div class="empty-state">Loading…</div>';
         loadOnlinePaymentStatus().then(() => { if(myProfileTab === 'fees') renderMyFeesTab(body, s); });
         return;
       }
-      return renderMyFeesTab(body, s);
+      if(myProfileTab === 'fees') return renderMyFeesTab(body, s);
+      return;
     }
-    if(myProfileTab === 'marks') return renderMyMarksTab(body, s);
+    if(myProfileTab === 'marks'){
+      body.innerHTML = '<div class="empty-state">Loading…</div>';
+      await ensureDataLoaded('examResults', loadExamResultsData);
+      if(myProfileTab === 'marks') return renderMyMarksTab(body, s);
+      return;
+    }
     if(myProfileTab === 'classinfo') return renderMyClassInfoTab(body, s);
     if(myProfileTab === 'syllabushw') return renderMySyllabusHomeworkTab(body, s);
     if(myProfileTab === 'contact'){
@@ -22618,6 +22810,7 @@
      amount is the exact outstanding + late fee already shown on screen, so the
      parent can't accidentally under/over-pay a line item. */
   async function payFeeOnline(type, key, amount, label){
+    await ensureDataLoaded('payments', loadPaymentsData);
     const s = myProfileStudent();
     if(!s){ showToast('No student linked to this login.'); return; }
     if(typeof Razorpay === 'undefined'){ showToast('Payment window failed to load — check your internet connection and try again.'); return; }
@@ -25004,6 +25197,9 @@
 
   async function saveWizard(e){
     e.preventDefault();
+    // Needed before the Bus Fee orphan-guard below (reads `payments`) runs —
+    // must see the real payment history, not an unloaded empty array.
+    await ensureDataLoaded('payments', loadPaymentsData);
     const editId = document.getElementById('editId').value;
     const g = id => document.getElementById(id).value;
 
@@ -25163,12 +25359,12 @@
     return Promise.all([
       loadClassLevels(), loadSectionLevels(), loadClassSectionOverrides(),
       loadSchoolInfo(), loadFinance(), loadFeeExtras(), loadAttendance(),
-      loadStaffAttendance(), loadExams(), loadRooms(), loadExamHallTickets(),
+      loadExams(), loadRooms(), loadExamHallTickets(),
       loadExamRoomConfigs(), loadExamHolidays(), loadReportTemplates(),
       loadAdmitCardTemplates(), loadExamCoScholastic(),
       loadAdminDownloads(), loadPendingApprovals(), loadInventory(),
       loadTimetable(), loadSyllabusHomework(), loadTransport(), loadLibrary(),
-      loadHostel(), loadAccounting(), loadAccountingLedger(), loadComms(), loadStaff(),
+      loadHostel(), loadAccounting(), loadComms(), loadStaff(),
       loadStaffPayroll(), loadSubjects(), loadCustomRoles(), loadStudents(),
       loadUsers(), loadBiometricStatus(),
     ]);
