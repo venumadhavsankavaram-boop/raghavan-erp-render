@@ -2457,12 +2457,6 @@
               <option value="">Not linked</option>
             </select>
           </div>
-          <div class="f-field full" id="uStaffField" style="display:none;">
-            <label>Linked Staff <span style="font-weight:400; color:var(--ink-soft);">(so this login's own Apply Leave requests mark the right person's attendance)</span></label>
-            <select id="uLinkedStaff">
-              <option value="">Not linked</option>
-            </select>
-          </div>
           <div class="f-field full">
             <label>Recovery Code <span style="font-weight:400; color:var(--ink-soft);">(used for "Forgot password?" on the login screen — share this with them privately)</span></label>
             <div style="display:flex; gap:10px; align-items:center;">
@@ -7779,8 +7773,8 @@
           <button class="btn btn-ghost btn-sm" onclick="markAllStatus('Absent')">Mark All Absent</button>
         </div>
       </div>
-      ${isHoliday ? `<div class="empty-state" style="margin-bottom:16px;"><b>This date is marked as a holiday</b>You can still record attendance if needed.</div>` : ``}
-      <div class="table-wrap">
+      ${isHoliday ? `<div class="empty-state" style="margin-bottom:16px;"><b>${holidays.find(h=>h.date===attMarkDate).name || 'Holiday'} — school is closed on ${attMarkDate}</b>Attendance isn't taken on a holiday. Pick a working day above, or remove the holiday first if this date shouldn't be one.</div>` : ``}
+      <div class="table-wrap" style="${isHoliday ? 'opacity:0.5; pointer-events:none;' : ''}">
         <table><thead><tr><th>Student</th><th>Admission No</th><th>Status</th></tr></thead>
         <tbody>
         ${list.map(s => `
@@ -7796,7 +7790,7 @@
         </tbody></table>
         ${list.length===0 ? `<div class="empty-state"><b>No students here</b></div>` : ``}
       </div>
-      <div style="margin-top:16px;"><button class="btn btn-primary" onclick="saveAttendance()">Save Attendance</button></div>
+      <div style="margin-top:16px;"><button class="btn btn-primary" ${isHoliday?'disabled':''} onclick="saveAttendance()">Save Attendance</button></div>
     `;
   }
 
@@ -7821,6 +7815,7 @@
     renderAttendanceBody();
   }
   async function saveAttendance(){
+    if(holidays.some(h => h.date===attMarkDate)){ showToast("Attendance isn't taken on a holiday."); return; }
     Object.keys(pendingMarks).forEach(studentId => {
       const status = pendingMarks[studentId];
       let rec = attendanceRecords.find(r => r.studentId===studentId && r.date===attMarkDate && r.session===attMarkSession);
@@ -8592,6 +8587,8 @@
     if(sections.length === 0){ showToast('Select at least one section.'); return false; }
     const dateVal = document.getElementById('subjDate').value;
     if(!dateVal){ showToast('Set an exam date for this subject — it\'s required before hall tickets can be generated.'); return false; }
+    const clashingHoliday = holidays.find(h => h.date===dateVal);
+    if(clashingHoliday && !await showConfirmDialog(`${dateVal} is marked as a holiday (${clashingHoliday.name}). Schedule the exam on this date anyway?`)) return false;
     const staffIds = Array.from(document.querySelectorAll('.subj-staff-check:checked')).map(c => c.value);
     const masterMatch = subjectsList.find(s => s.className === examCurrentClass && s.name.trim().toLowerCase() === name.toLowerCase());
     const subjectData = {
@@ -15781,10 +15778,21 @@
     const audienceLabels = { allstudents:'All Students', allstaff:'All Staff', class:`${commsAudienceClass} (Whole Class)`, section:`${commsAudienceClass} — Section ${commsAudienceSection}`, defaulters:'Fee Defaulters', individual:'Individual Student' };
     const record = {
       id:'msg_'+Date.now(), type:typeName, title, body:bodyText, audienceLabel:audienceLabels[commsAudienceScope]||commsAudienceScope,
+      audienceScope: commsAudienceScope, audienceClass: commsAudienceClass, audienceSection: commsAudienceSection, individualId: commsIndividualId,
       channels, recipientCount:targets.length, sentBy:currentUser.name, sentDate:new Date().toISOString().slice(0,10),
     };
     commsMessages.push(record);
     await storageSet(COMMS_MESSAGES_KEY, commsMessages);
+    if(inApp){
+      const studentIds = targets.filter(t => t.kind==='student').map(t => t.student.id);
+      const staffIds = targets.filter(t => t.kind==='staff').map(t => t.staff.id);
+      if(studentIds.length || staffIds.length){
+        fetch('/api/notifications/broadcast', {
+          method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()},
+          body: JSON.stringify({ title, body:bodyText, type:'circular', url:'/?view=myprofile', studentIds, staffIds }),
+        }).catch(err => console.error('notification broadcast failed:', err));
+      }
+    }
     if(whatsapp){
       renderCommsWhatsAppQueue(record, targets, bodyText);
     }else{
@@ -20410,7 +20418,6 @@
     else if(mode === 'studentparent') document.getElementById('uRole').value = 'Student';
     populateUserStudentPicker();
     if(presetStudentId) document.getElementById('uLinkedStudent').value = presetStudentId;
-    populateUserStaffPicker();
     toggleUserStudentField();
     onUserNameInput();
     document.getElementById('userModalOverlay').classList.add('open');
@@ -20421,11 +20428,6 @@
   function toggleUserStudentField(){
     const role = document.getElementById('uRole').value;
     document.getElementById('uStudentField').style.display = (role==='Student'||role==='Parent') ? 'block' : 'none';
-    // Teacher/Staff — the two login roles a real staff member (as opposed to
-    // Admin/Principal/Accountant/Office Assistant, who don't need Apply
-    // Leave to resolve to a staff row) would actually apply for their own
-    // leave from — see handleStaffLeaveRequests' myStaffId lookup.
-    document.getElementById('uStaffField').style.display = (role==='Teacher'||role==='Staff') ? 'block' : 'none';
   }
   function regenerateRecoveryCode(){
     document.getElementById('uRecoveryCode').value = generateRecoveryCode();
@@ -20434,11 +20436,6 @@
     const sel = document.getElementById('uLinkedStudent');
     sel.innerHTML = '<option value="">Not linked</option>' +
       students.map(s => `<option value="${s.id}">${s.firstName} ${s.lastName} — ${s.admissionNo}</option>`).join('');
-  }
-  function populateUserStaffPicker(){
-    const sel = document.getElementById('uLinkedStaff');
-    sel.innerHTML = '<option value="">Not linked</option>' +
-      staffList.map(s => `<option value="${s.id}">${s.firstName} ${s.lastName}${s.designation ? ' — ' + s.designation : ''}</option>`).join('');
   }
   function editUser(id){
     const u = users.find(x => x.id === id);
@@ -20457,8 +20454,6 @@
     document.getElementById('uRecoveryCode').value = u.recoveryCode || generateRecoveryCode();
     populateUserStudentPicker();
     document.getElementById('uLinkedStudent').value = u.linkedStudentId || '';
-    populateUserStaffPicker();
-    document.getElementById('uLinkedStaff').value = u.linkedStaffId || '';
     toggleUserStudentField();
     document.getElementById('userModalOverlay').classList.add('open');
   }
@@ -20496,7 +20491,6 @@
       password: document.getElementById('uPassword').value,
       role: document.getElementById('uRole').value,
       linkedStudentId: document.getElementById('uLinkedStudent').value,
-      linkedStaffId: document.getElementById('uLinkedStaff').value,
       recoveryCode: document.getElementById('uRecoveryCode').value,
     };
     if(editId){
@@ -21290,6 +21284,22 @@
      & results, holidays, notices) — nothing new is stored per-notification.
      "New" is tracked with a single lastNotificationSeenAt timestamp on the
      user record, updated whenever this tab is opened. --- */
+  // Older notice records saved before audience targeting was tracked have no
+  // audienceScope — keep those visible to everyone (their old behavior)
+  // rather than silently hiding history. Anything sent after this fix carries
+  // its real scope, so it only reaches the students it was actually sent to.
+  function commsMessageMatchesStudent(m, s){
+    if(!m.audienceScope) return true;
+    switch(m.audienceScope){
+      case 'allstudents': return true;
+      case 'allstaff': return false;
+      case 'class': return m.audienceClass === s.className;
+      case 'section': return m.audienceClass === s.className && m.audienceSection === s.section;
+      case 'individual': return m.individualId === s.id;
+      case 'defaulters': return computeDefaulters().some(d => d.student.id === s.id);
+      default: return true;
+    }
+  }
   function computeMyNotifications(s){
     const items = [];
     payments.filter(p => p.studentId === s.id).forEach(p => {
@@ -21334,7 +21344,7 @@
     holidays.filter(h => h.date >= holFromStr).forEach(h => {
       items.push({ icon:'🏖️', tag:'Holiday', date: h.date, title: `Holiday: ${h.name}`, detail: h.date });
     });
-    commsMessages.filter(m => m.channels.includes('In-App') && !m.boardRemoved).forEach(n => {
+    commsMessages.filter(m => m.channels.includes('In-App') && !m.boardRemoved && commsMessageMatchesStudent(m, s)).forEach(n => {
       items.push({
         icon: noticeTypeByName(n.type) ? noticeTypeByName(n.type).icon : '📣',
         tag:'Notice', date: n.sentDate || '', title: n.title, detail: n.body,

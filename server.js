@@ -136,13 +136,6 @@ async function ensureSchema() {
     id VARCHAR(191) PRIMARY KEY, name TEXT, username VARCHAR(191), password TEXT, role TEXT,
     linked_student_id TEXT, recovery_code TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
-  // Mirrors linked_student_id above, but for a Teacher/Staff login instead of
-  // a Student/Parent one — set from the Add/Edit User modal's "Linked Staff"
-  // picker (shown only for the Teacher/Staff roles). This is what lets a
-  // staff member's own login resolve to "my" row in the staff table, which
-  // handleStaffLeaveRequests below needs to know whose attendance to mark on
-  // approval, and to show that person only their own leave requests.
-  await addColumnIfMissing('users', 'linked_staff_id TEXT');
   // Soft delete: a deleted user's row stays put with deleted_at set, instead
   // of being erased outright. This closes two real gaps found after an
   // actual incident — a hard DELETE gave no way back if it was a mistake,
@@ -506,6 +499,24 @@ async function ensureSchema() {
     p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
+  // Every notification this app ever raises (fee due, exam schedule, a
+  // circular, homework assigned, attendance, a leave decision, an approval
+  // waiting on Admin/Principal...) gets a row here for the specific login(s)
+  // it's for, regardless of whether Web Push is even configured — this is
+  // what makes the in-app bell always work, where before every notify*
+  // function silently did nothing at all once webPushConfigured() was
+  // false (see the old comment on that function). Web Push, when
+  // configured, is now just a second delivery channel on top of this, not
+  // the only one. `url` is where clicking the notification should go (a
+  // view name switchView() already understands, e.g. '/?view=noticeboard');
+  // `type` is a short tag ('fee_due','exam_schedule','circular','homework',
+  // 'attendance','leave_decision','approval',...) the bell UI groups/icons by.
+  await sql`CREATE TABLE IF NOT EXISTS user_notifications (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id VARCHAR(191) NOT NULL, type VARCHAR(64) NOT NULL DEFAULT ('general'),
+    title TEXT, body TEXT, url TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, read_at DATETIME
+  )`;
+  await createIndexIfMissing('idx_user_notifications_user_id', 'user_notifications', 'user_id, created_at');
 
   // Idempotency log for notifications that a repeated check could otherwise
   // send more than once — right now just the fee-due reminders (the daily
@@ -981,7 +992,7 @@ const SIMPLE_RESOURCES = {
     fields: [
       { app: 'id', col: 'id' }, { app: 'name', col: 'name' }, { app: 'username', col: 'username' },
       { app: 'password', col: 'password' }, { app: 'role', col: 'role' },
-      { app: 'linkedStudentId', col: 'linked_student_id' }, { app: 'linkedStaffId', col: 'linked_staff_id' },
+      { app: 'linkedStudentId', col: 'linked_student_id' },
       { app: 'recoveryCode', col: 'recovery_code' },
       { app: 'photo', col: 'photo' },
     ],
@@ -1961,16 +1972,20 @@ async function handleStaffLeaveRequests(req, res) {
       const rows = await sql`SELECT * FROM staff_leave_requests ORDER BY requested_at DESC LIMIT 300`;
       return res.status(200).json(rows.map(shapeStaffLeaveRequest));
     }
-    const me = await sql`SELECT linked_staff_id FROM users WHERE id = ${req.authUser.id}`;
-    const myStaffId = me.length ? me[0].linked_staff_id : null;
+    const myStaff = await getMyStaffRow(req.authUser.id);
+    const myStaffId = myStaff ? myStaff.id : null;
     if (!myStaffId) return res.status(200).json([]); // not linked to a staff record — nothing to show yet
     const rows = await sql`SELECT * FROM staff_leave_requests WHERE staff_id = ${myStaffId} ORDER BY requested_at DESC LIMIT 300`;
     return res.status(200).json(rows.map(shapeStaffLeaveRequest));
   }
   if (req.method === 'POST') {
-    const me = await sql`SELECT linked_staff_id FROM users WHERE id = ${req.authUser.id}`;
-    const myStaffId = me.length ? me[0].linked_staff_id : null;
-    if (!myStaffId) return res.status(400).json({ error: 'Your login isn\'t linked to a staff record yet — ask Admin to link it from Users & Roles first.' });
+    // Same linkedUserId convention as concerns/submissions (see
+    // getMyStaffRow's own comment) — a Teacher/Staff login is tied to its
+    // staff record via "Enable Login Access" on the Staff Directory page,
+    // not a separate field on the user.
+    const myStaff = await getMyStaffRow(req.authUser.id);
+    const myStaffId = myStaff ? myStaff.id : null;
+    if (!myStaffId) return res.status(400).json({ error: 'Your login isn\'t linked to a staff record yet — ask Admin to enable "Login Access" for you from Staff Directory first.' });
     const staffRows = await sql`SELECT first_name, last_name FROM staff WHERE id = ${myStaffId}`;
     if (!staffRows.length) return res.status(404).json({ error: 'Linked staff record not found.' });
     const staffName = `${staffRows[0].first_name || ''} ${staffRows[0].last_name || ''}`.trim();
@@ -2256,6 +2271,7 @@ async function handleExamDefs(req, res) {
       INSERT INTO exam_defs (id, name, exam_type, start_date, end_date, class_subjects)
       VALUES (${e.id}, ${e.name}, ${e.examType}, ${e.startDate || null}, ${e.endDate || null}, ${JSON.stringify(e.classSubjects || {})}::jsonb)
     `;
+    notifyExamScheduled(e).catch(err => console.error('exam schedule notification failed:', err));
     return res.status(201).json({ ok: true });
   }
   if (req.method === 'PUT') {
@@ -2529,12 +2545,47 @@ async function getStudentContactUserIds(studentId) {
   const rows = await sql`SELECT id FROM users WHERE linked_student_id = ${studentId}`;
   return rows.map(r => r.id);
 }
+// Every Student/Parent login for every active student in a class (optionally
+// narrowed to one section) — used to notify a whole class about something
+// that isn't tied to one student, like homework being assigned or an exam
+// schedule being published. Goes through students → linked_student_id
+// rather than a direct join, same indirection getStudentContactUserIds uses,
+// since more than one login can be linked to the same child.
+async function getClassSectionContactUserIds(className, section) {
+  const studentRows = section
+    ? await sql`SELECT id FROM students WHERE class_name = ${className} AND section = ${section} AND deleted_at IS NULL AND (status IS NULL OR LOWER(status) = 'active')`
+    : await sql`SELECT id FROM students WHERE class_name = ${className} AND deleted_at IS NULL AND (status IS NULL OR LOWER(status) = 'active')`;
+  if (!studentRows.length) return [];
+  const ids = studentRows.map(r => r.id);
+  const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ');
+  const userRows = await sql.query(`SELECT id FROM users WHERE linked_student_id IN (${placeholders})`, ids);
+  return userRows.map(r => r.id);
+}
 function getStudentParentPhone(student) {
   const extra = student.extra || {};
   const raw = extra.fatherPhone || extra.motherPhone || extra.guardianPhone || '';
   return String(raw).replace(/\D/g, '');
 }
+// Writes the in-app notification row every notify* call ends up creating —
+// this is the one thing that ALWAYS happens, whether or not Web Push is
+// configured for this school, so the bell in the app is never silently
+// empty just because VAPID keys were never set. payload.tag doubles as the
+// bell's category (fee_due, exam_schedule, circular, homework, attendance,
+// leave_decision, approval, ...) since every call site already sets a tag
+// for Web Push's own dedup purposes.
+async function recordNotification(userId, payload) {
+  if (!userId || !payload) return;
+  try {
+    await sql`
+      INSERT INTO user_notifications (user_id, type, title, body, url)
+      VALUES (${userId}, ${payload.tag || 'general'}, ${payload.title || ''}, ${payload.body || ''}, ${payload.url || '/'})
+    `;
+  } catch (err) {
+    console.error('recordNotification failed for user', userId, err);
+  }
+}
 async function sendPushToUser(userId, payload) {
+  await recordNotification(userId, payload);
   if (!webPushConfigured()) return;
   const subs = await sql`SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ${userId}`;
   for (const sub of subs) {
@@ -2556,7 +2607,6 @@ async function sendPushToUser(userId, payload) {
   }
 }
 async function sendPushToStudent(studentId, payload) {
-  if (!webPushConfigured()) return;
   const userIds = await getStudentContactUserIds(studentId);
   for (const userId of userIds) await sendPushToUser(userId, payload);
 }
@@ -2566,7 +2616,6 @@ async function sendPushToStudent(studentId, payload) {
 // approval to another role later just needs its name added at the call
 // site, not a new function.
 async function notifyUsersByRole(roles, payload) {
-  if (!webPushConfigured()) return;
   const rows = await sql`SELECT id FROM users WHERE role IN (${roles})`;
   for (const row of rows) await sendPushToUser(row.id, payload);
 }
@@ -2634,6 +2683,31 @@ async function notifyMarksIfComplete({ examId, studentId }) {
   if (whatsappConfigured()) {
     const phone = getStudentParentPhone(student);
     if (phone) await sendWhatsAppTemplate(phone, 'MARKS_PUBLISHED', [`${student.first_name} ${student.last_name}`, exam.name]);
+  }
+}
+// Fires once, right when an exam schedule is first created (not on every
+// edit — a typo fix to the date a day later shouldn't re-alert the whole
+// school). class_subjects is keyed 'ClassName||Section' (see
+// notifyMarksIfComplete's own read of the same field above) — split each key
+// back apart to notify exactly the class+section combinations this exam
+// actually covers, not the whole school.
+async function notifyExamScheduled(e) {
+  const classSubjects = e.classSubjects || {};
+  const keys = Object.keys(classSubjects);
+  if (!keys.length) return;
+  const when = e.startDate ? (e.endDate && e.endDate !== e.startDate ? `${e.startDate} to ${e.endDate}` : e.startDate) : '';
+  const body = `${e.name}${when ? ' — ' + when : ''}. Check the exam schedule for details.`;
+  const notified = new Set();
+  for (const key of keys) {
+    const sep = key.indexOf('||');
+    const className = sep === -1 ? key : key.slice(0, sep);
+    const section = sep === -1 ? '' : key.slice(sep + 2);
+    const userIds = await getClassSectionContactUserIds(className, section || null);
+    for (const uid of userIds) {
+      if (notified.has(uid)) continue; // one exam can list several sections of the same class — never double-notify a login
+      notified.add(uid);
+      await sendPushToUser(uid, { title: 'Exam schedule published', body, tag: 'exam_schedule', url: '/?view=myprofile' });
+    }
   }
 }
 // Fires the moment a staff member files a fee-discount request — Admin is
@@ -2786,6 +2860,92 @@ app.post('/api/push/unsubscribe', async (req, res) => {
   } catch (err) {
     console.error('push unsubscribe error:', err);
     return res.status(500).json({ error: 'Could not remove your subscription.' });
+  }
+});
+
+// ---------- In-app notification bell ----------
+// Every login (Student/Parent, Teacher/Staff, Admin/Principal) reads its own
+// feed here — see recordNotification above for how rows land in this table,
+// and the design comment on user_notifications for why this exists
+// alongside (and independently of) Web Push.
+function shapeNotification(r) {
+  return { id: r.id, type: r.type, title: r.title, body: r.body, url: r.url, createdAt: r.created_at, read: !!r.read_at };
+}
+app.get('/api/notifications', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+    // Most-recent-first, capped generously — this is a rolling feed, not an
+    // archive; nothing here ever needs pagination in a single-school app.
+    const rows = await sql`SELECT * FROM user_notifications WHERE user_id = ${req.authUser.id} ORDER BY created_at DESC LIMIT 200`;
+    return res.status(200).json(rows.map(shapeNotification));
+  } catch (err) {
+    console.error('notifications list error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+app.put('/api/notifications/mark-all-read', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+    await sql`UPDATE user_notifications SET read_at = now() WHERE user_id = ${req.authUser.id} AND read_at IS NULL`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('notifications mark-all-read error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+app.put('/api/notifications/:id/read', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+    // Scoped to the caller's own id in the WHERE clause itself — reading
+    // someone else's notification id can never mark a row that isn't yours.
+    await sql`UPDATE user_notifications SET read_at = now() WHERE id = ${req.params.id} AND user_id = ${req.authUser.id} AND read_at IS NULL`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('notifications mark-read error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+// Fans a Communications ("Notice Board") message out to the actual logins
+// its audience resolves to, replacing the old behavior where every
+// "In-App" message was simply readable by every Student/Parent regardless
+// of who it was actually addressed to (renderMyNoticesTab used to filter
+// only on the channel, never the audience). The client already knows how to
+// resolve "Whole Class" / "Section" / "Individual Student" / "Fee
+// Defaulters" / "All Staff" into an exact list (see commsAudienceTargets()),
+// so this trusts that list rather than re-deriving it server-side — same
+// trust level the rest of this app already gives an authenticated
+// Admin/Principal/comms_compose user over bulk writes.
+app.post('/api/notifications/broadcast', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+    if (!(await checkModuleAccess(req, res, ['announcements']))) return;
+    const b = req.body || {};
+    const title = String(b.title || '').trim().slice(0, 200);
+    const body = String(b.body || '').trim().slice(0, 2000);
+    if (!title || !body) return res.status(400).json({ error: 'Missing title or body.' });
+    const type = String(b.type || 'circular').slice(0, 64);
+    const url = b.url ? String(b.url).slice(0, 300) : '/?view=noticeboard';
+    const studentIds = Array.isArray(b.studentIds) ? b.studentIds.filter(Boolean).slice(0, 5000) : [];
+    const staffIds = Array.isArray(b.staffIds) ? b.staffIds.filter(Boolean).slice(0, 5000) : [];
+    const userIds = new Set();
+    if (studentIds.length) {
+      const placeholders = studentIds.map((_, i) => `$${i + 1}`).join(', ');
+      const rows = await sql.query(`SELECT id FROM users WHERE linked_student_id IN (${placeholders})`, studentIds);
+      rows.forEach(r => userIds.add(r.id));
+    }
+    if (staffIds.length) {
+      // staffIds here are staff.id (the roster this app already scopes
+      // Communications' "All Staff" audience by) — resolved to logins via
+      // the same extra.linkedUserId convention as getMyStaffRow, just in
+      // bulk rather than one row at a time.
+      const staffRows = await sql`SELECT extra FROM staff WHERE id IN (${staffIds})`;
+      staffRows.forEach(r => { const uid = r.extra && r.extra.linkedUserId; if (uid) userIds.add(uid); });
+    }
+    for (const uid of userIds) await recordNotification(uid, { title, body, tag: type, url });
+    return res.status(200).json({ ok: true, notified: userIds.size });
+  } catch (err) {
+    console.error('notifications broadcast error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
 
