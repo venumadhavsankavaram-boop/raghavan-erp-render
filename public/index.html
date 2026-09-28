@@ -1581,6 +1581,9 @@
         <span class="approvals-bell-icon">🔔</span><span class="sb-btn-label">Approvals</span>
         <span class="approvals-bell-badge" id="approvalsBellBadge">0</span>
       </button>
+      <button type="button" class="approvals-bell-btn" id="applyLeaveBtn" onclick="openStaffLeaveModal()" style="display:none;">
+        <span class="approvals-bell-icon">🌴</span><span class="sb-btn-label">Apply Leave</span>
+      </button>
       <div onclick="switchView('myaccount')" style="cursor:pointer; display:flex; align-items:center; gap:10px; margin-bottom:10px; border-radius:8px; padding:6px; margin:-6px -6px 6px;" onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='none'">
         <div id="sbUserAvatar" style="width:42px; height:42px; border-radius:50%; background:rgba(255,255,255,0.14); display:flex; align-items:center; justify-content:center; font-weight:700; color:#fff; overflow:hidden; flex-shrink:0; font-size:0.95rem;">—<span class="sb-user-online-dot" title="Signed in"></span></div>
         <div style="overflow:hidden; min-width:0;">
@@ -2454,6 +2457,12 @@
               <option value="">Not linked</option>
             </select>
           </div>
+          <div class="f-field full" id="uStaffField" style="display:none;">
+            <label>Linked Staff <span style="font-weight:400; color:var(--ink-soft);">(so this login's own Apply Leave requests mark the right person's attendance)</span></label>
+            <select id="uLinkedStaff">
+              <option value="">Not linked</option>
+            </select>
+          </div>
           <div class="f-field full">
             <label>Recovery Code <span style="font-weight:400; color:var(--ink-soft);">(used for "Forgot password?" on the login screen — share this with them privately)</span></label>
             <div style="display:flex; gap:10px; align-items:center;">
@@ -2824,6 +2833,22 @@
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" onclick="closeApprovalsCenter()">Close</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="staffLeaveModalOverlay">
+  <div class="modal" style="max-width:680px;">
+    <div class="modal-inner">
+      <button class="modal-close" onclick="closeStaffLeaveModal()">&times;</button>
+      <h2>🌴 Staff Leave</h2>
+      <p class="modal-sub" id="staffLeaveModalSub">Apply for leave — once Admin/Principal approves it, your attendance for those dates is marked automatically.</p>
+      <div class="mf-tabs" id="staffLeaveTabRow">
+        <button type="button" class="mf-tab active" id="staffLeaveTabApply" onclick="switchStaffLeaveTab('apply')">📝 Apply</button>
+        <button type="button" class="mf-tab" id="staffLeaveTabMine" onclick="switchStaffLeaveTab('mine')">📋 My Requests</button>
+        <button type="button" class="mf-tab" id="staffLeaveTabAll" onclick="switchStaffLeaveTab('all')" style="display:none;">✅ All Requests</button>
+      </div>
+      <div id="staffLeaveModalBody" style="max-height:440px; overflow-y:auto;"></div>
     </div>
   </div>
 </div>
@@ -4358,6 +4383,7 @@
     document.getElementById('navStudentParentLogins').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
     document.getElementById('navRolesPermissions').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
     document.getElementById('navAdminTools2').style.display = currentUser.role === 'Admin' ? 'flex' : 'none';
+    { const b = document.getElementById('applyLeaveBtn'); if(b) b.style.display = !['Student','Parent'].includes(currentUser.role) ? 'flex' : 'none'; }
     document.getElementById('navInventory').style.display = allowed.includes('inventory') ? 'flex' : 'none';
     document.getElementById('navTimetable').style.display = allowed.includes('timetable') ? 'flex' : 'none';
     document.getElementById('navSyllabus').style.display = allowed.includes('syllabus') ? 'flex' : 'none';
@@ -20384,6 +20410,7 @@
     else if(mode === 'studentparent') document.getElementById('uRole').value = 'Student';
     populateUserStudentPicker();
     if(presetStudentId) document.getElementById('uLinkedStudent').value = presetStudentId;
+    populateUserStaffPicker();
     toggleUserStudentField();
     onUserNameInput();
     document.getElementById('userModalOverlay').classList.add('open');
@@ -20394,6 +20421,11 @@
   function toggleUserStudentField(){
     const role = document.getElementById('uRole').value;
     document.getElementById('uStudentField').style.display = (role==='Student'||role==='Parent') ? 'block' : 'none';
+    // Teacher/Staff — the two login roles a real staff member (as opposed to
+    // Admin/Principal/Accountant/Office Assistant, who don't need Apply
+    // Leave to resolve to a staff row) would actually apply for their own
+    // leave from — see handleStaffLeaveRequests' myStaffId lookup.
+    document.getElementById('uStaffField').style.display = (role==='Teacher'||role==='Staff') ? 'block' : 'none';
   }
   function regenerateRecoveryCode(){
     document.getElementById('uRecoveryCode').value = generateRecoveryCode();
@@ -20402,6 +20434,11 @@
     const sel = document.getElementById('uLinkedStudent');
     sel.innerHTML = '<option value="">Not linked</option>' +
       students.map(s => `<option value="${s.id}">${s.firstName} ${s.lastName} — ${s.admissionNo}</option>`).join('');
+  }
+  function populateUserStaffPicker(){
+    const sel = document.getElementById('uLinkedStaff');
+    sel.innerHTML = '<option value="">Not linked</option>' +
+      staffList.map(s => `<option value="${s.id}">${s.firstName} ${s.lastName}${s.designation ? ' — ' + s.designation : ''}</option>`).join('');
   }
   function editUser(id){
     const u = users.find(x => x.id === id);
@@ -20420,6 +20457,8 @@
     document.getElementById('uRecoveryCode').value = u.recoveryCode || generateRecoveryCode();
     populateUserStudentPicker();
     document.getElementById('uLinkedStudent').value = u.linkedStudentId || '';
+    populateUserStaffPicker();
+    document.getElementById('uLinkedStaff').value = u.linkedStaffId || '';
     toggleUserStudentField();
     document.getElementById('userModalOverlay').classList.add('open');
   }
@@ -20457,6 +20496,7 @@
       password: document.getElementById('uPassword').value,
       role: document.getElementById('uRole').value,
       linkedStudentId: document.getElementById('uLinkedStudent').value,
+      linkedStaffId: document.getElementById('uLinkedStaff').value,
       recoveryCode: document.getElementById('uRecoveryCode').value,
     };
     if(editId){
@@ -23175,6 +23215,24 @@
         }
       }catch(e){ /* network hiccup — skip this source for this refresh, the next poll will pick it up */ }
     }
+    if(['Admin','Principal'].includes(currentUser.role)){
+      try{
+        const res = await fetch('/api/staff-leave-requests');
+        if(res.ok){
+          const rows = await res.json();
+          _staffLeaveCache = rows; // keep the Staff Leave modal's own "All Requests" tab in sync regardless of which UI triggered this refresh
+          rows.filter(r => r.status==='Pending').forEach(r => {
+            items.push({
+              id: 'staffleave_'+r.id, icon:'🌴', title:'Staff leave request', sourceLabel:'Leave',
+              detail: `${escapeHtml(r.staffName||r.staffId)} — ${escapeHtml(staffLeaveSpanLabel(r))} — ${escapeHtml(r.reason||'')}`,
+              date: r.requestedAt ? String(r.requestedAt).slice(0,10) : '',
+              approveFn:'decideStaffLeaveRequest', rejectFn:'decideStaffLeaveRequest',
+              approveArgs:[r.id,'Approve'], rejectArgs:[r.id,'Reject'],
+            });
+          });
+        }
+      }catch(e){ /* network hiccup — skip this source for this refresh, the next poll will pick it up */ }
+    }
     items.sort((a,b) => (b.date||'').localeCompare(a.date||''));
     return items;
   }
@@ -23221,6 +23279,161 @@
     await fn(...args);
     await renderApprovalsCenterModal();
     await refreshApprovalsBell({ notify:false });
+  }
+
+  // ---------- Staff Leave (apply for leave + Admin/Principal approve) ----------
+  // A staff member applies here; Admin/Principal approve or reject either
+  // from this modal's "All Requests" tab or straight from the Approvals
+  // Center bell (computeApprovalQueueItems above adds a 'Leave' source that
+  // calls the exact same decideStaffLeaveRequest below — one decision path,
+  // two doors to it, same as every other approval source in this app).
+  // Approving writes directly into staff_attendance_records server-side
+  // (see markFullDayLeave/markHalfDayLeave in server.js) — nothing here
+  // marks attendance itself.
+  let _staffLeaveCache = [];
+  let staffLeaveTab = 'apply';
+  function openStaffLeaveModal(){
+    document.getElementById('staffLeaveModalOverlay').classList.add('open');
+    document.getElementById('staffLeaveTabAll').style.display = ['Admin','Principal'].includes(currentUser.role) ? 'inline-flex' : 'none';
+    switchStaffLeaveTab('apply');
+  }
+  function closeStaffLeaveModal(){
+    document.getElementById('staffLeaveModalOverlay').classList.remove('open');
+  }
+  function switchStaffLeaveTab(tab){
+    staffLeaveTab = tab;
+    ['apply','mine','all'].forEach(t => {
+      const btn = document.getElementById('staffLeaveTab' + t.charAt(0).toUpperCase() + t.slice(1));
+      if(btn) btn.classList.toggle('active', t === tab);
+    });
+    renderStaffLeaveModalBody();
+  }
+  function staffLeaveStatusPill(status){
+    const color = status==='Approved' ? '#1d8a4a' : (status==='Rejected' ? '#a80d5d' : '#a5760a');
+    return `<span style="font-weight:700; color:${color};">${escapeHtml(status)}</span>`;
+  }
+  // Shared by the "My Requests"/"All Requests" list rendering below and the
+  // Approvals Center item's detail line, so a request always reads the same
+  // way wherever it's shown.
+  function staffLeaveSpanLabel(r){
+    if(r.session) return `${r.fromDate} · ${r.session} (half day)`;
+    return r.fromDate === r.toDate ? r.fromDate : `${r.fromDate} to ${r.toDate}`;
+  }
+  function toggleStaffLeaveKind(){
+    const isHalf = document.querySelector('input[name="slKind"]:checked').value === 'half';
+    document.getElementById('slSessionWrap').style.display = isHalf ? 'block' : 'none';
+    document.getElementById('slToDateWrap').style.display = isHalf ? 'none' : 'block';
+    if(isHalf){
+      const from = document.getElementById('slFromDate').value;
+      if(from) document.getElementById('slToDate').value = from;
+    }
+  }
+  async function renderStaffLeaveModalBody(){
+    const body = document.getElementById('staffLeaveModalBody');
+    if(!body) return;
+    if(staffLeaveTab === 'apply'){
+      const today = new Date().toISOString().slice(0,10);
+      body.innerHTML = `
+        <div style="display:flex; gap:16px; align-items:center; margin-bottom:14px;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem; cursor:pointer;"><input type="radio" name="slKind" value="full" checked onchange="toggleStaffLeaveKind()"> Full day(s)</label>
+          <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem; cursor:pointer;"><input type="radio" name="slKind" value="half" onchange="toggleStaffLeaveKind()"> Half day</label>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+          <div>
+            <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">From</label>
+            <input type="date" class="input" id="slFromDate" value="${today}" style="max-width:180px;">
+          </div>
+          <div id="slToDateWrap">
+            <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">To</label>
+            <input type="date" class="input" id="slToDate" value="${today}" style="max-width:180px;">
+          </div>
+          <div id="slSessionWrap" style="display:none;">
+            <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">Session</label>
+            <select class="input" id="slSession" style="max-width:160px;">
+              <option value="Morning">🌅 Morning</option>
+              <option value="Afternoon">🌇 Afternoon</option>
+            </select>
+          </div>
+        </div>
+        <label style="font-size:0.78rem; color:var(--ink-soft); display:block; margin-bottom:4px;">Reason</label>
+        <textarea class="input" id="slReason" rows="3" placeholder="Reason for leave" style="width:100%; margin-bottom:14px;"></textarea>
+        <button type="button" class="btn btn-primary" onclick="submitStaffLeaveRequest()">Submit Request</button>
+      `;
+      return;
+    }
+    body.innerHTML = `<div class="empty-state"><b>Loading…</b></div>`;
+    try{
+      const res = await fetch('/api/staff-leave-requests');
+      _staffLeaveCache = await (await throwIfNotOk(res)).json();
+    }catch(e){
+      body.innerHTML = `<div class="empty-state"><b>Couldn't load requests.</b></div>`;
+      return;
+    }
+    const rows = _staffLeaveCache.slice().sort((a,b) => (b.requestedAt||'').localeCompare(a.requestedAt||''));
+    if(staffLeaveTab === 'mine'){
+      if(!rows.length){ body.innerHTML = `<div class="empty-state"><b>No leave requests yet</b>Use the Apply tab to submit one.</div>`; return; }
+      body.innerHTML = rows.map(r => `
+        <div class="approvals-item-card">
+          <div>
+            <div><b>${escapeHtml(staffLeaveSpanLabel(r))}</b> — ${staffLeaveStatusPill(r.status)}</div>
+            <div class="approvals-item-meta">${escapeHtml(r.reason||'')}</div>
+            ${r.decisionNote ? `<div class="approvals-item-meta">Note: ${escapeHtml(r.decisionNote)}</div>` : ''}
+          </div>
+        </div>
+      `).join('');
+      return;
+    }
+    // 'all' — Admin/Principal only (see openStaffLeaveModal's tab gate above)
+    if(!rows.length){ body.innerHTML = `<div class="empty-state"><b>No leave requests</b></div>`; return; }
+    body.innerHTML = rows.map(r => `
+      <div class="approvals-item-card">
+        <div>
+          <div><b>${escapeHtml(r.staffName||r.staffId)}</b> — ${escapeHtml(staffLeaveSpanLabel(r))} — ${staffLeaveStatusPill(r.status)}</div>
+          <div class="approvals-item-meta">${escapeHtml(r.reason||'')} — by ${escapeHtml(r.requestedByName||'')}</div>
+        </div>
+        ${r.status==='Pending' ? `
+        <div class="approvals-item-actions">
+          <button class="btn btn-primary btn-sm" onclick="decideStaffLeaveRequest('${r.id}','Approve')">Approve</button>
+          <button class="btn-danger-text" onclick="decideStaffLeaveRequest('${r.id}','Reject')">Reject</button>
+        </div>` : ''}
+      </div>
+    `).join('');
+  }
+  async function submitStaffLeaveRequest(){
+    const isHalf = document.querySelector('input[name="slKind"]:checked').value === 'half';
+    const fromDate = document.getElementById('slFromDate').value;
+    const toDate = document.getElementById('slToDate').value;
+    const session = document.getElementById('slSession').value;
+    const reason = document.getElementById('slReason').value.trim();
+    if(!fromDate){ showToast('Pick a from date.'); return; }
+    if(!isHalf && toDate && toDate < fromDate){ showToast('To date cannot be before from date.'); return; }
+    if(!reason){ showToast('Enter a reason.'); return; }
+    try{
+      await throwIfNotOk(await fetch('/api/staff-leave-requests', {
+        method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()},
+        body: JSON.stringify({ fromDate, toDate: isHalf ? fromDate : toDate, isHalfDay:isHalf, session: isHalf ? session : null, reason })
+      }));
+      showToast('Leave request submitted.', 'burst');
+      switchStaffLeaveTab('mine');
+    }catch(e){
+      showToast(e.message || 'Could not submit the request.');
+    }
+  }
+  async function decideStaffLeaveRequest(id, decision){
+    const confirmMsg = decision === 'Approve'
+      ? 'Approve this leave request? This will mark the staff member\'s attendance as Leave for the requested date(s), overwriting any existing mark.'
+      : 'Reject this leave request?';
+    if(!await showConfirmDialog(confirmMsg)) return;
+    try{
+      await throwIfNotOk(await fetch('/api/staff-leave-requests?id=' + encodeURIComponent(id), {
+        method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()},
+        body: JSON.stringify({ decision })
+      }));
+      showToast(`Leave request ${decision==='Approve' ? 'approved' : 'rejected'}.`, 'burst');
+      if(document.getElementById('staffLeaveModalOverlay').classList.contains('open')) await renderStaffLeaveModalBody();
+    }catch(e){
+      showToast(e.message || 'Could not save the decision.');
+    }
   }
 
   // ---- Bell badge, live poll, and new-item alert ----

@@ -136,6 +136,13 @@ async function ensureSchema() {
     id VARCHAR(191) PRIMARY KEY, name TEXT, username VARCHAR(191), password TEXT, role TEXT,
     linked_student_id TEXT, recovery_code TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
+  // Mirrors linked_student_id above, but for a Teacher/Staff login instead of
+  // a Student/Parent one — set from the Add/Edit User modal's "Linked Staff"
+  // picker (shown only for the Teacher/Staff roles). This is what lets a
+  // staff member's own login resolve to "my" row in the staff table, which
+  // handleStaffLeaveRequests below needs to know whose attendance to mark on
+  // approval, and to show that person only their own leave requests.
+  await addColumnIfMissing('users', 'linked_staff_id TEXT');
   // Soft delete: a deleted user's row stays put with deleted_at set, instead
   // of being erased outright. This closes two real gaps found after an
   // actual incident — a hard DELETE gave no way back if it was a mistake,
@@ -199,6 +206,23 @@ async function ensureSchema() {
     id VARCHAR(191) PRIMARY KEY, device_serial TEXT, device_user_id TEXT, punched_at DATETIME,
     staff_id TEXT, staff_name TEXT, matched BOOLEAN DEFAULT false, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
+  // Staff leave applications. A request covers either a full-day date range
+  // (from_date..to_date, session NULL) or a single half-day (from_date ==
+  // to_date, session = 'Morning'/'Afternoon') — see handleStaffLeaveRequests
+  // below for how each shape is written into staff_attendance_records once
+  // approved. Deliberately its own table (not another kv_store blob) so it
+  // can be role-filtered and approved server-side the same safe way
+  // deletion_requests is, rather than trusting the client to set its own
+  // status.
+  await sql`CREATE TABLE IF NOT EXISTS staff_leave_requests (
+    id VARCHAR(191) PRIMARY KEY, staff_id TEXT, staff_name TEXT,
+    from_date VARCHAR(32), to_date VARCHAR(32), session VARCHAR(20), reason TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT ('Pending'),
+    requested_by TEXT, requested_by_name TEXT, requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    decided_by TEXT, decided_by_name TEXT, decided_at DATETIME, decision_note TEXT
+  )`;
+  await createIndexIfMissing('idx_staff_leave_requests_staff_id', 'staff_leave_requests', 'staff_id');
+  await createIndexIfMissing('idx_staff_leave_requests_status', 'staff_leave_requests', 'status');
   await sql`CREATE TABLE IF NOT EXISTS admission_inquiries (
     id VARCHAR(191) PRIMARY KEY, parent_name TEXT, parent_email TEXT, parent_phone TEXT, student_name TEXT,
     applying_grade TEXT, notes TEXT, submitted_date TEXT, status VARCHAR(191), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -957,7 +981,8 @@ const SIMPLE_RESOURCES = {
     fields: [
       { app: 'id', col: 'id' }, { app: 'name', col: 'name' }, { app: 'username', col: 'username' },
       { app: 'password', col: 'password' }, { app: 'role', col: 'role' },
-      { app: 'linkedStudentId', col: 'linked_student_id' }, { app: 'recoveryCode', col: 'recovery_code' },
+      { app: 'linkedStudentId', col: 'linked_student_id' }, { app: 'linkedStaffId', col: 'linked_staff_id' },
+      { app: 'recoveryCode', col: 'recovery_code' },
       { app: 'photo', col: 'photo' },
     ],
   },
@@ -1853,6 +1878,174 @@ async function handleDeletionRequests(req, res) {
     return res.status(200).json({ ok: true, status: 'Approved' });
   }
   return res.status(405).json({ error: 'Method not allowed.' });
+}
+
+// ---------- Staff Leave Requests (apply → Admin/Principal approve → attendance auto-marked) ----------
+// A staff member applies for either a full-day range (fromDate..toDate,
+// session null) or a single half-day (fromDate === toDate, session =
+// 'Morning'/'Afternoon' — the same two sessions the Staff Attendance "Mark"
+// screen and biometric sync already use). Only Admin/Principal can decide
+// it, mirroring handleDeletionRequests' role gate, but this is a single-step
+// approve (no second confirmation) since — unlike a permanent deletion — a
+// wrong approval here is trivially reversible: it only overwrites attendance
+// rows, which any Admin/Principal can re-mark by hand afterwards. On
+// approval, every affected (date, session) is written into
+// staff_attendance_records as 'Leave', always overwriting whatever was
+// already marked there (the user's explicit choice — see the design
+// discussion this feature came from). Leave stays one generic status, same
+// as manual marking, so Payroll's existing staffAttendanceCountInMonth(...,
+// ['Leave','Absent']) quota math needs no changes at all.
+function staffLeaveDatesInRange(fromDate, toDate) {
+  // Inclusive day-by-day walk between two 'YYYY-MM-DD' strings. Capped at 366
+  // days as a sanity limit — nobody applies for a year of leave in one go,
+  // and this stops a typo'd date range from looping near-forever.
+  const out = [];
+  let cur = new Date(fromDate + 'T00:00:00Z');
+  const end = new Date(toDate + 'T00:00:00Z');
+  let guard = 0;
+  while (cur.getTime() <= end.getTime() && guard < 366) {
+    out.push(cur.toISOString().slice(0, 10));
+    cur = new Date(cur.getTime() + 86400000);
+    guard++;
+  }
+  return out;
+}
+// Writes one date fully as 'Leave' — used for a full-day leave request. Any
+// existing per-session rows for that staff+date are cleared first (an
+// approved full-day leave always wins over whatever was marked earlier,
+// session-by-session or otherwise), then a single sessionless row is
+// upserted — attSessionWeight() in index.html already treats a sessionless
+// row as a full day (weight 2), exactly matching a full day's worth of
+// Present/Absent/Late it may be replacing.
+async function markFullDayLeave(staffId, dateStr) {
+  await sql`DELETE FROM staff_attendance_records WHERE staff_id = ${staffId} AND date = ${dateStr}`;
+  const attId = 'statt_' + staffId + '_' + dateStr;
+  await sql`
+    INSERT INTO staff_attendance_records (id, staff_id, date, session, status)
+    VALUES (${attId}, ${staffId}, ${dateStr}, NULL, 'Leave')
+    ON DUPLICATE KEY UPDATE session = NULL, status = 'Leave'
+  `;
+}
+// Writes just one session as 'Leave' — used for a half-day leave request.
+// If a sessionless (full-day) row already covers this date, it's split
+// first: deleted, and its status carried over to the *other* session so
+// that session's earlier mark isn't silently lost, before the requested
+// session is overwritten with 'Leave'.
+async function markHalfDayLeave(staffId, dateStr, session) {
+  const other = session === 'Morning' ? 'Afternoon' : 'Morning';
+  const existingFullDay = await sql`SELECT status FROM staff_attendance_records WHERE id = ${'statt_' + staffId + '_' + dateStr}`;
+  if (existingFullDay.length) {
+    await sql`DELETE FROM staff_attendance_records WHERE id = ${'statt_' + staffId + '_' + dateStr}`;
+    const otherId = 'statt_' + staffId + '_' + dateStr + '_' + other;
+    await sql`
+      INSERT INTO staff_attendance_records (id, staff_id, date, session, status)
+      VALUES (${otherId}, ${staffId}, ${dateStr}, ${other}, ${existingFullDay[0].status})
+      ON DUPLICATE KEY UPDATE session = ${other}, status = ${existingFullDay[0].status}
+    `;
+  }
+  const attId = 'statt_' + staffId + '_' + dateStr + '_' + session;
+  await sql`
+    INSERT INTO staff_attendance_records (id, staff_id, date, session, status)
+    VALUES (${attId}, ${staffId}, ${dateStr}, ${session}, 'Leave')
+    ON DUPLICATE KEY UPDATE session = ${session}, status = 'Leave'
+  `;
+}
+async function handleStaffLeaveRequests(req, res) {
+  if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+  if (req.method === 'GET') {
+    // Admin/Principal see the whole queue (they're the ones who act on it);
+    // anyone else sees only requests filed against their own linked staff
+    // record, so a Teacher/Staff login can check their own status without
+    // seeing the rest of the school's leave requests.
+    if (MANAGEMENT_ROLES.includes(req.authUser.role)) {
+      const rows = await sql`SELECT * FROM staff_leave_requests ORDER BY requested_at DESC LIMIT 300`;
+      return res.status(200).json(rows.map(shapeStaffLeaveRequest));
+    }
+    const me = await sql`SELECT linked_staff_id FROM users WHERE id = ${req.authUser.id}`;
+    const myStaffId = me.length ? me[0].linked_staff_id : null;
+    if (!myStaffId) return res.status(200).json([]); // not linked to a staff record — nothing to show yet
+    const rows = await sql`SELECT * FROM staff_leave_requests WHERE staff_id = ${myStaffId} ORDER BY requested_at DESC LIMIT 300`;
+    return res.status(200).json(rows.map(shapeStaffLeaveRequest));
+  }
+  if (req.method === 'POST') {
+    const me = await sql`SELECT linked_staff_id FROM users WHERE id = ${req.authUser.id}`;
+    const myStaffId = me.length ? me[0].linked_staff_id : null;
+    if (!myStaffId) return res.status(400).json({ error: 'Your login isn\'t linked to a staff record yet — ask Admin to link it from Users & Roles first.' });
+    const staffRows = await sql`SELECT first_name, last_name FROM staff WHERE id = ${myStaffId}`;
+    if (!staffRows.length) return res.status(404).json({ error: 'Linked staff record not found.' });
+    const staffName = `${staffRows[0].first_name || ''} ${staffRows[0].last_name || ''}`.trim();
+    const { fromDate, toDate, isHalfDay, session, reason } = req.body || {};
+    if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'A reason is required.' });
+    if (!fromDate) return res.status(400).json({ error: 'Missing fromDate.' });
+    let finalToDate, finalSession;
+    if (isHalfDay) {
+      if (!ATT_SESSIONS_SERVER.includes(session)) return res.status(400).json({ error: 'Pick Morning or Afternoon for a half-day request.' });
+      finalToDate = fromDate; // a half-day request is always a single date
+      finalSession = session;
+    } else {
+      finalToDate = toDate || fromDate;
+      finalSession = null;
+      if (finalToDate < fromDate) return res.status(400).json({ error: 'toDate cannot be before fromDate.' });
+    }
+    const id = 'stflv_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+    await sql`
+      INSERT INTO staff_leave_requests (id, staff_id, staff_name, from_date, to_date, session, reason, requested_by, requested_by_name)
+      VALUES (${id}, ${myStaffId}, ${staffName}, ${fromDate}, ${finalToDate}, ${finalSession}, ${String(reason).trim()}, ${req.authUser.id}, ${req.authUser.name})
+    `;
+    const span = finalSession ? `${fromDate} (${finalSession})` : (fromDate === finalToDate ? fromDate : `${fromDate} to ${finalToDate}`);
+    notifyUsersByRole(MANAGEMENT_ROLES, {
+      title: 'Leave request needs approval',
+      body: `${staffName} applied for leave: ${span}. Reason: ${String(reason).trim()}`,
+      tag: 'staff-leave-request', url: '/',
+    }).catch(err => console.error('staff leave request notification failed:', err));
+    return res.status(201).json({ ok: true, id });
+  }
+  if (req.method === 'PUT') {
+    if (!MANAGEMENT_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Admin or Principal access required to decide a leave request.' });
+    }
+    const { id } = req.query;
+    if (!id) return res.status(400).json({ error: 'Missing id.' });
+    const { decision, note } = req.body || {};
+    if (decision !== 'Approve' && decision !== 'Reject') return res.status(400).json({ error: 'decision must be "Approve" or "Reject".' });
+    const rows = await sql`SELECT * FROM staff_leave_requests WHERE id = ${id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Request not found.' });
+    const reqRow = rows[0];
+    if (reqRow.status === 'Approved' || reqRow.status === 'Rejected') {
+      return res.status(409).json({ error: `This request was already ${reqRow.status.toLowerCase()}.` });
+    }
+    if (decision === 'Approve') {
+      if (reqRow.session) {
+        await markHalfDayLeave(reqRow.staff_id, reqRow.from_date, reqRow.session);
+      } else {
+        const dates = staffLeaveDatesInRange(reqRow.from_date, reqRow.to_date);
+        for (const d of dates) await markFullDayLeave(reqRow.staff_id, d);
+      }
+    }
+    await sql`
+      UPDATE staff_leave_requests SET status = ${decision === 'Approve' ? 'Approved' : 'Rejected'},
+        decided_by = ${req.authUser.id}, decided_by_name = ${req.authUser.name}, decided_at = now(),
+        decision_note = ${note ? String(note).trim() : null}
+      WHERE id = ${id}
+    `;
+    if (reqRow.requested_by) {
+      sendPushToUser(reqRow.requested_by, {
+        title: `Leave request ${decision === 'Approve' ? 'approved' : 'rejected'}`,
+        body: `${req.authUser.name} ${decision === 'Approve' ? 'approved' : 'rejected'} your leave request${note ? ': ' + String(note).trim() : '.'}`,
+        tag: 'staff-leave-decision', url: '/',
+      }).catch(err => console.error('staff leave decision notification failed:', err));
+    }
+    return res.status(200).json({ ok: true, status: decision === 'Approve' ? 'Approved' : 'Rejected' });
+  }
+  return res.status(405).json({ error: 'Method not allowed.' });
+}
+function shapeStaffLeaveRequest(r) {
+  return {
+    id: r.id, staffId: r.staff_id, staffName: r.staff_name,
+    fromDate: r.from_date, toDate: r.to_date, session: r.session, reason: r.reason,
+    status: r.status, requestedBy: r.requested_by, requestedByName: r.requested_by_name, requestedAt: r.requested_at,
+    decidedBy: r.decided_by, decidedByName: r.decided_by_name, decidedAt: r.decided_at, decisionNote: r.decision_note,
+  };
 }
 
 // ---------- Bulk "Delete Duplicate Students" (one step, duplicates only) ----------
@@ -2800,6 +2993,11 @@ const PARENT_LOGIN_ROLES = ['Student', 'Parent'];
 // below), matching how the rest of the app already treats Admin and
 // Principal as the two full-access staff roles.
 const MANAGEMENT_ROLES = ['Admin', 'Principal'];
+// Mirrors ATT_SESSIONS in index.html — kept as its own server-side constant
+// (rather than importing across the client/server boundary) purely for
+// validating a half-day leave request's session value in
+// handleStaffLeaveRequests above.
+const ATT_SESSIONS_SERVER = ['Morning', 'Afternoon'];
 
 // ---------- Student/Parent self-service: "My Portal" reads ----------
 // The generic staff-module permission gate below (RESOURCE_TO_MODULE +
@@ -3917,6 +4115,14 @@ app.all('/api/:resource', async (req, res) => {
     // the generic one because of the password rules described there.
     if (resource === 'users') return await handleUsers(req, res);
     if (resource === 'deletion-requests') return await handleDeletionRequests(req, res);
+    // Not listed in RESOURCE_TO_MODULE above — deliberately unrestricted by
+    // the 'staff' module permission (that permission is really "can manage
+    // HR/payroll records", which most Teacher/Staff logins won't have and
+    // shouldn't need just to apply for their own leave). The handler itself
+    // already scopes GET/POST to the caller's own linked staff record and
+    // gates PUT (approve/reject) to MANAGEMENT_ROLES, so no extra module
+    // gate is needed here.
+    if (resource === 'staff-leave-requests') return await handleStaffLeaveRequests(req, res);
     if (resource === 'certificates') return await handleCertificates(req, res);
     // One-step bulk cleanup for the "Find Duplicate Students" view — see
     // handleDeleteDuplicateStudents' own comment for why this exists
