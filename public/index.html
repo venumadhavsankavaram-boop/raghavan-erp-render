@@ -21588,13 +21588,39 @@
     return (s.status||'Active').toString().trim().toLowerCase() === 'active';
   }
 
+  // Walks the WHOLE connected sibling group, not just one hop. A sibling
+  // link is stored on just one side (see the wizard's sibling picker), so
+  // for a 3+-way family — e.g. Govardhan's own record lists Sirisha AND
+  // Chandana as siblings, but neither Sirisha's nor Chandana's own record
+  // lists anything — a single hop from Chandana only finds Govardhan (the
+  // record that names her) and misses Sirisha, who's only reachable by then
+  // following Govardhan's own list onward. This does a breadth-first walk
+  // over the sibling graph (treating siblingIds as edges, followed in BOTH
+  // directions) so the full group comes back regardless of which one
+  // record(s) the links happen to be stored on, or how many students are in
+  // it. Used for the Fee "Family Total" view, the profile page's Siblings
+  // row, and the edit wizard's inherited-siblings note — one fix covers all
+  // three, and also corrects the Fee family view for any family of 3+ that
+  // was previously silently under-counting.
   function getFamilyIds(s){
-    const ids = new Set([s.id]);
-    (s.siblingIds||[]).forEach(id => ids.add(id));
-    students.forEach(other => {
-      if((other.siblingIds||[]).includes(s.id)) ids.add(other.id);
-    });
-    return Array.from(ids);
+    const visited = new Set([s.id]);
+    const queue = [s.id];
+    while(queue.length){
+      const currentId = queue.shift();
+      const current = students.find(x => x.id === currentId);
+      if(current){
+        (current.siblingIds||[]).forEach(id => {
+          if(!visited.has(id)){ visited.add(id); queue.push(id); }
+        });
+      }
+      students.forEach(other => {
+        if((other.siblingIds||[]).includes(currentId) && !visited.has(other.id)){
+          visited.add(other.id);
+          queue.push(other.id);
+        }
+      });
+    }
+    return Array.from(visited);
   }
 
   function statusMatches(s){
@@ -24878,12 +24904,15 @@
     document.getElementById('fPrevClass').value = s.prevClass || '';
     document.getElementById('fPrevYear').value = s.prevYear || '';
     wizardSiblings = (s.siblingIds || []).slice();
-    // Reverse-linked siblings — added on the OTHER student's own record,
-    // not this one — shown read-only below the editable list so staff can
-    // see the link already exists without re-adding it from this side too.
-    wizardInheritedSiblingIds = students
-      .filter(o => o.id !== s.id && (o.siblingIds||[]).includes(s.id) && !wizardSiblings.includes(o.id))
-      .map(o => o.id);
+    // Every other member of this student's whole connected sibling group
+    // (see getFamilyIds) that isn't already directly listed on this
+    // record — covers not just a direct reverse link, but also a sibling
+    // who's only reachable by following the group onward through a THIRD
+    // student's record (a 3+-way family stored star-fashion on just one
+    // member). Shown read-only below the editable list so staff can see
+    // every link already exists without re-adding any of them from this
+    // side too.
+    wizardInheritedSiblingIds = getFamilyIds(s).filter(id => id !== s.id && !wizardSiblings.includes(id));
     renderSiblingList();
 
     document.getElementById('fNeedsTransport').value = s.needsTransport || 'No';
