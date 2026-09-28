@@ -2567,12 +2567,28 @@
           <div class="f-field"><label>Assigned Date</label><input type="date" id="hwAssignedDate"></div>
           <div class="f-field"><label>Due Date</label><input type="date" id="hwDueDate"></div>
           <div class="f-field full"><label>Assigned By</label><select id="hwStaff"><option value="">Select teacher</option></select></div>
+          <div class="f-field full">
+            <label>Attach worksheet, reading material, etc. (optional — up to 5 files, 12MB combined)</label>
+            <input type="file" id="hwAttachmentInput" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" multiple onchange="previewHwAttachment(event)">
+            <div id="hwAttachmentPreview" style="margin-top:6px;"></div>
+          </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" onclick="closeHomeworkModal()">Cancel</button>
           <button type="submit" class="btn btn-primary">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="hwRosterModalOverlay">
+  <div class="modal" style="max-width:560px;">
+    <div class="modal-inner">
+      <button class="modal-close" type="button" onclick="closeHomeworkRoster()">&times;</button>
+      <h2>Completion Roster</h2>
+      <p class="modal-sub" id="hwRosterSubtitle"></p>
+      <div id="hwRosterBody"></div>
     </div>
   </div>
 </div>
@@ -15099,7 +15115,14 @@
   // one student's class & section.
   const SYLLABUS_KEY = "syllabus-topics";
   const HOMEWORK_KEY = "homework-items";
-  [SYLLABUS_KEY, HOMEWORK_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
+  OBJECT_BACKED_KEYS[SYLLABUS_KEY] = '/api/kv/' + SYLLABUS_KEY;
+  // Homework moved off the kv_store blob to its own dedicated table/endpoint
+  // (see server.js's homework_items table) — same reasoning as the earlier
+  // Accounting and student_submissions migrations: a real table lets each
+  // item carry attachments and drive a notify-on-assign push, and the
+  // generic API_BACKED_KEYS sync (diff + POST/PUT/DELETE per row) is a
+  // drop-in replacement for the whole-blob PUT this used to do.
+  API_BACKED_KEYS[HOMEWORK_KEY] = '/api/homework-items';
   let syllabusTopics = [], homeworkItems = [];
   async function loadSyllabusHomework(){
     syllabusTopics = await storageGet(SYLLABUS_KEY, []);
@@ -18427,15 +18450,16 @@
       ${canEdit ? `<button class="btn btn-primary btn-sm" style="margin-bottom:16px;" ${!syClass?'disabled title="Pick a class first"':''} onclick="openHomeworkModal()">+ Assign Homework</button>` : ''}
       ${rows.length ? `
       <div class="table-wrap">
-        <table><thead><tr><th>Class/Section</th><th>Subject</th><th>Title</th><th>Assigned</th><th>Due</th>${canEdit?'<th></th>':''}</tr></thead><tbody>
+        <table><thead><tr><th>Class/Section</th><th>Subject</th><th>Title</th><th>Assigned</th><th>Due</th><th></th>${canEdit?'<th></th>':''}</tr></thead><tbody>
         ${rows.map(h => {
           const overdue = h.dueDate && h.dueDate < today;
           return `<tr>
             <td>${h.className}${h.section?' — '+h.section:' — All Sections'}</td>
             <td>${h.subject}</td>
-            <td>${h.title}</td>
+            <td>${h.title}${(h.attachments||[]).map(a => `<br><a href="${a.dataUrl}" target="_blank" rel="noopener" class="pill" style="text-decoration:none; font-size:0.68rem;">📎 ${a.name}</a>`).join('')}</td>
             <td>${h.assignedDate||'—'}</td>
             <td>${h.dueDate ? `<span style="${overdue?'color:var(--magenta); font-weight:600;':''}">${h.dueDate}${overdue?' (overdue)':''}</span>` : '—'}</td>
+            <td><button class="btn-edit-text" onclick="openHomeworkRoster('${h.id}')">Roster</button></td>
             ${canEdit ? `<td style="white-space:nowrap;"><button class="btn-edit-text" onclick="openHomeworkModal('${h.id}')">Edit</button> · <button class="btn-danger-text" onclick="deleteHomework('${h.id}')">Delete</button></td>` : ''}
           </tr>`;
         }).join('')}
@@ -18463,9 +18487,65 @@
     document.getElementById('hwDescription').value = h ? (h.description||'') : '';
     document.getElementById('hwAssignedDate').value = h ? (h.assignedDate||'') : new Date().toISOString().slice(0,10);
     document.getElementById('hwDueDate').value = h ? (h.dueDate||'') : '';
+    hwAttachments = h && Array.isArray(h.attachments) ? h.attachments.map(a => ({ name:a.name, dataUrl:a.dataUrl, size:0 })) : [];
+    renderHwAttachmentPreview();
     document.getElementById('homeworkModalOverlay').classList.add('open');
   }
   function closeHomeworkModal(){ document.getElementById('homeworkModalOverlay').classList.remove('open'); }
+  // Same {name, dataUrl, size} shape and 5-file/12MB-combined caps as the
+  // student submission attachments above — one teacher-facing upload of the
+  // same kind, just attached to the homework item itself instead of a
+  // student's response to it.
+  let hwAttachments = [];
+  function previewHwAttachment(e){
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if(!files.length) return;
+    const currentTotal = hwAttachments.reduce((sum,a) => sum + (a.size||0), 0);
+    let runningTotal = currentTotal;
+    const toRead = [];
+    for(const file of files){
+      if(hwAttachments.length + toRead.length >= MAX_SUBMISSION_FILES){
+        showToast('You can attach up to ' + MAX_SUBMISSION_FILES + ' files.');
+        break;
+      }
+      if(file.size > MAX_SUBMISSION_FILE_BYTES){
+        showToast(file.name + ' is over 5MB — please choose a smaller file.');
+        continue;
+      }
+      if(runningTotal + file.size > MAX_SUBMISSION_TOTAL_BYTES){
+        showToast('That would put your combined attachments over 12MB — please choose smaller or fewer files.');
+        break;
+      }
+      runningTotal += file.size;
+      toRead.push(file);
+    }
+    if(!toRead.length) return;
+    let pending = toRead.length;
+    toRead.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = evt => {
+        hwAttachments.push({ name: file.name, dataUrl: evt.target.result, size: file.size });
+        pending--;
+        if(pending === 0) renderHwAttachmentPreview();
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  function renderHwAttachmentPreview(){
+    const preview = document.getElementById('hwAttachmentPreview');
+    if(!preview) return;
+    preview.innerHTML = hwAttachments.map((a,i) => `
+      <span class="pill" style="margin:0 6px 6px 0; display:inline-flex; align-items:center; gap:6px;">
+        📎 ${a.name}
+        <a href="javascript:void(0)" onclick="removeHwAttachment(${i})" style="color:var(--magenta); text-decoration:none; font-weight:700;">✕</a>
+      </span>
+    `).join('');
+  }
+  function removeHwAttachment(i){
+    hwAttachments.splice(i, 1);
+    renderHwAttachmentPreview();
+  }
   async function saveHomework(e){
     e.preventDefault();
     const subject = document.getElementById('hwSubject').value;
@@ -18479,6 +18559,7 @@
       assignedDate: document.getElementById('hwAssignedDate').value,
       dueDate: document.getElementById('hwDueDate').value,
       staffId: document.getElementById('hwStaff').value,
+      attachments: hwAttachments.map(a => ({ name:a.name, dataUrl:a.dataUrl })),
       updatedAt: new Date().toISOString(),
     };
     if(hwEditId){
@@ -18499,6 +18580,39 @@
     await storageSet(HOMEWORK_KEY, homeworkItems);
     renderSyllabusBody();
   }
+  // Who's turned this homework in — every active student in its class(+section)
+  // cross-referenced against student_submissions for this homework_id, resolved
+  // server-side (see GET /api/homework-items/:id/roster) since that join isn't
+  // data this page already has lying around.
+  async function openHomeworkRoster(id){
+    document.getElementById('hwRosterSubtitle').textContent = '';
+    document.getElementById('hwRosterBody').innerHTML = `<p style="font-size:0.85rem; color:var(--ink-soft);">Loading…</p>`;
+    document.getElementById('hwRosterModalOverlay').classList.add('open');
+    try{
+      const res = await throwIfNotOk(await fetch('/api/homework-items/'+encodeURIComponent(id)+'/roster', { headers: actorHeaders() }));
+      const { homework, roster } = await res.json();
+      document.getElementById('hwRosterSubtitle').textContent = `${homework.subject} — ${homework.title} (${homework.className}${homework.section?' — '+homework.section:''})`;
+      const statusLabel = st => st==='not_submitted' ? 'Not submitted' : st==='resubmit' ? 'Needs Resubmission' : st==='reviewed' ? 'Reviewed' : 'Submitted';
+      const statusColor = st => st==='not_submitted' ? 'color:var(--ink-soft);' : st==='resubmit' ? 'background:rgba(209,16,115,0.15); color:var(--magenta);' : st==='reviewed' ? 'background:rgba(19,145,127,0.15); color:var(--teal);' : '';
+      const sorted = [...roster].sort((a,b) => (a.studentName||'').localeCompare(b.studentName||''));
+      const submittedCount = roster.filter(r => r.status !== 'not_submitted').length;
+      document.getElementById('hwRosterBody').innerHTML = `
+        <p style="font-size:0.8rem; color:var(--ink-soft); margin:0 0 12px;">${submittedCount} of ${roster.length} student(s) have submitted.</p>
+        <div class="table-wrap">
+          <table><thead><tr><th>Student</th><th>Section</th><th>Status</th><th>Marks</th></tr></thead><tbody>
+          ${sorted.map(r => `<tr>
+            <td>${r.studentName}</td><td>${r.section||'—'}</td>
+            <td><span class="pill" style="${statusColor(r.status)}">${statusLabel(r.status)}</span></td>
+            <td>${r.marks||'—'}</td>
+          </tr>`).join('')}
+          </tbody></table>
+        </div>
+      `;
+    }catch(e){
+      document.getElementById('hwRosterBody').innerHTML = `<div class="empty-state"><b>Could not load the roster</b>${e.message||''}</div>`;
+    }
+  }
+  function closeHomeworkRoster(){ document.getElementById('hwRosterModalOverlay').classList.remove('open'); }
 
   function initMyAccountView(){
     const u = users.find(x => x.username === currentUser.username);
@@ -21478,6 +21592,7 @@
               <span class="pill" style="font-size:0.62rem;">${h.subject}</span>
               <h4 style="margin:6px 0 2px;">${h.title}</h4>
               ${h.description ? `<p style="font-size:0.8rem; color:var(--ink-soft); margin:2px 0 6px; white-space:pre-wrap;">${h.description}</p>` : ''}
+              ${(h.attachments||[]).map(a => `<a href="${a.dataUrl}" target="_blank" rel="noopener" class="pill" style="text-decoration:none; margin:0 4px 4px 0; display:inline-block;">📎 ${a.name}</a>`).join('')}
               <p style="font-size:0.74rem; color:var(--ink-soft); margin:0;">${staff ? 'Assigned by '+staff.firstName+' '+staff.lastName+(h.assignedDate?' · ':'') : ''}${h.assignedDate ? 'Given '+h.assignedDate : ''}</p>
             </div>
             ${h.dueDate ? `<span class="pill" style="${overdue?'background:rgba(209,16,115,0.15); color:var(--magenta);':''} white-space:nowrap;">Due ${h.dueDate}${overdue?' — overdue':''}</span>` : ''}
@@ -21580,7 +21695,11 @@
   function renderMyContactTab(body, s){
     const recipientOptionsHtml = myContactRecipientOptionsHtml(s);
     const relevantHomework = homeworkItems.filter(h => h.className===s.className && (!h.section || h.section===s.section));
-    const homeworkOptionsHtml = relevantHomework.map(h => `<option value="${h.id}">${h.subject} — ${h.title}${h.dueDate ? ' (due '+h.dueDate+')' : ''}</option>`).join('');
+    // data-subject carries the homework's subject so picking one can
+    // auto-select the matching Subject Teacher below (autoRouteSubmissionRecipient) —
+    // otherwise it's easy to submit worksheet-for-Maths to the wrong teacher
+    // by leaving "Send to" on whatever it defaulted to.
+    const homeworkOptionsHtml = relevantHomework.map(h => `<option value="${h.id}" data-subject="${h.subject}">${h.subject} — ${h.title}${h.dueDate ? ' (due '+h.dueDate+')' : ''}</option>`).join('');
 
     const concernsSorted = [...myConcerns].sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
     const concernsHistoryHtml = concernsSorted.length ? concernsSorted.map(c => `
@@ -21608,9 +21727,9 @@
             ${(sub.attachments||[]).map(a => `<a href="${a.dataUrl}" target="_blank" rel="noopener" class="pill" style="text-decoration:none; margin-right:4px;">📎 ${a.name}</a>`).join('')}
             <p style="font-size:0.7rem; color:var(--ink-soft); margin:6px 0 0;">${sub.createdAt ? new Date(sub.createdAt).toLocaleString() : ''}</p>
           </div>
-          <span class="pill" style="${sub.status==='submitted' ? '' : 'background:rgba(19,145,127,0.15); color:var(--teal);'}">${sub.status==='submitted' ? 'Submitted' : 'Reviewed'}</span>
+          <span class="pill" style="${sub.status==='submitted' ? '' : sub.status==='resubmit' ? 'background:rgba(209,16,115,0.15); color:var(--magenta);' : 'background:rgba(19,145,127,0.15); color:var(--teal);'}">${sub.status==='submitted' ? 'Submitted' : sub.status==='resubmit' ? 'Needs Resubmission' : 'Reviewed'}</span>
         </div>
-        ${sub.feedback ? `<div style="margin-top:8px; padding:8px 10px; background:var(--cream); border-radius:8px; font-size:0.82rem; white-space:pre-wrap;"><b>${sub.reviewedBy||'Feedback'}:</b> ${sub.feedback}</div>` : ''}
+        ${(sub.feedback || sub.marks) ? `<div style="margin-top:8px; padding:8px 10px; background:var(--cream); border-radius:8px; font-size:0.82rem; white-space:pre-wrap;">${sub.marks ? `<b>Marks:</b> ${sub.marks}<br>` : ''}${sub.feedback ? `<b>${sub.reviewedBy||'Feedback'}:</b> ${sub.feedback}` : ''}</div>` : ''}
       </div>
     `).join('') : `<div class="empty-state"><b>No work submitted yet</b></div>`;
 
@@ -21630,7 +21749,7 @@
       <div class="profile-card" style="margin-bottom:20px;">
         <div class="form-grid">
           <div class="f-field full"><label>Send to</label><select id="submissionRecipientSel">${recipientOptionsHtml}</select></div>
-          ${homeworkOptionsHtml ? `<div class="f-field full"><label>Which homework is this for? (optional)</label><select id="submissionHomeworkSel"><option value="">Not listed / holiday work</option>${homeworkOptionsHtml}</select></div>` : ''}
+          ${homeworkOptionsHtml ? `<div class="f-field full"><label>Which homework is this for? (optional)</label><select id="submissionHomeworkSel" onchange="autoRouteSubmissionRecipient()"><option value="">Not listed / holiday work</option>${homeworkOptionsHtml}</select></div>` : ''}
           <div class="f-field full"><label>Title <span class="required-star">*</span></label><input type="text" id="submissionTitleInput" placeholder="e.g. Maths worksheet, Holiday project"></div>
           <div class="f-field full"><label>Notes</label><textarea id="submissionDescInput" rows="3" placeholder="Anything you'd like to add..."></textarea></div>
           <div class="f-field full">
@@ -21693,6 +21812,22 @@
   function removeSubmissionAttachment(i){
     submissionAttachments.splice(i, 1);
     renderSubmissionAttachmentPreview();
+  }
+  // Picking a homework item auto-selects its Subject Teacher in "Send to" —
+  // the recipient dropdown is built the same way for both (subjectOpts in
+  // myContactRecipientOptionsHtml), so the value there always exists when a
+  // teacher is assigned to that subject/section. Left alone (not reset) if
+  // no matching option is found, since the person may have already picked a
+  // recipient on purpose (e.g. sending a Maths worksheet to the Class
+  // Teacher instead).
+  function autoRouteSubmissionRecipient(){
+    const hwSel = document.getElementById('submissionHomeworkSel');
+    const recipientSel = document.getElementById('submissionRecipientSel');
+    if(!hwSel || !recipientSel || !hwSel.value) return;
+    const subject = hwSel.options[hwSel.selectedIndex].dataset.subject;
+    if(!subject) return;
+    const match = Array.from(recipientSel.options).find(o => o.value.startsWith('subject_teacher::') && o.value.endsWith('::'+subject));
+    if(match) recipientSel.value = match.value;
   }
   async function submitConcern(){
     const sel = document.getElementById('concernRecipientSel');
@@ -21895,31 +22030,39 @@
             ${(s.attachments||[]).map(a => `<a href="${a.dataUrl}" target="_blank" rel="noopener" class="pill" style="text-decoration:none; margin-right:4px;">📎 ${a.name}</a>`).join('')}
             <p style="font-size:0.72rem; color:var(--ink-soft); margin:6px 0 0;">${s.createdAt ? new Date(s.createdAt).toLocaleString() : ''}</p>
           </div>
-          <span class="pill" style="${s.status==='submitted' ? 'background:rgba(19,145,127,0.15); color:var(--teal);' : ''}">${s.status==='submitted' ? 'New' : 'Reviewed'}</span>
+          <span class="pill" style="${s.status==='submitted' ? 'background:rgba(19,145,127,0.15); color:var(--teal);' : s.status==='resubmit' ? 'background:rgba(209,16,115,0.15); color:var(--magenta);' : ''}">${s.status==='submitted' ? 'New' : s.status==='resubmit' ? 'Needs Resubmission' : 'Reviewed'}</span>
         </div>
-        ${s.feedback ? `
+        ${s.status !== 'submitted' ? `
           <div style="margin-top:10px; padding:10px; background:var(--cream); border-radius:8px;">
-            <div style="font-size:0.72rem; color:var(--ink-soft); margin-bottom:4px;">Feedback — ${s.reviewedBy||''} ${s.reviewedAt ? 'on '+new Date(s.reviewedAt).toLocaleString() : ''}</div>
-            <div style="font-size:0.85rem; white-space:pre-wrap;">${s.feedback}</div>
+            <div style="font-size:0.72rem; color:var(--ink-soft); margin-bottom:4px;">${s.marks ? 'Marks: '+s.marks+' · ' : ''}${s.reviewedBy||''} ${s.reviewedAt ? 'on '+new Date(s.reviewedAt).toLocaleString() : ''}</div>
+            ${s.feedback ? `<div style="font-size:0.85rem; white-space:pre-wrap;">${s.feedback}</div>` : ''}
           </div>
         ` : `
           <div style="margin-top:10px;">
+            <div style="display:flex; gap:8px; margin-bottom:6px; flex-wrap:wrap;">
+              <input type="text" id="submissionMarks-${s.id}" placeholder="Marks/grade (optional)" style="max-width:160px;">
+            </div>
             <textarea id="submissionFeedback-${s.id}" rows="2" placeholder="Optional feedback..." style="width:100%;"></textarea>
-            <button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="markSubmissionReviewed('${s.id}')">Mark Reviewed</button>
+            <div style="display:flex; gap:8px; margin-top:6px;">
+              <button class="btn btn-primary btn-sm" onclick="markSubmissionReviewed('${s.id}','reviewed')">Mark Reviewed</button>
+              <button class="btn btn-ghost btn-sm" onclick="markSubmissionReviewed('${s.id}','resubmit')">Needs Resubmission</button>
+            </div>
           </div>
         `}
       </div>
     `).join('') : `<div class="empty-state"><b>Nothing here yet</b>Homework and holiday-work submissions addressed to you will show up here.</div>`);
   }
-  async function markSubmissionReviewed(id){
+  async function markSubmissionReviewed(id, status){
     const ta = document.getElementById('submissionFeedback-'+id);
+    const marksInput = document.getElementById('submissionMarks-'+id);
     const feedback = ((ta && ta.value) || '').trim();
+    const marks = ((marksInput && marksInput.value) || '').trim();
     try{
       await throwIfNotOk(await fetch('/api/submissions/'+encodeURIComponent(id)+'/review', {
         method: 'PUT', headers: { 'Content-Type': 'application/json', ...actorHeaders() },
-        body: JSON.stringify({ feedback }),
+        body: JSON.stringify({ feedback, marks, status: status || 'reviewed' }),
       }));
-      showToast('Marked reviewed.', 'burst');
+      showToast(status==='resubmit' ? 'Marked as needing resubmission.' : 'Marked reviewed.', 'burst');
       await loadInboxSubmissions();
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast(e.message || 'Could not update.');

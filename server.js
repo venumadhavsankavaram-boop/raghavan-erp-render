@@ -448,6 +448,28 @@ async function ensureSchema() {
   // for any row saved before this existed; the app reads `attachments` first
   // and falls back to wrapping `attachment` for those older rows.
   await addColumnIfMissing('student_submissions', "attachments JSON NOT NULL DEFAULT ('[]')");
+  // Free-text so a teacher can enter "8/10", "A", "18/20" etc. rather than
+  // being forced into one grading scale — this is a lightweight per-item
+  // note, not the school's real gradebook (that's Exams & Marks). status
+  // gains a third value, 'resubmit', alongside the existing 'submitted' and
+  // 'reviewed' — set by the same PUT .../review endpoint, just with
+  // { status: 'resubmit' } instead of leaving it to default to 'reviewed'.
+  await addColumnIfMissing('student_submissions', 'marks TEXT');
+  // Homework/holiday-work items assigned by a teacher — migrated off the
+  // kv_store whole-blob (index.html's old HOMEWORK_KEY under
+  // OBJECT_BACKED_KEYS) to a real table, the same move Accounting and this
+  // submissions table already made, for the same reason: a real row per item
+  // is what lets it carry file attachments and drive a notify-on-assign push
+  // (see notifyHomeworkAssigned below), neither of which a shared JSON blob
+  // can do safely. attachments is the same {name, dataUrl} JSON-array
+  // convention as student_submissions.attachments above. section blank means
+  // "every section of that class" (see index.html's Assign Homework modal).
+  await sql`CREATE TABLE IF NOT EXISTS homework_items (
+    id VARCHAR(191) PRIMARY KEY, class_name TEXT, section TEXT, subject TEXT, title TEXT, description TEXT,
+    assigned_date TEXT, due_date TEXT, staff_id VARCHAR(191), attachments JSON NOT NULL DEFAULT ('[]'),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME
+  )`;
+  await createIndexIfMissing('idx_homework_items_created_at', 'homework_items', 'created_at');
   // The generic key/value table backs every module that doesn't need its own
   // dedicated table with real columns — Inventory, Timetable, Library, Transport,
   // Hostel, Accounting, Fee/Exam sub-settings, Report Template signatures, Class
@@ -696,6 +718,35 @@ async function migrateAccountingFromKv() {
   await migrateOne('acct-expenses', 'acct_expenses');
 }
 
+// ---------- One-time homework migration: kv_store blob -> homework_items table ----------
+// Same shape as migrateAccountingFromKv above (skips if homework_items
+// already has rows, so a restart never re-copies) — a school that already
+// has homework assigned under the old HOMEWORK_KEY kv_store blob keeps every
+// item after this deploy instead of the tab silently going empty.
+async function migrateHomeworkFromKv() {
+  const [{ c }] = await sql.query(`SELECT COUNT(*)::int AS c FROM homework_items`);
+  if (c > 0) return;
+  const kvRows = await sql`SELECT value FROM kv_store WHERE \`key\` = 'homework-items'`;
+  const items = kvRows.length && Array.isArray(kvRows[0].value) ? kvRows[0].value : [];
+  if (!items.length) return;
+  let migrated = 0;
+  for (const item of items) {
+    if (!item || !item.id) continue;
+    // created_at is deliberately left out (same as migrateAccountingFromKv
+    // above) so the column's own DEFAULT CURRENT_TIMESTAMP applies — the kv
+    // blob's original createdAt isn't preserved, but every item still sorts
+    // and displays correctly either way.
+    await sql`
+      INSERT IGNORE INTO homework_items (id, class_name, section, subject, title, description, assigned_date, due_date, staff_id, attachments)
+      VALUES (${item.id}, ${item.className || ''}, ${item.section || ''}, ${item.subject || ''}, ${item.title || ''}, ${item.description || ''},
+              ${item.assignedDate || null}, ${item.dueDate || null}, ${item.staffId || null},
+              ${JSON.stringify(Array.isArray(item.attachments) ? item.attachments : [])}::jsonb)
+    `;
+    migrated++;
+  }
+  if (migrated) console.log(`Migrated ${migrated} legacy homework item(s) from kv_store["homework-items"] into homework_items.`);
+}
+
 // ---------- One-time password migration ----------
 // Every password in the `users` table has been plain text since this app's
 // first version — readable by anyone who could call GET /api/users, which
@@ -764,6 +815,7 @@ async function initDb() {
   await ensureSchema();
   console.log('Schema ready.');
   await migrateAccountingFromKv();
+  await migrateHomeworkFromKv();
   await migratePlaintextPasswords();
   await seedDefaultAdminIfEmpty();
   console.log('Database initialization complete.');
@@ -1227,6 +1279,7 @@ const RESOURCE_TO_MODULE = {
   'exam-results': ['exams', 'result'],
   'exam-defs': ['exams'],
   subjects: ['subjects'],
+  'homework-items': ['syllabus'],
   rooms: ['result'],
   'exam-hall-tickets': ['result'],
   'exam-room-config': ['result'],
@@ -1275,7 +1328,9 @@ const KV_KEY_TO_MODULE = {
   'timetable-periods': ['timetable'],
   'timetable-days': ['timetable'],
   'syllabus-topics': ['syllabus'],
-  'homework-items': ['syllabus'],
+  // 'homework-items' removed — it's now a real resource (see
+  // RESOURCE_TO_MODULE above) served from its own table, not this generic
+  // kv_store blob.
   'transport-routes': ['transport'],
   'library-books': ['library'],
   'library-issues': ['library'],
@@ -2710,6 +2765,19 @@ async function notifyExamScheduled(e) {
     }
   }
 }
+// Fires once, right when a homework item is first assigned (never on an
+// edit — see notifyExamScheduled's own reasoning above for why: fixing a
+// typo in the description a day later shouldn't re-alert the whole class).
+// section blank means every section of that class, same convention as the
+// homework_items table itself.
+async function notifyHomeworkAssigned(h) {
+  if (!h.className) return;
+  const body = `${h.subject ? h.subject + ' — ' : ''}${h.title}${h.dueDate ? '. Due ' + h.dueDate : ''}.`;
+  const userIds = await getClassSectionContactUserIds(h.className, h.section || null);
+  for (const uid of userIds) {
+    await sendPushToUser(uid, { title: 'New homework assigned', body, tag: 'homework', url: '/?view=myprofile' });
+  }
+}
 // Fires the moment a staff member files a fee-discount request — Admin is
 // the only role that can act on it (see Roles & Permissions matrix), so
 // that's who gets alerted, exactly like every other notify* here: never
@@ -3188,12 +3256,22 @@ const PARENT_OWN_RECORD_RESOURCES = {
   'exam-results': { table: 'exam_results', fields: () => SIMPLE_RESOURCES['exam-results'].fields },
   attendance: { table: 'attendance_records', fields: () => SIMPLE_RESOURCES.attendance.fields },
 };
-const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjects'];
+// 'homework-items' added alongside the pre-existing three: a Student/Parent
+// login has to be able to read homework (renderMySyllabusHomeworkTab) even
+// though their role has no 'syllabus' module permission — same reasoning as
+// fee-structure/exam-defs/subjects, nothing per-student to leak in a GET.
+const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjects', 'homework-items'];
 // Same idea, one level down, for the generic /api/kv/:key store — right now
 // just the late-fee policy (rate/grace period), which Fees needs to show an
 // accurate "Outstanding" figure instead of silently treating every family
 // as having no late fee at all.
-const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings'];
+// 'syllabus-topics' added here for the same reason 'homework-items' was
+// added to PARENT_SHARED_REFERENCE_RESOURCES: renderMySyllabusHomeworkTab
+// reads it directly for every Student/Parent login, and without this bypass
+// that GET 403s for any role whose defaults don't include 'syllabus' (see
+// SERVER_ROLE_VIEWS — Student/Parent's is just ['myprofile']), silently
+// leaving the tab empty instead of erroring loudly.
+const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics'];
 
 app.post('/api/login', async (req, res) => {
   try {
@@ -3548,7 +3626,7 @@ function shapeSubmission(r) {
     recipientType: r.recipient_type, recipientStaffId: r.recipient_staff_id,
     recipientName: r.recipient_name, subjectName: r.subject_name,
     homeworkId: r.homework_id, title: r.title, description: r.description, attachments,
-    status: r.status, feedback: r.feedback, reviewedBy: r.reviewed_by, reviewedAt: r.reviewed_at,
+    status: r.status, feedback: r.feedback, marks: r.marks, reviewedBy: r.reviewed_by, reviewedAt: r.reviewed_at,
     createdAt: r.created_at,
   };
 }
@@ -3841,14 +3919,109 @@ app.put('/api/submissions/:id/review', async (req, res) => {
     const canReview = (myStaff && submission.recipient_staff_id === myStaff.id) || isManagement;
     if (!canReview) return res.status(403).json({ error: 'This submission is not addressed to you.' });
     const feedback = req.body && req.body.feedback;
+    const marks = req.body && req.body.marks;
+    const status = (req.body && req.body.status === 'resubmit') ? 'resubmit' : 'reviewed';
     await sql`
-      UPDATE student_submissions SET feedback = ${feedback ? String(feedback).trim().slice(0, 4000) : null}, status = 'reviewed',
+      UPDATE student_submissions SET feedback = ${feedback ? String(feedback).trim().slice(0, 4000) : null},
+        marks = ${marks ? String(marks).trim().slice(0, 40) : null}, status = ${status},
         reviewed_by = ${req.authUser.name}, reviewed_at = now()
       WHERE id = ${req.params.id}
     `;
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('submissions review error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+function shapeHomeworkItem(r) {
+  return {
+    id: r.id, className: r.class_name, section: r.section || '', subject: r.subject, title: r.title,
+    description: r.description || '', assignedDate: r.assigned_date || '', dueDate: r.due_date || '',
+    staffId: r.staff_id || '', attachments: r.attachments || [],
+    createdAt: r.created_at, updatedAt: r.updated_at,
+  };
+}
+// Custom handler (not the generic handleSimple()) so attachments — a JSON
+// array, same {name, dataUrl} convention as student_submissions — can be
+// written with an explicit ::jsonb cast, and so a create can fire the
+// notify-on-assign push below. GET is readable by everyone signed in
+// (Student/Parent included — see PARENT_SHARED_REFERENCE_RESOURCES); the
+// generic dispatcher's RESOURCE_TO_MODULE gate already restricts
+// POST/PUT/DELETE to a role with the 'syllabus' module before this runs.
+async function handleHomeworkItems(req, res) {
+  if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+  if (req.method === 'GET') {
+    const rows = await sql`SELECT * FROM homework_items FORCE INDEX (idx_homework_items_created_at) ORDER BY created_at ASC`;
+    return res.status(200).json(rows.map(shapeHomeworkItem));
+  }
+  if (req.method === 'POST' || req.method === 'PUT') {
+    const b = req.body || {};
+    if (!b.id) return res.status(400).json({ error: 'Missing id.' });
+    const attachments = Array.isArray(b.attachments)
+      ? b.attachments.filter(a => a && a.dataUrl).slice(0, 5).map(a => ({ name: String(a.name || 'file').slice(0, 200), dataUrl: a.dataUrl }))
+      : [];
+    if (req.method === 'POST') {
+      await sql`
+        INSERT INTO homework_items (id, class_name, section, subject, title, description, assigned_date, due_date, staff_id, attachments)
+        VALUES (${b.id}, ${b.className || ''}, ${b.section || ''}, ${b.subject || ''}, ${b.title || ''}, ${b.description || ''},
+                ${b.assignedDate || null}, ${b.dueDate || null}, ${b.staffId || null}, ${JSON.stringify(attachments)}::jsonb)
+      `;
+      notifyHomeworkAssigned({ className: b.className, section: b.section, subject: b.subject, title: b.title, dueDate: b.dueDate })
+        .catch(err => console.error('homework notification failed:', err));
+      return res.status(201).json({ ok: true });
+    }
+    await sql`
+      UPDATE homework_items SET class_name = ${b.className || ''}, section = ${b.section || ''}, subject = ${b.subject || ''},
+        title = ${b.title || ''}, description = ${b.description || ''}, assigned_date = ${b.assignedDate || null},
+        due_date = ${b.dueDate || null}, staff_id = ${b.staffId || null}, attachments = ${JSON.stringify(attachments)}::jsonb,
+        updated_at = now()
+      WHERE id = ${b.id}
+    `;
+    return res.status(200).json({ ok: true });
+  }
+  if (req.method === 'DELETE') {
+    const { id } = req.query;
+    if (!id) return res.status(400).json({ error: 'Missing id.' });
+    await sql`DELETE FROM homework_items WHERE id = ${id}`;
+    await sql`DELETE FROM student_submissions WHERE homework_id = ${id}`;
+    return res.status(200).json({ ok: true });
+  }
+  return res.status(405).json({ error: 'Method not allowed.' });
+}
+
+// Per-homework completion roster: every active student in that homework's
+// class(+section), cross-referenced against student_submissions for this
+// homework_id, so a teacher can see who's actually turned it in without
+// hunting through the whole Inbox. A student with more than one submission
+// for this homework (e.g. resubmitted after "Needs Resubmission") shows
+// their latest one.
+app.get('/api/homework-items/:id/roster', async (req, res) => {
+  try {
+    if (!req.authUser || !STAFF_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Not available for this account.' });
+    }
+    if (!(await checkModuleAccess(req, res, ['syllabus']))) return;
+    const hwRows = await sql`SELECT * FROM homework_items WHERE id = ${req.params.id}`;
+    if (!hwRows.length) return res.status(404).json({ error: 'Homework item not found.' });
+    const hw = hwRows[0];
+    const studentRows = hw.section
+      ? await sql`SELECT * FROM students WHERE class_name = ${hw.class_name} AND section = ${hw.section} AND deleted_at IS NULL AND (status IS NULL OR LOWER(status) = 'active')`
+      : await sql`SELECT * FROM students WHERE class_name = ${hw.class_name} AND deleted_at IS NULL AND (status IS NULL OR LOWER(status) = 'active')`;
+    const subRows = await sql`SELECT * FROM student_submissions WHERE homework_id = ${req.params.id} ORDER BY created_at ASC`;
+    const byStudent = {};
+    subRows.forEach(r => { byStudent[r.student_id] = shapeSubmission(r); }); // last write wins — oldest-first order means latest submission survives
+    const roster = studentRows.map(s => {
+      const sub = byStudent[s.id] || null;
+      return {
+        studentId: s.id, studentName: (s.first_name + ' ' + (s.last_name || '')).trim(), section: s.section,
+        status: sub ? sub.status : 'not_submitted', submittedAt: sub ? sub.createdAt : null,
+        marks: sub ? sub.marks : null, submissionId: sub ? sub.id : null,
+      };
+    });
+    return res.status(200).json({ homework: shapeHomeworkItem(hw), roster });
+  } catch (err) {
+    console.error('homework roster error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
@@ -4284,6 +4457,7 @@ app.all('/api/:resource', async (req, res) => {
     // gate is needed here.
     if (resource === 'staff-leave-requests') return await handleStaffLeaveRequests(req, res);
     if (resource === 'certificates') return await handleCertificates(req, res);
+    if (resource === 'homework-items') return await handleHomeworkItems(req, res);
     // One-step bulk cleanup for the "Find Duplicate Students" view — see
     // handleDeleteDuplicateStudents' own comment for why this exists
     // alongside (never instead of) the 3-step deletion-request flow above.
