@@ -83,6 +83,19 @@ app.use((req, res, next) => {
   next();
 });
 
+// Express sets an ETag on every JSON response by default. Without an explicit
+// Cache-Control telling it otherwise, a browser (mobile Safari/Chrome in
+// particular, and any page restored from the back/forward cache) can treat
+// that ETag as licence to reuse a previously-cached /api/* response instead
+// of hitting the network — which is exactly the "refreshed many times, still
+// shows old numbers" symptom. ERP data must always be live, so every API
+// response is marked non-cacheable; this runs before any route handler, so
+// it applies uniformly without touching each one individually.
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
 // sql (tagged-template and sql.query(text, params) forms) now comes from
 // ./db.js, a MySQL-backed shim written for the GoDaddy hosting migration —
 // see that file's header comment for what it does and doesn't paper over.
@@ -876,6 +889,16 @@ const SESSION_IDLE_MS = 30 * 60 * 1000;
 const SESSION_ABSOLUTE_MAX_MS = 12 * 60 * 60 * 1000;
 
 async function createSession(req, res, user) {
+  // One active session per account — logging in on a new device/browser
+  // signs that account out everywhere else, rather than allowing several
+  // concurrent logins with the same credentials. Deliberately "new login
+  // wins" rather than blocking the new one: the latter can permanently lock
+  // someone out of their own account if an old session (say, a browser tab
+  // left open on a shared office computer) never gets explicitly logged out
+  // — this way there's no such dead end, just a one-line note the previous
+  // device will see on its next request ("Signed in elsewhere" via the
+  // ordinary "session expired" 401 path, since the row is simply gone).
+  await sql`DELETE FROM sessions WHERE user_id = ${user.id}`;
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + SESSION_IDLE_MS);
   await sql`
@@ -4311,11 +4334,25 @@ app.all('/api/:resource', async (req, res) => {
       const validationError = validateAdmissionInquiry(req.body);
       if (validationError) return res.status(400).json({ error: validationError });
     }
-    // 'users' and 'roles' control who can log in and the permission system
-    // itself — hard-locked to the built-in Admin role, unconditionally,
-    // mirroring LOCKED_ADMIN_ONLY_PAGES on the client. No override, saved or
-    // otherwise, can ever widen this.
-    if ((resource === 'users' || resource === 'roles') && (!req.authUser || req.authUser.role !== 'Admin')) {
+    // 'users' controls who can log in — hard-locked to the built-in Admin
+    // role, unconditionally, mirroring LOCKED_ADMIN_ONLY_PAGES on the client.
+    // No override, saved or otherwise, can ever widen this.
+    if (resource === 'users' && (!req.authUser || req.authUser.role !== 'Admin')) {
+      return res.status(403).json({ error: 'Admin access required.' });
+    }
+    // 'roles' (custom_roles — the saved Roles & Permissions overrides) is
+    // writable by Admin only, same as 'users' — but every logged-in role,
+    // not just Admin, needs to READ it: index.html's loadCustomRoles() /
+    // findRoleOverride() fetch this same list on every login to work out
+    // which sidebar links THEIR OWN role is actually allowed, so a non-Admin
+    // blocked from GET here silently fell back to the hardcoded default
+    // permission set for their role — making any customization an admin
+    // saved in Roles & Permissions invisible to that role's own login, no
+    // matter how many times they reloaded or which device they used. The
+    // response is just {id, name, permissions} per role (no user records,
+    // no credentials), so reading it carries none of the risk writing it
+    // would.
+    if (resource === 'roles' && req.method !== 'GET' && (!req.authUser || req.authUser.role !== 'Admin')) {
       return res.status(403).json({ error: 'Admin access required.' });
     }
     // A Student/Parent self-service login has no reason to see the whole

@@ -4400,7 +4400,10 @@
   // in and signs them out automatically after a stretch of inactivity,
   // with a visible warning (and a countdown) before it actually happens so
   // a person who's just reading the screen isn't cut off without notice.
-  const IDLE_LIMIT_MS = 20 * 60 * 1000;   // sign out after 20 minutes idle
+  // On phones/tablets (see isMobileViewport() below) this is skipped
+  // entirely — those are personal devices, so only an explicit Logout
+  // signs a mobile session out.
+  const IDLE_LIMIT_MS = 5 * 60 * 1000;    // sign out after 5 minutes idle (desktop only)
   const IDLE_WARNING_MS = 60 * 1000;      // warn 60 seconds before that
   let idleLastActivity = Date.now();
   let idleIntervalId = null;
@@ -4411,8 +4414,19 @@
     if(idleWarningVisible) idleHideWarning();
   }
 
+  function isMobileViewport(){
+    return window.innerWidth <= 820; // same breakpoint the sidebar/off-canvas nav uses
+  }
+
   function idleTick(){
     if(!currentUser) return; // shouldn't be running, but a safe no-op if it is
+    if(isMobileViewport()){
+      // Phones/tablets are personal devices, not shared front-office computers —
+      // stay signed in until the person taps Logout themselves, rather than
+      // getting bounced out mid-scroll on a train or between classes.
+      if(idleWarningVisible) idleHideWarning();
+      return;
+    }
     const idleFor = Date.now() - idleLastActivity;
     if(idleFor >= IDLE_LIMIT_MS){
       idleHideWarning();
