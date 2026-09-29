@@ -7180,7 +7180,7 @@
         id: 'sdisc_' + Date.now() + '_' + entry.studentId + '_' + entry.cat,
         batchId, studentId: entry.studentId, type, appliesTo: entry.cat, mode: 'amount', value: entry.value,
         note, status,
-        requestedBy: currentUser.name, requestedRole: currentUser.role,
+        requestedBy: currentUser.name, requestedRole: currentUser.role, requestedByUserId: currentUser.id,
         requestedDate: new Date().toISOString().slice(0,10),
         approverId: approver.id, approverName: approver.name,
         ...(status==='Approved' ? { approvedBy: currentUser.name, approvedDate: new Date().toISOString().slice(0,10) } : {}),
@@ -7196,22 +7196,30 @@
   }
 
   async function approveDiscountGroup(batchId, studentId){
-    studentDiscounts.filter(d => (d.batchId||d.id)===batchId && d.studentId===studentId).forEach(d => {
+    const rows = studentDiscounts.filter(d => (d.batchId||d.id)===batchId && d.studentId===studentId);
+    rows.forEach(d => {
       d.status = 'Approved'; d.approvedBy = currentUser.name; d.approvedDate = new Date().toISOString().slice(0,10);
     });
     await storageSet(STUDENT_DISCOUNTS_KEY, studentDiscounts);
     renderDiscListView(document.getElementById('feeBody'));
     renderDashboard();
     showToast('Discount approved.', 'burst');
+    const s = students.find(x => x.id === studentId);
+    const name = s ? `${s.firstName} ${s.lastName}` : studentId;
+    notifyRequesterOfDecision(rows[0] && rows[0].requestedByUserId, 'Fee discount approved', `${currentUser.name} approved the fee discount you requested for ${name}.`, 'approval-decision');
   }
   async function rejectDiscountGroup(batchId, studentId){
-    studentDiscounts.filter(d => (d.batchId||d.id)===batchId && d.studentId===studentId).forEach(d => {
+    const rows = studentDiscounts.filter(d => (d.batchId||d.id)===batchId && d.studentId===studentId);
+    rows.forEach(d => {
       d.status = 'Rejected'; d.approvedBy = currentUser.name; d.approvedDate = new Date().toISOString().slice(0,10);
     });
     await storageSet(STUDENT_DISCOUNTS_KEY, studentDiscounts);
     renderDiscListView(document.getElementById('feeBody'));
     renderDashboard();
     showToast('Discount rejected.', 'burst');
+    const s = students.find(x => x.id === studentId);
+    const name = s ? `${s.firstName} ${s.lastName}` : studentId;
+    notifyRequesterOfDecision(rows[0] && rows[0].requestedByUserId, 'Fee discount rejected', `${currentUser.name} rejected the fee discount you requested for ${name}.`, 'approval-decision');
   }
   async function deleteDiscountGroup(batchId, studentId){
     if(!await showConfirmDialog('Remove this discount record?')) return;
@@ -19623,7 +19631,7 @@
       if(!explanation){ showToast('Enter an explanation before submitting for approval.'); return; }
       if(!await showConfirmDialog('Submit this stock change to Admin for approval?')) return;
       pendingApprovals.push({
-        id:'appr_'+Date.now(), type:'inventory_item', requestedBy:currentUser.name, requestedByRole:currentUser.role,
+        id:'appr_'+Date.now(), type:'inventory_item', requestedBy:currentUser.name, requestedByRole:currentUser.role, requestedByUserId: currentUser.id,
         requestDate:new Date().toISOString().slice(0,10), explanation, payload, status:'Pending',
       });
       await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
@@ -20003,6 +20011,7 @@
     await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
     renderInventoryBody();
     showToast('Approved and applied.', 'burst');
+    notifyRequesterOfDecision(a.requestedByUserId, 'Inventory change approved', `${currentUser.name} approved your inventory change request (${a.payload && a.payload.name || 'item'}) and it's been applied.`, 'approval-decision');
   }
   async function rejectInventoryRequest(id){
     const a = pendingApprovals.find(x => x.id === id);
@@ -20012,6 +20021,7 @@
     await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
     renderInventoryBody();
     showToast('Request rejected.', 'burst');
+    notifyRequesterOfDecision(a.requestedByUserId, 'Inventory change rejected', `${currentUser.name} rejected your inventory change request (${a.payload && a.payload.name || 'item'}).`, 'approval-decision');
   }
 
   /* --- Sales History --- */
@@ -21603,7 +21613,7 @@
       if(!explanation){ showToast('Enter an explanation before submitting for approval.'); return; }
       if(!await showConfirmDialog(`Submit this promotion request for ${payloadStudents.length} student(s) to Admin for approval?`)) return;
       pendingApprovals.push({
-        id: 'appr_'+Date.now(), type:'promote', requestedBy: currentUser.name, requestedByRole: currentUser.role,
+        id: 'appr_'+Date.now(), type:'promote', requestedBy: currentUser.name, requestedByRole: currentUser.role, requestedByUserId: currentUser.id,
         requestDate: new Date().toISOString().slice(0,10), explanation, payload: payloadStudents, status:'Pending',
       });
       await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
@@ -21659,7 +21669,7 @@
       if(!explanation){ showToast('Enter an explanation before submitting for approval.'); return; }
       if(!await showConfirmDialog(`Submit this transfer request for ${selected.length} student(s) to Admin for approval?`)) return;
       pendingApprovals.push({
-        id: 'appr_'+Date.now(), type:'transfer', requestedBy: currentUser.name, requestedByRole: currentUser.role,
+        id: 'appr_'+Date.now(), type:'transfer', requestedBy: currentUser.name, requestedByRole: currentUser.role, requestedByUserId: currentUser.id,
         requestDate: new Date().toISOString().slice(0,10), explanation, payload: { studentIds: selected, date, reason }, status:'Pending',
       });
       await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
@@ -21707,7 +21717,7 @@
       if(!explanation){ showToast('Enter an explanation before submitting for approval.'); return; }
       if(!await showConfirmDialog(`Submit this section change for ${changes.length} student(s) to Admin for approval?`)) return;
       pendingApprovals.push({
-        id: 'appr_'+Date.now(), type:'section', requestedBy: currentUser.name, requestedByRole: currentUser.role,
+        id: 'appr_'+Date.now(), type:'section', requestedBy: currentUser.name, requestedByRole: currentUser.role, requestedByUserId: currentUser.id,
         requestDate: new Date().toISOString().slice(0,10), explanation, payload: { changes }, status:'Pending',
       });
       await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
@@ -21764,6 +21774,23 @@
     const names = a.payload.studentIds.map(id => { const s = students.find(x=>x.id===id); return s ? s.firstName+' '+s.lastName : ''; }).filter(Boolean).join(', ');
     return names + (a.payload.reason ? ' — '+a.payload.reason : '');
   }
+  // Every approval flow that lives purely as a client-side KV record
+  // (promotion/transfer/section requests, inventory change requests, fee
+  // discount requests — see PENDING_APPROVALS_KEY/STUDENT_DISCOUNTS_KEY) has
+  // no server-side hook of its own to fire a push from, unlike Staff Leave
+  // (handled natively in handleStaffLeaveRequests) or Deletion Requests
+  // (handled natively in handleDeletionRequests). This is the one shared
+  // call site for all of them: fire-and-forget, exactly like every other
+  // notify* call in this app — a slow or failing push must never block the
+  // Admin's own decision from completing, so this never awaits the caller
+  // and swallows its own errors after logging them.
+  function notifyRequesterOfDecision(userId, title, body, tag){
+    if(!userId) return; // older records saved before this feature has no id to notify — nothing to do
+    fetch('/api/notify-user', {
+      method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()},
+      body: JSON.stringify({ userId, title, body, tag, url:'/' }),
+    }).catch(err => console.error('notify-user failed:', err));
+  }
   async function approveRequest(id){
     const a = pendingApprovals.find(x => x.id === id);
     if(!a) return;
@@ -21775,6 +21802,8 @@
     await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
     renderPromoTransferBody();
     showToast('Approved and applied.', 'burst');
+    const typeLabel = a.type === 'promote' ? 'Promotion' : a.type === 'section' ? 'Section change' : 'Transfer';
+    notifyRequesterOfDecision(a.requestedByUserId, `${typeLabel} request approved`, `${currentUser.name} approved your ${typeLabel.toLowerCase()} request and it's been applied.`, 'approval-decision');
   }
   async function rejectRequest(id){
     const a = pendingApprovals.find(x => x.id === id);
@@ -21784,6 +21813,8 @@
     await storageSet(PENDING_APPROVALS_KEY, pendingApprovals);
     renderPromoTransferBody();
     showToast('Request rejected.', 'burst');
+    const typeLabel = a.type === 'promote' ? 'Promotion' : a.type === 'section' ? 'Section change' : 'Transfer';
+    notifyRequesterOfDecision(a.requestedByUserId, `${typeLabel} request rejected`, `${currentUser.name} rejected your ${typeLabel.toLowerCase()} request.`, 'approval-decision');
   }
 
   function renderPromotionsTab(body){

@@ -1901,6 +1901,13 @@ async function handleDeletionRequests(req, res) {
           decision_note = ${note ? String(note).trim() : null}
         WHERE id = ${id}
       `;
+      if (reqRow.requested_by) {
+        sendPushToUser(reqRow.requested_by, {
+          title: 'Deletion request rejected',
+          body: `${req.authUser.name} rejected your request to delete ${reqRow.record_label}${note ? ': ' + String(note).trim() : '.'}`,
+          tag: 'deletion-decision', url: '/',
+        }).catch(err => console.error('deletion decision notification failed:', err));
+      }
       return res.status(200).json({ ok: true, status: 'Rejected' });
     }
     // decision === 'Approve'
@@ -1941,6 +1948,13 @@ async function handleDeletionRequests(req, res) {
         decision_note = ${note ? String(note).trim() : null}
       WHERE id = ${id}
     `;
+    if (reqRow.requested_by) {
+      sendPushToUser(reqRow.requested_by, {
+        title: 'Deletion request approved',
+        body: `${req.authUser.name} approved your request to delete ${reqRow.record_label}${note ? ': ' + String(note).trim() : '.'}`,
+        tag: 'deletion-decision', url: '/',
+      }).catch(err => console.error('deletion decision notification failed:', err));
+    }
     return res.status(200).json({ ok: true, status: 'Approved' });
   }
   return res.status(405).json({ error: 'Method not allowed.' });
@@ -3013,6 +3027,38 @@ app.post('/api/notifications/broadcast', async (req, res) => {
     return res.status(200).json({ ok: true, notified: userIds.size });
   } catch (err) {
     console.error('notifications broadcast error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+// Generic requester-facing decision notification — backs every approval
+// flow that lives purely as a client-side KV record with no dedicated
+// server route of its own (promotion/transfer/section requests, inventory
+// change requests, fee discount requests): right after Admin/Principal
+// decides one — from the Approvals Center or the item's own page — the
+// client calls this so the ORIGINAL REQUESTER gets a push + in-app
+// notification telling them the outcome, the same guarantee
+// handleStaffLeaveRequests' PUT already gives leave decisions natively
+// (see sendPushToUser calls there). Restricted to MANAGEMENT_ROLES since
+// only they can actually decide any of these flows; the client only ever
+// calls this immediately after its own successful decision, never as a
+// generic message-to-anyone endpoint.
+app.post('/api/notify-user', async (req, res) => {
+  try {
+    if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+    if (!MANAGEMENT_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Admin or Principal access required.' });
+    }
+    const b = req.body || {};
+    const userId = String(b.userId || '').trim();
+    const title = String(b.title || '').trim().slice(0, 200);
+    const body = String(b.body || '').trim().slice(0, 2000);
+    const tag = String(b.tag || 'approval-decision').trim().slice(0, 64) || 'approval-decision';
+    const url = b.url ? String(b.url).slice(0, 300) : '/';
+    if (!userId || !title || !body) return res.status(400).json({ error: 'Missing userId, title, or body.' });
+    await sendPushToUser(userId, { title, body, tag, url });
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('notify-user error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
