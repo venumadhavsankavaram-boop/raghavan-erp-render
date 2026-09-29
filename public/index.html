@@ -1966,6 +1966,7 @@
         <button type="button" class="mf-tab active" id="trtab-routes" onclick="switchTransportTab('routes')">🚌 Routes</button>
         <button type="button" class="mf-tab" id="trtab-assign" onclick="switchTransportTab('assign')">🧾 Assign Students</button>
         <button type="button" class="mf-tab" id="trtab-roster" onclick="switchTransportTab('roster')">📋 Route Roster</button>
+        <button type="button" class="mf-tab" id="trtab-buspass" onclick="switchTransportTab('buspass')">🪪 Bus Passes</button>
       </div>
       <div id="transportBody"></div>
     </div>
@@ -3809,6 +3810,7 @@
     { key:'transport_routes', label:'Routes',            icon:'🚌', category:'Facilities', parent:'transport', isNew:true },
     { key:'transport_assign', label:'Assign Students',   icon:'🧾', category:'Facilities', parent:'transport', isNew:true },
     { key:'transport_roster', label:'Route Roster',      icon:'📋', category:'Facilities', parent:'transport', isNew:true },
+    { key:'transport_buspass', label:'Bus Passes',       icon:'🪪', category:'Facilities', parent:'transport', isNew:true },
     { key:'library',     label:'Library',            icon:'📚', category:'Facilities' },
     { key:'library_catalog',     label:'Catalog',           icon:'📚', category:'Facilities', parent:'library', isNew:true },
     { key:'library_issuereturn', label:'Issue & Return',    icon:'🔄', category:'Facilities', parent:'library', isNew:true },
@@ -4047,7 +4049,7 @@
   function getManageFeeTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'managefee', action); }
   const INVENTORY_SUBMODULE_KEYS = ['inventory_items','inventory_sell','inventory_approvals','inventory_saleshistory','inventory_stockoverview'];
   function getInventoryTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'inventory', action); }
-  const TRANSPORT_SUBMODULE_KEYS = ['transport_routes','transport_assign','transport_roster'];
+  const TRANSPORT_SUBMODULE_KEYS = ['transport_routes','transport_assign','transport_roster','transport_buspass'];
   function getTransportTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'transport', action); }
   const LIBRARY_SUBMODULE_KEYS = ['library_catalog','library_issuereturn','library_overdue','library_settings'];
   function getLibraryTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'library', action); }
@@ -15820,6 +15822,13 @@
   let trRouteView = 'list';
   let editingRouteId = '';
   let trEditStops = [];
+  // Bus Pass printing — template, route/class filters, and the set of
+  // selected student ids carry over while the admin flips between filters,
+  // so ticking a box doesn't get lost when they narrow the list further.
+  let busPassTemplate = 'classic';
+  let busPassRouteFilter = '';
+  let busPassClassFilter = '';
+  let busPassSelected = new Set();
   /* ===== LIBRARY MODULE ===== */
   const LIBRARY_BOOKS_KEY = "library-books";
   const LIBRARY_ISSUES_KEY = "library-issues";
@@ -18388,7 +18397,7 @@
     showToast('Settings saved.', 'burst');
   }
 
-  const TRANSPORT_TAB_PERM_KEYS = { routes:'transport_routes', assign:'transport_assign', roster:'transport_roster' };
+  const TRANSPORT_TAB_PERM_KEYS = { routes:'transport_routes', assign:'transport_assign', roster:'transport_roster', buspass:'transport_buspass' };
   function initTransportView(){
     const accessibleTabs = Object.keys(TRANSPORT_TAB_PERM_KEYS).filter(t => getTransportTabAccess(currentUser.role, TRANSPORT_TAB_PERM_KEYS[t]));
     Object.keys(TRANSPORT_TAB_PERM_KEYS).forEach(t => {
@@ -18400,7 +18409,7 @@
   }
   function switchTransportTab(tab){
     transportTab = tab;
-    ['routes','assign','roster'].forEach(t => {
+    ['routes','assign','roster','buspass'].forEach(t => {
       const btn = document.getElementById('trtab-'+t);
       if(btn) btn.classList.toggle('active', t===tab);
     });
@@ -18417,6 +18426,7 @@
     if(transportTab === 'routes') return trRouteView==='edit' ? renderRouteEditor(body) : renderRoutesList(body);
     if(transportTab === 'assign') return renderTransportAssignTab(body);
     if(transportTab === 'roster') return renderRouteRosterTab(body);
+    if(transportTab === 'buspass') return renderBusPassTab(body);
   }
 
   function studentsOnRoute(routeId){
@@ -18704,6 +18714,276 @@
         </div>
       `).join('')}
     `;
+  }
+
+  /* --- Bus Passes: pick a template, pick students, print several onto one A4 sheet --- */
+  const BUS_PASS_TEMPLATES = {
+    classic:  { label: 'Classic Replica',  wMm: 90, hMm: 58, cols: 2 },
+    modern:   { label: 'Modern Card',      wMm: 93, hMm: 62, cols: 2 },
+    compact:  { label: 'Compact Badge',    wMm: 86, hMm: 55, cols: 2 },
+    ticket:   { label: 'Ticket Stub',      wMm: 104, hMm: 46, cols: 2 },
+    inksaver: { label: 'Ink Saver (B/W)',  wMm: 90, hMm: 58, cols: 2 },
+  };
+  function busPassRiderPool(){
+    // Only students actually on transport have a route/fare to print — same
+    // population the Route Roster and fee-collection reports use.
+    return students.filter(s => isActive(s) && s.needsTransport === 'Yes');
+  }
+  function busPassStudentInfo(s){
+    const route = transportRoutes.find(r => r.id === s.transportRouteId);
+    const stop = route ? route.stops.find(st => st.id === s.transportStopId) : null;
+    const expected = studentBusFare(s);
+    const paid = payments.filter(p => p.studentId === s.id && p.category === 'bus' && !p.voided).reduce((sum,p) => sum + (Number(p.amount)||0), 0);
+    return {
+      name: `${s.firstName} ${s.lastName}`,
+      fatherName: s.fatherName || '—',
+      className: s.className,
+      section: s.section,
+      route: route ? (stop ? `${route.name} — ${stop.name}` : route.name) : '—',
+      admissionNo: s.admissionNo,
+      photo: s.photo || '',
+      paid: fmtMoney(paid),
+      balance: fmtMoney(Math.max(expected - paid, 0)),
+    };
+  }
+  function renderBusPassTab(body){
+    const pool = busPassRiderPool();
+    if(pool.length === 0){
+      body.innerHTML = `<div class="empty-state"><b>No students on transport yet</b>Assign students to a route under "Assign Students" first — a bus pass needs a route to print.</div>`;
+      return;
+    }
+    const routesInUse = transportRoutes.filter(r => pool.some(s => s.transportRouteId === r.id));
+    const classesInUse = [...new Set(pool.map(s => s.className))];
+    body.innerHTML = `
+      <div class="form-grid" style="max-width:720px; margin-bottom:6px;">
+        <div class="f-field">
+          <label>Template</label>
+          <select id="bpTemplate" onchange="busPassTemplate=this.value; renderBusPassBody();">
+            ${Object.keys(BUS_PASS_TEMPLATES).map(k => `<option value="${k}" ${k===busPassTemplate?'selected':''}>${BUS_PASS_TEMPLATES[k].label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="f-field">
+          <label>Passes per row (A4)</label>
+          <select id="bpCols" onchange="renderBusPassBody();">
+            <option value="2">2 per row</option>
+            <option value="3">3 per row</option>
+          </select>
+        </div>
+        <div class="f-field">
+          <label>Route</label>
+          <select id="bpRoute" onchange="busPassRouteFilter=this.value; renderBusPassBody();">
+            <option value="">All Routes</option>
+            ${routesInUse.map(r => `<option value="${r.id}" ${r.id===busPassRouteFilter?'selected':''}>${r.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="f-field">
+          <label>Class</label>
+          <select id="bpClass" onchange="busPassClassFilter=this.value; renderBusPassBody();">
+            <option value="">All Classes</option>
+            ${classesInUse.map(c => `<option value="${c}" ${c===busPassClassFilter?'selected':''}>${c}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="bpListWrap"></div>
+    `;
+    document.getElementById('bpCols').value = String(BUS_PASS_TEMPLATES[busPassTemplate].cols);
+    renderBusPassBody();
+  }
+  function renderBusPassBody(){
+    const colsEl = document.getElementById('bpCols');
+    if(colsEl) BUS_PASS_TEMPLATES[busPassTemplate].cols = Number(colsEl.value) || 2;
+    let list = busPassRiderPool();
+    if(busPassRouteFilter) list = list.filter(s => s.transportRouteId === busPassRouteFilter);
+    if(busPassClassFilter) list = list.filter(s => s.className === busPassClassFilter);
+    const wrap = document.getElementById('bpListWrap');
+    if(!wrap) return;
+    const allChecked = list.length > 0 && list.every(s => busPassSelected.has(s.id));
+    wrap.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin:14px 0;">
+        <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer;">
+          <input type="checkbox" ${allChecked?'checked':''} onchange="toggleBusPassSelectAll(this.checked)"> Select all (${list.length})
+        </label>
+        <button class="btn btn-primary" onclick="printBusPasses()" ${busPassSelected.size===0?'disabled':''}>🖨️ Print ${busPassSelected.size||''} Bus Pass${busPassSelected.size===1?'':'es'}</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th></th><th>Student</th><th>Class</th><th>Route</th><th>Paid</th><th>Balance</th></tr></thead>
+          <tbody>
+            ${list.map(s => {
+              const info = busPassStudentInfo(s);
+              return `<tr>
+                <td><input type="checkbox" ${busPassSelected.has(s.id)?'checked':''} onchange="toggleBusPassStudent('${s.id}', this.checked)"></td>
+                <td class="name-cell">${info.name}</td>
+                <td>${info.className} - ${info.section}</td>
+                <td>${info.route}</td>
+                <td>${info.paid}</td>
+                <td>${info.balance}</td>
+              </tr>`;
+            }).join('')}
+            ${list.length===0 ? `<tr><td colspan="6"><div class="empty-state"><b>No students match this filter</b></div></td></tr>` : ''}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+  function toggleBusPassStudent(id, checked){
+    if(checked) busPassSelected.add(id); else busPassSelected.delete(id);
+    renderBusPassBody();
+  }
+  function toggleBusPassSelectAll(checked){
+    let list = busPassRiderPool();
+    if(busPassRouteFilter) list = list.filter(s => s.transportRouteId === busPassRouteFilter);
+    if(busPassClassFilter) list = list.filter(s => s.className === busPassClassFilter);
+    list.forEach(s => { if(checked) busPassSelected.add(s.id); else busPassSelected.delete(s.id); });
+    renderBusPassBody();
+  }
+  function busPassCardInner(tpl, info, logoSrc){
+    const photoBlock = info.photo
+      ? `<img src="${info.photo}" class="bp-photo-img">`
+      : `<div class="bp-photo-ph">PHOTO</div>`;
+    if(tpl === 'modern'){
+      return `
+        <div class="bp-modern-head"><img src="${logoSrc}" class="bp-modern-logo"><div><div class="bp-modern-school">${schoolInfo.name||''}</div><div class="bp-modern-sub">STUDENT BUS PASS</div></div></div>
+        <div class="bp-modern-photo">${photoBlock}</div>
+        <div class="bp-modern-body">
+          <div class="bp-modern-name">${info.name}</div>
+          <div class="bp-row"><span>Father</span><b>${info.fatherName}</b></div>
+          <div class="bp-row"><span>Class</span><b>${info.className} - ${info.section}</b></div>
+          <div class="bp-row"><span>Paid</span><b>${info.paid}</b><span style="margin-left:8px;">Balance</span><b>${info.balance}</b></div>
+          <div class="bp-modern-route">Route: ${info.route}</div>
+        </div>
+        <div class="bp-modern-foot"><span>S.No. ${info.admissionNo}</span><span>Principal Sign.</span></div>
+      `;
+    }
+    if(tpl === 'compact'){
+      return `
+        <div class="bp-compact-head"><img src="${logoSrc}" class="bp-compact-logo"><div class="bp-compact-school">${schoolInfo.name||''} · BUS PASS</div><span class="bp-compact-no">#${info.admissionNo}</span></div>
+        <div class="bp-compact-body">
+          ${photoBlock}
+          <div class="bp-compact-fields">
+            <div><span>Name</span> <b>${info.name}</b></div>
+            <div><span>Father</span> ${info.fatherName}</div>
+            <div><span>Class</span> ${info.className} - ${info.section}</div>
+            <div><span>Paid</span> ${info.paid} <span style="margin-left:6px;">Bal.</span> ${info.balance}</div>
+          </div>
+        </div>
+        <div class="bp-compact-route">ROUTE ${info.route}</div>
+      `;
+    }
+    if(tpl === 'ticket'){
+      return `
+        <div class="bp-ticket-main">
+          <div class="bp-ticket-head"><img src="${logoSrc}" class="bp-ticket-logo"><div><div class="bp-ticket-school">${schoolInfo.name||''}</div><div class="bp-ticket-addr">${schoolInfo.address||''}</div></div></div>
+          <div class="bp-row"><span>Student</span><b>${info.name}</b></div>
+          <div class="bp-row"><span>Father</span>${info.fatherName}</div>
+          <div class="bp-row"><span>Class</span>${info.className}-${info.section}<span style="margin-left:8px;">Route</span>${info.route}</div>
+          <div class="bp-row"><span>Paid</span>${info.paid}<span style="margin-left:8px;">Balance</span>${info.balance}</div>
+        </div>
+        <div class="bp-ticket-stub">
+          <div class="bp-ticket-stub-label">BUS<br>PASS</div>
+          ${photoBlock}
+          <div class="bp-ticket-sno"><div>S.No.</div><b>${info.admissionNo}</b></div>
+        </div>
+      `;
+    }
+    // classic and inksaver share the same layout; inksaver is just monochrome via CSS class
+    return `
+      <div class="bp-classic-head"><img src="${logoSrc}" class="bp-classic-logo"><div class="bp-classic-names"><div class="bp-classic-school">${schoolInfo.name||''}</div><div class="bp-classic-addr">${schoolInfo.address||''}</div></div><div class="bp-classic-badge">STUDENT<br>BUS PASS</div></div>
+      <div class="bp-classic-body">
+        <div class="bp-classic-fields">
+          <div class="bp-row"><span>Student name</span><b>${info.name}</b></div>
+          <div class="bp-row"><span>Father name</span><b>${info.fatherName}</b></div>
+          <div class="bp-row"><span>Class</span><b>${info.className}</b><span style="margin-left:8px;">Route</span><b>${info.route}</b></div>
+          <div class="bp-row"><span>Amount Paid</span><b>${info.paid}</b><span style="margin-left:8px;">Balance</span><b>${info.balance}</b></div>
+        </div>
+        ${photoBlock}
+      </div>
+      <div class="bp-classic-foot"><span>S.No. <b>${info.admissionNo}</b></span><span class="bp-classic-issued">Issued Date: __/__/____</span><span>Principal Signature</span></div>
+    `;
+  }
+  function printBusPasses(){
+    const ids = [...busPassSelected];
+    if(ids.length === 0){ showToast('Select at least one student first.'); return; }
+    const tpl = busPassTemplate;
+    const conf = BUS_PASS_TEMPLATES[tpl];
+    const cols = conf.cols || 2;
+    const gapMm = 6;
+    const usableMm = 190; // A4 width (210mm) minus 10mm margins each side
+    const cardWMm = Math.round(((usableMm - (cols-1)*gapMm) / cols) * 10) / 10;
+    const cardHMm = Math.round((cardWMm * (conf.hMm / conf.wMm)) * 10) / 10;
+    const logoSrc = schoolLogoSrc();
+    const list = students.filter(s => ids.includes(s.id));
+    const cardsHtml = list.map(s => `<div class="bp-card bp-tpl-${tpl}">${busPassCardInner(tpl, busPassStudentInfo(s), logoSrc)}</div>`).join('');
+    const w = window.open('', '_blank');
+    w.document.write(`
+      <html><head><title>Bus Passes — ${conf.label}</title>
+      <style>
+        @page{ size:A4; margin:10mm; }
+        body{ font-family:Arial,Helvetica,sans-serif; color:#111; margin:0; }
+        .bp-wrap{ display:flex; flex-wrap:wrap; gap:${gapMm}mm; }
+        .bp-card{ width:${cardWMm}mm; height:${cardHMm}mm; box-sizing:border-box; page-break-inside:avoid; overflow:hidden; position:relative; }
+        .bp-photo-img{ width:16mm; height:20mm; object-fit:cover; border-radius:1mm; flex-shrink:0; }
+        .bp-photo-ph{ width:16mm; height:20mm; border:1px solid #9ca3af; border-radius:1mm; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:6px; color:#9ca3af; }
+        .bp-row{ display:flex; gap:4px; font-size:7.5px; align-items:baseline; }
+        .bp-row span{ color:#6b7280; }
+
+        /* Classic Replica + Ink Saver */
+        .bp-tpl-classic, .bp-tpl-inksaver{ border:2px solid #1c2b52; border-radius:2mm; padding:3mm; display:flex; flex-direction:column; gap:2mm; }
+        .bp-classic-head{ display:flex; align-items:center; gap:2mm; }
+        .bp-classic-logo{ width:9mm; height:9mm; border-radius:50%; flex-shrink:0; }
+        .bp-classic-names{ flex-grow:1; min-width:0; }
+        .bp-classic-school{ font-size:11px; font-weight:700; color:#1c2b52; line-height:1.15; }
+        .bp-classic-addr{ font-size:6.5px; color:#6b7280; }
+        .bp-classic-badge{ flex-shrink:0; background:#1c2b52; color:#fff; font-size:6.5px; font-weight:800; text-align:center; padding:1.2mm 1.6mm; border-radius:1mm; line-height:1.25; }
+        .bp-classic-body{ display:flex; gap:2mm; flex-grow:1; }
+        .bp-classic-fields{ flex-grow:1; display:flex; flex-direction:column; gap:1.3mm; justify-content:center; }
+        .bp-classic-foot{ display:flex; justify-content:space-between; font-size:6.5px; color:#6b7280; border-top:1px solid #e2e2e2; padding-top:1mm; }
+        .bp-tpl-inksaver{ border-color:#111827; }
+        .bp-tpl-inksaver .bp-classic-school, .bp-tpl-inksaver .bp-classic-addr, .bp-tpl-inksaver .bp-classic-foot, .bp-tpl-inksaver .bp-row span, .bp-tpl-inksaver .bp-row b{ color:#111827; }
+        .bp-tpl-inksaver .bp-classic-badge{ background:#fff; color:#111827; border:1px solid #111827; }
+        .bp-tpl-inksaver img{ filter:grayscale(1) contrast(1.3); }
+
+        /* Modern Card */
+        .bp-tpl-modern{ border-radius:3mm; box-shadow:0 0 0 1px #e5e7eb inset; padding:0; display:flex; flex-direction:column; }
+        .bp-modern-head{ background:#1c2b52; color:#fff; padding:2.5mm 3mm; display:flex; align-items:center; gap:2mm; border-bottom:1mm solid #c9a227; }
+        .bp-modern-logo{ width:8mm; height:8mm; border-radius:50%; }
+        .bp-modern-school{ font-size:10px; font-weight:700; }
+        .bp-modern-sub{ font-size:6.5px; color:#c9a227; letter-spacing:0.04em; }
+        .bp-modern-photo{ margin:-4mm 3mm 0 auto; width:14mm; }
+        .bp-modern-photo .bp-photo-img, .bp-modern-photo .bp-photo-ph{ width:14mm; height:14mm; border-radius:50%; border:1mm solid #fff; box-shadow:0 0 0 1px #ddd; margin-left:auto; }
+        .bp-modern-body{ padding:2mm 3mm; display:flex; flex-direction:column; gap:1.3mm; flex-grow:1; }
+        .bp-modern-name{ font-size:10px; font-weight:700; color:#1c2b52; }
+        .bp-modern-route{ font-size:7px; font-weight:700; color:#1c2b52; background:#eef2ff; display:inline-block; padding:0.8mm 2mm; border-radius:3mm; margin-top:1mm; }
+        .bp-modern-foot{ display:flex; justify-content:space-between; font-size:6.5px; color:#6b7280; background:#f8f9fb; padding:1.5mm 3mm; border-top:1px solid #eef0f4; }
+
+        /* Compact Badge */
+        .bp-tpl-compact{ border:1px solid #e5e7eb; border-radius:2mm; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 0 0 1px #f3f4f6 inset; }
+        .bp-compact-head{ display:flex; align-items:center; gap:1.5mm; padding:2mm 2.5mm 1mm; }
+        .bp-compact-logo{ width:6mm; height:6mm; border-radius:50%; flex-shrink:0; }
+        .bp-compact-school{ font-size:8px; font-weight:700; color:#1c2b52; flex-grow:1; }
+        .bp-compact-no{ font-size:6.5px; color:#c0392b; font-weight:800; }
+        .bp-compact-body{ display:flex; gap:2mm; padding:1mm 2.5mm; flex-grow:1; }
+        .bp-compact-fields{ display:flex; flex-direction:column; gap:1mm; font-size:7px; justify-content:center; }
+        .bp-compact-fields span{ color:#9ca3af; }
+        .bp-compact-route{ background:#1c2b52; color:#fff; font-size:7px; font-weight:700; padding:1.3mm 2.5mm; }
+
+        /* Ticket Stub */
+        .bp-tpl-ticket{ border:1.5px solid #1c2b52; border-radius:2mm; display:flex; }
+        .bp-ticket-main{ flex-grow:1; padding:2.5mm 3mm; display:flex; flex-direction:column; gap:1mm; border-right:1px dashed #9ca3af; }
+        .bp-ticket-head{ display:flex; align-items:center; gap:1.5mm; margin-bottom:1mm; }
+        .bp-ticket-logo{ width:7mm; height:7mm; border-radius:50%; }
+        .bp-ticket-school{ font-size:9px; font-weight:700; color:#1c2b52; }
+        .bp-ticket-addr{ font-size:6px; color:#6b7280; }
+        .bp-ticket-stub{ flex-shrink:0; width:22mm; background:#f8f9fb; display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:2mm; }
+        .bp-ticket-stub-label{ font-size:6px; font-weight:800; color:#1c2b52; text-align:center; letter-spacing:0.06em; }
+        .bp-ticket-sno{ text-align:center; font-size:6px; color:#9ca3af; }
+        .bp-ticket-sno b{ display:block; font-size:11px; color:#c0392b; }
+      </style></head>
+      <body onload="window.print()">
+        <div class="bp-wrap">${cardsHtml}</div>
+      </body></html>
+    `);
+    w.document.close();
   }
 
   const TIMETABLE_TAB_PERM_KEYS = { class:'timetable_class', teacher:'timetable_teacher', periods:'timetable_periods' };
