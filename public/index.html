@@ -1780,6 +1780,7 @@
         <button type="button" class="mf-tab" id="restab-roomallotment" onclick="switchResultTab('roomallotment')">Room Allotment</button>
         <button type="button" class="mf-tab" id="restab-progress" onclick="switchResultTab('progress')">Progress Reports</button>
         <button type="button" class="mf-tab" id="restab-consolidated" onclick="switchResultTab('consolidated')">Consolidated Report</button>
+        <button type="button" class="mf-tab" id="restab-yearend" onclick="switchResultTab('yearend')">🎓 Year-End Marks Cards</button>
         <button type="button" class="mf-tab" id="restab-examtemplates" onclick="switchResultTab('examtemplates')">Exam Templates</button>
         <button type="button" class="mf-tab" id="restab-consolscale" onclick="switchResultTab('consolscale')">Consolidation Scale</button>
         <button type="button" class="mf-tab" id="restab-grading" onclick="switchResultTab('grading')">Grading Scale</button>
@@ -2868,6 +2869,51 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="examTypeModalOverlay">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-inner">
+      <button class="modal-close" onclick="closeExamTypeModal()">&times;</button>
+      <h2 id="examTypeModalTitle">Add Exam Type</h2>
+      <p class="modal-sub">E.g. "Formative Assessment", "Summative Assessment 1", or "Prefinals" — each individual exam (FA1, FA2, SA1…) picks one of these when it's created.</p>
+      <form id="examTypeForm" onsubmit="return saveExamTypeModal(event)">
+        <input type="hidden" id="editExamTypeId">
+        <div class="form-grid">
+          <div class="f-field full">
+            <label>Type Name <span class="required-star">*</span></label>
+            <input type="text" id="etName" required placeholder="e.g. Formative Assessment">
+          </div>
+          <div class="f-field">
+            <label>Kind</label>
+            <select id="etGroup" onchange="toggleExamTypeWeightHint()">
+              <option value="formative">Formative</option>
+              <option value="summative">Summative</option>
+              <option value="internal">Internal only (mock/practice, e.g. Prefinals)</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="f-field">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="etIncludeInAnnual" style="width:auto;" onchange="document.getElementById('etWeightRow').style.opacity = this.checked ? 1 : 0.4;"> Counts toward Year-End Marks Card</label>
+          </div>
+          <div class="f-field full" id="etWeightRow">
+            <label>Year-End Weight (%)</label>
+            <input type="number" id="etWeight" min="0" max="100" step="1" value="0">
+            <p id="etWeightHint" style="font-size:0.76rem; color:var(--ink-soft); margin-top:4px;"></p>
+          </div>
+          <div class="f-field full">
+            <label>Offered To</label>
+            <p style="font-size:0.78rem; color:var(--ink-soft); margin:0 0 8px;">Leave everything unchecked for "all classes". Tick specific classes to restrict it — e.g. Prefinals → 10th Class only.</p>
+            <div id="etScopeBox" style="display:flex; flex-wrap:wrap; gap:8px; max-height:160px; overflow-y:auto;"></div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" onclick="closeExamTypeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Exam Type</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="approvalsCenterModalOverlay">
   <div class="modal" style="max-width:680px;">
     <div class="modal-inner">
@@ -3745,6 +3791,7 @@
     { key:'result_roomallotment', label:'Room Allotment',       icon:'🚪', category:'Academics', parent:'result', isNew:true },
     { key:'result_progress',     label:'Progress Reports',      icon:'📄', category:'Academics', parent:'result', isNew:true },
     { key:'result_consolidated', label:'Consolidated Report',   icon:'📊', category:'Academics', parent:'result', isNew:true },
+    { key:'result_yearend',      label:'Year-End Marks Cards',  icon:'🎓', category:'Academics', parent:'result', isNew:true },
     { key:'result_examtemplates', label:'Exam Templates',       icon:'🧩', category:'Academics', parent:'result', isNew:true },
     { key:'result_consolscale',  label:'Consolidation Scale',   icon:'📐', category:'Academics', parent:'result', isNew:true },
     { key:'result_grading',      label:'Grading Scale',         icon:'🎯', category:'Academics', parent:'result', isNew:true },
@@ -4025,7 +4072,7 @@
   // Thin, named wrappers kept for every existing call site + readability —
   // all delegate to getSubModuleAccess above.
   function getAccountingTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'accounting', action); }
-  const RESULT_SUBMODULE_KEYS = ['result_admitcards','result_roomallotment','result_progress','result_consolidated','result_examtemplates','result_consolscale','result_grading','result_templates'];
+  const RESULT_SUBMODULE_KEYS = ['result_admitcards','result_roomallotment','result_progress','result_consolidated','result_yearend','result_examtemplates','result_consolscale','result_grading','result_templates'];
   function getResultTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'result', action); }
   const STAFF_SUBPAGE_KEYS = ['staff_depts','staff_idcards','staff_payroll'];
   function getStaffSubpageAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'staff', action); }
@@ -8378,6 +8425,24 @@
   async function loadExams(){
     examDefs = await storageGet(EXAM_DEFS_KEY, []);
     examTypes = await storageGet(EXAM_TYPES_KEY, ['Unit Test 1','Unit Test 2','Quarterly Exam','Half Yearly Exam','Annual Exam']);
+    // Exam types used to be plain strings. They're now structured — each type
+    // carries which class-level of assessment it is (Formative / Summative /
+    // Internal-only), how much it weighs toward the Year-End Marks Card, and
+    // which classes it even applies to (e.g. Prefinals should only ever be
+    // offered for 10th Class). A string-only type is migrated in place, once,
+    // into an object with safe do-nothing defaults (0 weight, not counted
+    // toward the annual result, open to every class) so nothing that already
+    // depends on `exam.examType` matching a type *name* breaks — the name is
+    // preserved exactly, only the wrapper around it changes.
+    let typesMigrated = false;
+    examTypes = examTypes.map(t => {
+      if(typeof t === 'string'){
+        typesMigrated = true;
+        return { id: 'etype_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), name: t, group:'other', weightPercent:0, includeInAnnual:false, scopeClasses:[] };
+      }
+      return t;
+    });
+    if(typesMigrated) await storageSet(EXAM_TYPES_KEY, examTypes);
     examGroups = await storageGet(EXAM_GROUPS_KEY, []);
     consolidationScale = await storageGet(CONSOLIDATION_SCALE_KEY, [
       {grade:'A1', minPct:91, maxPct:100},
@@ -8436,6 +8501,34 @@
     if(!exam) return [];
     exam.classSubjects = exam.classSubjects || {};
     return exam.classSubjects[classSecKey(className, section)] || exam.subjects || [];
+  }
+  function examTypeByName(name){
+    return examTypes.find(t => t.name === name);
+  }
+  // Empty scopeClasses means "every class" (the default for ordinary exam
+  // types) — only an explicit, non-empty list narrows it, which is how
+  // something like Prefinals gets locked to 10th Class only.
+  function classAllowedForExamType(typeName, className){
+    const type = examTypeByName(typeName);
+    if(!type || !type.scopeClasses || type.scopeClasses.length === 0) return true;
+    return type.scopeClasses.includes(className);
+  }
+  function classLevelsForExamType(typeName){
+    const type = examTypeByName(typeName);
+    if(!type || !type.scopeClasses || type.scopeClasses.length === 0) return CLASS_LEVELS;
+    return CLASS_LEVELS.filter(c => type.scopeClasses.includes(c));
+  }
+  // A class's own start/end for THIS exam, derived from whatever subject
+  // dates have actually been set for it (across its sections) — not a
+  // separate stored field, so it can never drift out of sync with the real
+  // per-subject schedule. This is what lets two classes sit on the same
+  // "Formative Assessment 1" exam but start on different calendar days.
+  function classExamDateRange(exam, className){
+    const dates = [];
+    SECTIONS.forEach(sec => getExamSubjects(exam, className, sec).forEach(s => { if(s.date) dates.push(s.date); }));
+    if(dates.length === 0) return null;
+    dates.sort();
+    return { start: dates[0], end: dates[dates.length-1] };
   }
 
   // A report template can carry its own explicit signature image (uploaded once,
@@ -8512,7 +8605,7 @@
     const examOptions = examDefs.map(ex => `<option value="${ex.id}" ${meStatusExamId===ex.id?'selected':''}>${ex.name}</option>`).join('');
     const scope = myTeacherScope();
     const rows = [];
-    CLASS_LEVELS.forEach(cls => {
+    classLevelsForExamType(exam && exam.examType).forEach(cls => {
       SECTIONS.forEach(sec => {
         if(scope && !scope.subjectSections.some(ss => ss.className===cls && ss.section===sec)) return;
         let subjects = getExamSubjects(exam, cls, sec);
@@ -8573,8 +8666,8 @@
 
   /* --- Result module (Admit Cards, Progress Reports, Consolidated, Grading Scale, Templates) --- */
   let resultTab = 'admitcards';
-  const RESULT_TAB_PERM_KEYS = { admitcards:'result_admitcards', roomallotment:'result_roomallotment', progress:'result_progress', consolidated:'result_consolidated', examtemplates:'result_examtemplates', consolscale:'result_consolscale', grading:'result_grading', templates:'result_templates' };
-  const RESULT_TABS = ['admitcards','roomallotment','progress','consolidated','examtemplates','consolscale','grading','templates'];
+  const RESULT_TAB_PERM_KEYS = { admitcards:'result_admitcards', roomallotment:'result_roomallotment', progress:'result_progress', consolidated:'result_consolidated', yearend:'result_yearend', examtemplates:'result_examtemplates', consolscale:'result_consolscale', grading:'result_grading', templates:'result_templates' };
+  const RESULT_TABS = ['admitcards','roomallotment','progress','consolidated','yearend','examtemplates','consolscale','grading','templates'];
   function initResultView(){
     document.getElementById('resAyBadge').textContent = 'AY ' + currentAcademicYearValue;
     const accessibleTabs = RESULT_TABS.filter(t => getResultTabAccess(currentUser.role, RESULT_TAB_PERM_KEYS[t]));
@@ -8614,6 +8707,7 @@
     if(resultTab === 'roomallotment') return renderRoomAllotmentTab(body);
     if(resultTab === 'progress') return renderReportCardsTab(body);
     if(resultTab === 'consolidated') return renderConsolidatedTab(body);
+    if(resultTab === 'yearend') return renderYearEndTab(body);
     if(resultTab === 'examtemplates') return renderExamTemplatesTab(body);
     if(resultTab === 'consolscale') return renderConsolidationScaleTab(body);
     if(resultTab === 'grading') return renderGradingScaleTab(body);
@@ -8700,41 +8794,129 @@
     const canCreate = canSub('exams_definitions','exams','create');
     const canEdit = canSub('exams_definitions','exams','edit');
     const canDelete = canSub('exams_definitions','exams','delete');
+    const groupBadge = (g) => {
+      const map = { formative:['Formative','rgba(46,111,158,0.14)','#2E6F9E'], summative:['Summative','rgba(24,143,134,0.15)','#0f6a63'], internal:['Internal only','rgba(203,154,46,0.18)','#8a6a1f'], other:['Other','rgba(0,0,0,0.06)','var(--ink-soft)'] };
+      const [label,bg,fg] = map[g] || map.other;
+      return `<span class="pill" style="background:${bg}; color:${fg};">${label}</span>`;
+    };
     body.innerHTML = `
       <div class="profile-card" style="margin-bottom:20px;">
-        <h4>Exam Types</h4>
-        ${canCreate ? `<div class="inline-add-form" style="margin-bottom:10px;">
-          <input class="input" id="newExamTypeName" placeholder="e.g. Unit Test 3" style="max-width:220px;">
-          <button class="btn btn-ghost btn-sm" onclick="addExamType()">+ Add Type</button>
-        </div>` : ''}
-        <div style="display:flex; flex-wrap:wrap; gap:8px;">
-          ${examTypes.map((t,i) => `<span class="pill" style="display:flex; align-items:center; gap:6px;">${t} ${canDelete ? `<button onclick="removeExamType(${i})" style="background:none; border:none; color:var(--magenta); font-weight:700; cursor:pointer;">&times;</button>` : ''}</span>`).join('') || '<span style="font-size:0.82rem; color:var(--ink-soft);">No exam types yet</span>'}
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:4px;">
+          <h4 style="margin:0;">Exam Types &amp; Year-End Weightage</h4>
+          ${canCreate ? `<div style="display:flex; gap:8px;">
+            ${examTypes.length===0 ? `<button class="btn btn-ghost btn-sm" onclick="quickSetupExamTypes()">⚡ Quick setup (FA×4 / SA1 / SA2 / Prefinals)</button>` : ''}
+            <button class="btn btn-primary btn-sm" onclick="openExamTypeModal()">+ Add Exam Type</button>
+          </div>` : ''}
+        </div>
+        <p style="font-size:0.82rem; color:var(--ink-soft); margin:4px 0 14px; max-width:680px;">Each type says what kind of assessment it is, how much it counts toward the Year-End Marks Card, and — like Prefinals — which classes it's even offered to. Individual exams (FA1, FA2, SA1…) are created below and tagged with one of these types.</p>
+        <div class="table-wrap">
+          <table><thead><tr><th>Type</th><th>Kind</th><th>Year-End Weight</th><th>Offered To</th><th></th></tr></thead>
+          <tbody>
+          ${examTypes.length ? examTypes.map(t => `
+            <tr>
+              <td class="name-cell">${t.name}</td>
+              <td>${groupBadge(t.group)}</td>
+              <td>${t.includeInAnnual ? (t.group==='formative' ? `${t.weightPercent}% <span style="color:var(--ink-soft); font-size:0.76rem;">(shared across all exams of this type)</span>` : t.weightPercent+'%') : '<span style="color:var(--ink-soft);">Not counted</span>'}</td>
+              <td>${t.scopeClasses && t.scopeClasses.length ? t.scopeClasses.map(c => `<span class="pill">${c}</span>`).join(' ') : 'All classes'}</td>
+              <td>${canEdit ? `<button class="btn-edit-text" onclick="openExamTypeModal('${t.id}')">Edit</button>` : ''}${(canEdit && canDelete) ? ' · ' : ''}${canDelete ? `<button class="btn-danger-text" onclick="removeExamType('${t.id}')">Delete</button>` : ''}</td>
+            </tr>
+          `).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No exam types yet</b>Use "Quick setup" for the standard Formative/Summative/Prefinals pattern, or add your own.</div></td></tr>`}
+          </tbody></table>
         </div>
       </div>
 
       ${canCreate ? `<button class="btn btn-primary" style="margin-bottom:16px;" onclick="openExamModal()">+ Add Exam</button>` : ''}
-      ${examDefs.length ? examDefs.map(ex => `
+      ${examDefs.length ? examDefs.map(ex => {
+        const type = examTypeByName(ex.examType);
+        return `
         <div class="list-manage-row">
-          <div><div class="lm-name">${ex.name}</div><div class="lm-meta">${ex.examType||'—'} · ${ex.startDate ? (ex.startDate + (ex.endDate && ex.endDate!==ex.startDate ? ' – ' + ex.endDate : '')) : 'No dates set'}</div></div>
+          <div><div class="lm-name">${ex.name}</div><div class="lm-meta">${ex.examType||'—'}${type && type.scopeClasses && type.scopeClasses.length ? ' · ' + type.scopeClasses.join(', ') + ' only' : ''} · ${ex.startDate ? (ex.startDate + (ex.endDate && ex.endDate!==ex.startDate ? ' – ' + ex.endDate : '')) : 'No dates set'}</div></div>
           <div style="display:flex; gap:10px;">
             ${canEdit ? `<button class="btn-edit-text" onclick="openSubjConfigGrid('${ex.id}')">Configure Subjects</button>` : ''}
             ${canEdit ? `<button class="btn-edit-text" onclick="openExamModal('${ex.id}')">Edit</button>` : ''}
             ${canDelete ? `<button class="btn-danger-text" onclick="deleteExam('${ex.id}')">Delete</button>` : ''}
           </div>
         </div>
-      `).join('') : `<div class="empty-state"><b>No exams yet</b>Click "+ Add Exam" to create your first one.</div>`}
+      `;}).join('') : `<div class="empty-state"><b>No exams yet</b>Click "+ Add Exam" to create your first one.</div>`}
     `;
   }
-  async function addExamType(){
-    const val = document.getElementById('newExamTypeName').value.trim();
-    if(!val) return;
-    examTypes.push(val);
+  async function quickSetupExamTypes(){
+    if(examTypes.length > 0 && !await showConfirmDialog('This adds the standard Formative/Summative/Prefinals types alongside whatever you already have. Continue?')) return;
+    const tenth = CLASS_LEVELS[CLASS_LEVELS.length-1]; // last class level = the board-exam class, "10th Class" by default
+    const mk = (name, group, weightPercent, includeInAnnual, scopeClasses) => ({ id:'etype_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), name, group, weightPercent, includeInAnnual, scopeClasses });
+    examTypes.push(
+      mk('Formative Assessment', 'formative', 20, true, []),
+      mk('Summative Assessment 1', 'summative', 20, true, []),
+      mk('Summative Assessment 2 (Annual)', 'summative', 60, true, []),
+      mk('Prefinals', 'internal', 0, false, [tenth]),
+    );
     await storageSet(EXAM_TYPES_KEY, examTypes);
     renderExamsListTab(document.getElementById('examBody'));
-    showToast('Exam type added.', 'burst');
+    showToast('Standard exam types added — create FA1–FA4, SA1 and SA2 as exams under them.', 'burst');
   }
-  async function removeExamType(idx){
-    examTypes.splice(idx,1);
+  function openExamTypeModal(id){
+    document.getElementById('examTypeForm').reset();
+    document.getElementById('editExamTypeId').value = id || '';
+    document.getElementById('examTypeModalTitle').textContent = id ? 'Edit Exam Type' : 'Add Exam Type';
+    const t = id ? examTypes.find(x => x.id===id) : null;
+    document.getElementById('etName').value = t ? t.name : '';
+    document.getElementById('etGroup').value = t ? t.group : 'formative';
+    document.getElementById('etIncludeInAnnual').checked = t ? !!t.includeInAnnual : true;
+    document.getElementById('etWeight').value = t ? t.weightPercent : 0;
+    document.getElementById('etScopeBox').innerHTML = CLASS_LEVELS.map(c => `
+      <label class="admission-toggle"><input type="checkbox" class="et-scope-check" value="${c}" ${t && t.scopeClasses && t.scopeClasses.includes(c) ? 'checked' : ''}> ${c}</label>
+    `).join('');
+    toggleExamTypeWeightHint();
+    document.getElementById('examTypeModalOverlay').classList.add('open');
+  }
+  function closeExamTypeModal(){
+    document.getElementById('examTypeModalOverlay').classList.remove('open');
+  }
+  function toggleExamTypeWeightHint(){
+    const group = document.getElementById('etGroup').value;
+    const hint = document.getElementById('etWeightHint');
+    if(hint) hint.textContent = group === 'formative'
+      ? 'This is the TOTAL weight for the whole type — split evenly across however many exams you create under it (e.g. 20% ÷ 4 tests).'
+      : 'Each exam under a Summative/Other type carries this weight on its own (e.g. give SA1 20% and SA2 60%).';
+  }
+  async function saveExamTypeModal(e){
+    e.preventDefault();
+    const id = document.getElementById('editExamTypeId').value;
+    const name = document.getElementById('etName').value.trim();
+    if(!name){ showToast('Enter a name for the exam type.'); return false; }
+    const dup = examTypes.find(t => t.name.toLowerCase()===name.toLowerCase() && t.id!==id);
+    if(dup){ showToast('An exam type with this name already exists.'); return false; }
+    const scopeClasses = Array.from(document.querySelectorAll('.et-scope-check:checked')).map(c => c.value);
+    const data = {
+      name,
+      group: document.getElementById('etGroup').value,
+      includeInAnnual: document.getElementById('etIncludeInAnnual').checked,
+      weightPercent: Number(document.getElementById('etWeight').value) || 0,
+      scopeClasses,
+    };
+    if(id){
+      const t = examTypes.find(x => x.id===id);
+      const oldName = t.name;
+      Object.assign(t, data);
+      // Exams reference their type by name (not id), so a rename has to
+      // cascade — otherwise every exam quietly falls back to an "unknown type".
+      if(oldName !== name) examDefs.forEach(ex => { if(ex.examType === oldName) ex.examType = name; });
+    } else {
+      examTypes.push({ id:'etype_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), ...data });
+    }
+    await storageSet(EXAM_TYPES_KEY, examTypes);
+    if(id) await storageSet(EXAM_DEFS_KEY, examDefs);
+    closeExamTypeModal();
+    renderExamsListTab(document.getElementById('examBody'));
+    showToast('Exam type saved.', 'burst');
+    return false;
+  }
+  async function removeExamType(id){
+    const t = examTypes.find(x => x.id===id);
+    if(!t) return;
+    const inUse = examDefs.some(ex => ex.examType === t.name);
+    if(inUse && !await showConfirmDialog(`"${t.name}" is used by one or more exams — they'll show as having no type, but their marks are untouched. Delete anyway?`)) return;
+    examTypes = examTypes.filter(x => x.id !== id);
     await storageSet(EXAM_TYPES_KEY, examTypes);
     renderExamsListTab(document.getElementById('examBody'));
   }
@@ -8753,17 +8935,22 @@
   function renderSubjConfigGrid(body){
     const exam = examDefs.find(e => e.id === examCurrentExamId);
     if(!exam){ examSubjView = 'list'; return renderExamBody(); }
-    const rows = CLASS_LEVELS.map((cls, idx) => {
+    const allowedClasses = classLevelsForExamType(exam.examType);
+    const rows = allowedClasses.map((cls, idx) => {
       const count = getClassSubjectSummary(exam, cls).length;
+      const range = classExamDateRange(exam, cls);
       return `<div class="class-compact-tile" data-idx="${idx%4}" onclick="openSubjConfigEditor('${cls}')">
         <div class="class-compact-header"><div>
           <div class="class-compact-name">${cls}</div>
           <div class="class-compact-count">${count} <span class="class-compact-count-label">subject${count===1?'':'s'}</span></div>
+          ${range ? `<div style="font-size:0.72rem; color:var(--ink-soft); margin-top:2px;">${range.start}${range.end!==range.start ? ' – '+range.end : ''}</div>` : ''}
         </div></div>
       </div>`;
     }).join('');
+    const type = examTypeByName(exam.examType);
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToExamsList()">All Exams</a> &nbsp;/&nbsp; ${exam.name} — choose a class to manage its subjects</div>
+      ${type && type.scopeClasses && type.scopeClasses.length ? `<p style="font-size:0.82rem; color:var(--ink-soft); margin:-8px 0 16px;">"${exam.examType}" is only offered to ${type.scopeClasses.join(', ')} — other classes are hidden here.</p>` : ''}
       <div class="class-compact-grid">${rows}</div>
     `;
   }
@@ -8905,7 +9092,7 @@
     document.getElementById('editExamId').value = id || '';
     document.getElementById('examModalTitle').textContent = id ? 'Edit Exam' : 'Add Exam';
     const typeSel = document.getElementById('exType');
-    typeSel.innerHTML = '<option value="" disabled selected>Select exam type</option>' + examTypes.map(t => `<option value="${t}">${t}</option>`).join('');
+    typeSel.innerHTML = '<option value="" disabled selected>Select exam type</option>' + examTypes.map(t => `<option value="${t.name}">${t.name}</option>`).join('');
     if(id){
       const ex = examDefs.find(e => e.id === id);
       document.getElementById('exName').value = ex.name;
@@ -8966,6 +9153,7 @@
     }
     if(!examCurrentExamId || !examDefs.find(e => e.id === examCurrentExamId)) examCurrentExamId = examDefs[0].id;
     const examOptions = examDefs.map(ex => `<option value="${ex.id}" ${examCurrentExamId===ex.id?'selected':''}>${ex.name}</option>`).join('');
+    const currentExam = examDefs.find(e => e.id === examCurrentExamId);
     const scope = myTeacherScope();
     if(scope && !scope.subjectSections.length){
       body.innerHTML = `<div class="empty-state"><b>You're not assigned as a Subject Teacher for any class yet</b>Marks can only be entered by that subject's assigned teacher — ask an admin to assign you one under Subjects.</div>`;
@@ -8973,7 +9161,7 @@
     }
     const isSectionAllowed = (cls, sec) => !scope || scope.subjectSections.some(ss => ss.className===cls && ss.section===sec);
     const gridHtml = buildModernClassGrid(
-      CLASS_LEVELS,
+      classLevelsForExamType(currentExam && currentExam.examType),
       (cls, sec) => isSectionAllowed(cls, sec) ? students.filter(s => s.className===cls && s.section===sec && isActive(s)).length : 0,
       cls => `toggleMarksClassExpand('${cls}')`,
       (cls, sec) => `openMarksSection('${cls}','${sec}')`,
@@ -11646,6 +11834,208 @@
         </div>
       </body></html>
     `);
+    w.document.close();
+  }
+
+  /* --- Year-End Marks Card: weighted roll-up of every exam type flagged
+     "Counts toward Year-End Marks Card" (see Exam Types tab) into one
+     official annual result per subject, per student. Formative-group types
+     share one total weight averaged across however many instances exist
+     (FA1..FA4); Summative/Other types each carry their own weight on their
+     one named exam (SA1, SA2...). Anything not flagged — Prefinals by
+     default — never enters this calculation at all. --- */
+  let yeClass = '', yeSection = '';
+  function yearEndTypesForClass(className){
+    return examTypes.filter(t => t.includeInAnnual && classAllowedForExamType(t.name, className));
+  }
+  function examsOfTypeForClass(typeName, className){
+    return examDefs.filter(ex => ex.examType === typeName);
+  }
+  function subjectPctInExam(exam, studentId, className, section, subjectName){
+    const subjDef = getExamSubjects(exam, className, section).find(s => s.name === subjectName);
+    if(!subjDef) return null;
+    const max = Number(subjDef.maxMarks) || 0;
+    if(max <= 0) return null;
+    const res = examResults.find(r => r.examId===exam.id && r.studentId===studentId && r.subject===subjectName);
+    if(!res) return null;
+    const marks = res.absent ? 0 : (Number(res.marks)||0);
+    return (marks/max)*100;
+  }
+  // The subject roster for the card: the fullest countable subject list among
+  // this class's year-end-eligible exams, preferring a Summative exam's list
+  // (most likely to be complete/final) over a Formative one.
+  function yearEndSubjectRoster(className, section){
+    const types = yearEndTypesForClass(className).slice().sort((a,b) => {
+      const rank = g => g==='summative' ? 0 : g==='other' ? 1 : 2;
+      return rank(a.group) - rank(b.group) || b.weightPercent - a.weightPercent;
+    });
+    for(const t of types){
+      for(const exam of examsOfTypeForClass(t.name, className)){
+        const subs = getExamSubjects(exam, className, section).filter(s => s.countable !== false).map(s => s.name);
+        if(subs.length) return subs;
+      }
+    }
+    return [];
+  }
+  function computeYearEndSubject(studentId, className, section, subjectName){
+    const types = yearEndTypesForClass(className);
+    let weightedSum = 0, weightAvailable = 0;
+    const breakdown = [];
+    types.forEach(t => {
+      const exams = examsOfTypeForClass(t.name, className);
+      if(t.group === 'formative'){
+        const pcts = exams.map(ex => subjectPctInExam(ex, studentId, className, section, subjectName)).filter(p => p !== null);
+        if(pcts.length){
+          const avg = pcts.reduce((a,b) => a+b, 0) / pcts.length;
+          weightedSum += (avg/100) * t.weightPercent;
+          weightAvailable += t.weightPercent;
+          breakdown.push({ label: t.name, detail: `${pcts.length}/${exams.length} test(s)`, pct: avg, weight: t.weightPercent });
+        }
+      } else {
+        const withData = exams.map(ex => ({ ex, pct: subjectPctInExam(ex, studentId, className, section, subjectName) })).filter(x => x.pct !== null);
+        if(withData.length){
+          const latest = withData[withData.length-1];
+          weightedSum += (latest.pct/100) * t.weightPercent;
+          weightAvailable += t.weightPercent;
+          breakdown.push({ label: t.name, detail: latest.ex.name, pct: latest.pct, weight: t.weightPercent });
+        }
+      }
+    });
+    if(weightAvailable === 0) return null;
+    const pct = (weightedSum / weightAvailable) * 100; // scaled up if not everything's been conducted yet
+    return { pct: Math.round(pct*10)/10, weightAvailable, breakdown };
+  }
+  function computeYearEndForStudent(studentId, className, section){
+    const roster = yearEndSubjectRoster(className, section);
+    const subjects = roster.map(name => {
+      const r = computeYearEndSubject(studentId, className, section, name);
+      return { name, pct: r ? r.pct : null, grade: r ? gradeForConsolPct(r.pct) : '—', breakdown: r ? r.breakdown : [], complete: r ? r.weightAvailable >= 100 : false };
+    });
+    const withData = subjects.filter(s => s.pct !== null);
+    const overallPct = withData.length ? Math.round((withData.reduce((a,s) => a+s.pct, 0)/withData.length)*10)/10 : null;
+    const overallGrade = overallPct !== null ? gradeForConsolPct(overallPct) : '—';
+    return { subjects, overallPct, overallGrade, allComplete: subjects.length>0 && subjects.every(s => s.complete) };
+  }
+  function renderYearEndTab(body){
+    if(!yeClass) yeClass = CLASS_LEVELS[0];
+    const classesWithTypes = CLASS_LEVELS.filter(c => yearEndTypesForClass(c).length > 0);
+    if(classesWithTypes.length === 0){
+      body.innerHTML = `<div class="empty-state"><b>No exam types are set up for the Year-End Marks Card yet</b>Go to <a onclick="switchView('exams'); setTimeout(()=>switchExamTab('exams'),0);" style="color:var(--magenta); cursor:pointer; font-weight:600;">Manage Exams → Exams tab</a> and use "Quick setup" (or add your own types) with "Counts toward Year-End Marks Card" turned on.</div>`;
+      return;
+    }
+    if(!classesWithTypes.includes(yeClass)) yeClass = classesWithTypes[0];
+    if(!yeSection) yeSection = SECTIONS[0];
+    const roster = yearEndSubjectRoster(yeClass, yeSection);
+    const list = students.filter(s => s.className===yeClass && s.section===yeSection && isActive(s));
+    const typesInUse = yearEndTypesForClass(yeClass);
+    body.innerHTML = `
+      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">
+        The official annual result — Formative and Summative exams combined by their configured weight (see <a onclick="switchExamTab('exams')" style="color:var(--magenta); cursor:pointer; font-weight:600;">Exam Types</a>). Anything not flagged to count (like Prefinals) stays out of this entirely.
+      </p>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;">
+        ${typesInUse.map(t => `<span class="pill" style="background:rgba(33,26,78,0.06);">${t.name} — ${t.weightPercent}%</span>`).join('')}
+      </div>
+      <div class="form-grid" style="max-width:420px; margin-bottom:16px;">
+        <div class="f-field"><label>Class</label><select onchange="yeClass=this.value; renderYearEndTab(document.getElementById('resultBody'));">${classesWithTypes.map(c => `<option ${c===yeClass?'selected':''}>${c}</option>`).join('')}</select></div>
+        <div class="f-field"><label>Section</label><select onchange="yeSection=this.value; renderYearEndTab(document.getElementById('resultBody'));">${SECTIONS.map(sec => `<option ${sec===yeSection?'selected':''}>${sec}</option>`).join('')}</select></div>
+      </div>
+      ${roster.length===0 ? `<div class="empty-state"><b>No countable subjects found yet for ${yeClass}</b>Configure subjects under Manage Exams for at least one Formative or Summative exam first.</div>` : `
+      <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+        <button class="btn btn-primary btn-sm" onclick="printBulkYearEndCards()" ${list.length===0?'disabled':''}>🖨️ Print Year-End Cards — ${yeClass} Section ${yeSection}</button>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Student</th><th>Admission No</th>${roster.map(n => `<th>${n}</th>`).join('')}<th>Overall %</th><th>Grade</th><th></th></tr></thead>
+        <tbody>
+        ${list.length ? list.map(s => {
+          const r = computeYearEndForStudent(s.id, yeClass, yeSection);
+          const bySubject = {}; r.subjects.forEach(su => bySubject[su.name]=su);
+          return `<tr>
+            <td class="name-cell">${s.firstName} ${s.lastName}</td>
+            <td>${s.admissionNo}</td>
+            ${roster.map(n => { const su=bySubject[n]; return `<td>${su && su.pct!==null ? su.pct+'%' : '—'}${su && !su.complete ? ' <span style="color:var(--ink-soft); font-size:0.72rem;">(partial)</span>' : ''}</td>`; }).join('')}
+            <td><b>${r.overallPct!==null ? r.overallPct+'%' : '—'}</b></td>
+            <td><span class="grade-pill ${isFailGrade(r.overallGrade)?'fail':''}">${r.overallGrade}</span></td>
+            <td><button class="btn-edit-text" onclick="printYearEndCard('${s.id}')">Print</button></td>
+          </tr>`;
+        }).join('') : `<tr><td colspan="${roster.length+5}"><div class="empty-state"><b>No students in ${yeClass} — Section ${yeSection}</b></div></td></tr>`}
+        </tbody></table>
+      </div>
+      `}
+    `;
+  }
+  function yearEndCardPageHtml(s){
+    const r = computeYearEndForStudent(s.id, s.className, s.section);
+    const typesInUse = yearEndTypesForClass(s.className);
+    const t = reportTemplates.find(x => x.isDefault) || reportTemplates[0] || { signatureLabel1:'Class Teacher', signatureLabel2:'Principal / Correspondent' };
+    const logoSrc = schoolLogoSrc ? schoolLogoSrc() : document.querySelector('.sb-brand img').src;
+    const attendance = computeAttendanceStats(s.id);
+    return `
+      <div class="yec-card">
+        <div class="yec-head"><img src="${logoSrc}"></div>
+        <div class="yec-school">${schoolInfo.name||''}</div>
+        <div class="yec-addr">${schoolInfo.address||''}</div>
+        <div class="yec-title">YEAR-END MARKS CARD — ${currentAcademicYearValue || ''}</div>
+        <div class="yec-info">
+          <div>Student Name: <b>${s.firstName} ${s.lastName}</b></div>
+          <div>Admission No: <b>${s.admissionNo}</b></div>
+          <div>Class &amp; Section: <b>${s.className} — ${s.section}</b></div>
+          <div>Father Name: <b>${s.fatherName||'—'}</b></div>
+          ${attendance ? `<div>Attendance: <b>${attendance.present}/${attendance.total} (${attendance.pct}%)</b></div>` : ''}
+        </div>
+        <table>
+          <thead><tr><th>Subject</th>${typesInUse.map(ty => `<th>${ty.name}<br><span style="font-weight:400;">(${ty.weightPercent}%)</span></th>`).join('')}<th>Total</th><th>Grade</th></tr></thead>
+          <tbody>
+          ${r.subjects.map(su => {
+            const byLabel = {}; su.breakdown.forEach(b => byLabel[b.label]=b);
+            return `<tr>
+              <td>${su.name}</td>
+              ${typesInUse.map(ty => { const b=byLabel[ty.name]; return `<td>${b ? Math.round(b.pct*10)/10+'%' : '—'}</td>`; }).join('')}
+              <td><b>${su.pct!==null ? su.pct+'%' : '—'}</b></td>
+              <td><b>${su.grade}</b></td>
+            </tr>`;
+          }).join('')}
+          <tr><td><b>Overall</b></td><td colspan="${typesInUse.length}"></td><td><b>${r.overallPct!==null ? r.overallPct+'%' : '—'}</b></td><td><b>${r.overallGrade}</b></td></tr>
+          </tbody>
+        </table>
+        <div class="yec-sign">
+          <div>${resolveReportSignature1(t,s) ? `<img src="${resolveReportSignature1(t,s)}">` : ''}${t.signatureLabel1 || 'Class Teacher'}</div>
+          <div>${resolveReportSignature2(t) ? `<img src="${resolveReportSignature2(t)}" style="margin-left:auto;">` : ''}${t.signatureLabel2 || 'Principal / Correspondent'}</div>
+        </div>
+      </div>
+    `;
+  }
+  function yearEndPrintCss(){
+    return `
+      @page{ size:A4; margin:14mm; }
+      body{ font-family:Arial,Helvetica,sans-serif; color:#111; margin:0; }
+      .yec-card{ page-break-after:always; padding-bottom:10mm; }
+      .yec-card:last-child{ page-break-after:auto; }
+      .yec-head{ display:flex; align-items:center; gap:12px; justify-content:center; margin-bottom:6px; }
+      .yec-head img{ width:44px; height:44px; border-radius:50%; }
+      .yec-school{ font-weight:700; font-size:18px; text-align:center; }
+      .yec-addr{ font-size:11px; text-align:center; color:#555; margin-bottom:14px; }
+      .yec-title{ text-align:center; font-weight:700; font-size:13px; border-top:1px solid #333; border-bottom:1px solid #333; padding:5px 0; margin-bottom:14px; }
+      .yec-info{ display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:12px; margin-bottom:16px; }
+      .yec-card table{ width:100%; border-collapse:collapse; font-size:11px; margin-bottom:16px; }
+      .yec-card th, .yec-card td{ border:1px solid #999; padding:5px 6px; text-align:left; }
+      .yec-card th{ background:#211A4E; color:#fff; }
+      .yec-sign{ display:flex; justify-content:space-between; font-size:12px; margin-top:50px; }
+      .yec-sign img{ height:34px; display:block; margin-bottom:3px; }
+    `;
+  }
+  function printYearEndCard(studentId){
+    const s = students.find(x => x.id===studentId);
+    if(!s) return;
+    const w = window.open('', '_blank');
+    w.document.write(`<html><head><title>Year-End Marks Card - ${s.firstName} ${s.lastName}</title><style>${yearEndPrintCss()}</style></head><body onload="window.print()">${yearEndCardPageHtml(s)}</body></html>`);
+    w.document.close();
+  }
+  async function printBulkYearEndCards(){
+    const list = students.filter(s => s.className===yeClass && s.section===yeSection && isActive(s));
+    if(list.length === 0) return;
+    if(list.length > 60 && !await showConfirmDialog(`Print ${list.length} Year-End Marks Cards at once? This can take a moment to render.`)) return;
+    const w = window.open('', '_blank');
+    w.document.write(`<html><head><title>Year-End Marks Cards - ${yeClass} Section ${yeSection}</title><style>${yearEndPrintCss()}</style></head><body onload="window.print()">${list.map(s => yearEndCardPageHtml(s)).join('')}</body></html>`);
     w.document.close();
   }
 
