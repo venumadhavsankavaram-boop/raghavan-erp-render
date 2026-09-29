@@ -3810,6 +3810,23 @@
       return cp && PERMISSION_ACTIONS.some(a => cp[a]);
     });
   }
+  // Same bug, one level up: a FLAT module with no children (Manage Student,
+  // Manage Fee's own row, Inventory's own row, Manage Staff, ...) used to
+  // stay completely invisible unless its own "View" box specifically was
+  // ticked — so an admin who granted Office Assistant only "Create" (or only
+  // "Approve") on a module, meaning to let them do that one thing, found the
+  // whole module missing from the sidebar with no obvious reason why.
+  // Fix: a module is implicitly viewable the moment ANY of its own action
+  // checkboxes is ticked, not just "View" specifically — the module then
+  // shows up in the sidebar, and each individual button/screen inside it
+  // still only shows for the specific action that's actually granted (every
+  // button already gates itself with its own canDo(module, action) check;
+  // this only ever widens whether the module's page is reachable at all,
+  // never which buttons appear once you're on it).
+  function moduleHasAnyOwnPermission(ov, moduleKey){
+    const p = ov.permissions[moduleKey];
+    return !!(p && PERMISSION_ACTIONS.some(a => p[a]));
+  }
   // Pages that manage who can log in and what every role can do are never
   // delegable through this matrix, no matter how a role is customized —
   // otherwise a role could grant itself (or anyone) more access than it
@@ -3849,7 +3866,7 @@
     const ov = findRoleOverride(role);
     if(ov){
       return PERMISSION_MODULES.filter(m => {
-        if(ov.permissions[m.key] !== undefined) return !!ov.permissions[m.key].view || moduleHasAnyChildPermission(ov, m.key);
+        if(ov.permissions[m.key] !== undefined) return moduleHasAnyOwnPermission(ov, m.key) || moduleHasAnyChildPermission(ov, m.key);
         // This module didn't exist yet when the override was saved — fall back to the role's built-in default instead of silently hiding it.
         return ROLE_VIEWS[role] ? ROLE_VIEWS[role].includes(m.key) : false;
       }).map(m => m.key);
@@ -3860,7 +3877,7 @@
     const ov = findRoleOverride(role);
     if(ov){
       if(ov.permissions[moduleKey] !== undefined){
-        if(action === 'view') return !!ov.permissions[moduleKey].view || moduleHasAnyChildPermission(ov, moduleKey);
+        if(action === 'view') return moduleHasAnyOwnPermission(ov, moduleKey) || moduleHasAnyChildPermission(ov, moduleKey);
         return !!ov.permissions[moduleKey][action];
       }
       return ROLE_VIEWS[role] ? ROLE_VIEWS[role].includes(moduleKey) : false;
@@ -20605,7 +20622,7 @@
         <div class="perm-legend-item">✅ <b>Approve</b> — approve a workflow (payroll, admissions, etc.)</div>
       </div>
       <p style="font-size:0.78rem; color:var(--ink-soft); margin:-6px 0 14px; max-width:760px;">
-        A parent row (like "Manage Fee" or "Manage Exams") shows up in the sidebar the moment <b>any</b> item nested under it has any permission at all — you no longer need to separately tick "View" on the parent row too. Use the <b>None / View / Entry / Full</b> buttons under each row's name for the most common combinations, or tick individual boxes for anything more specific.
+        A parent row (like "Manage Fee" or "Manage Exams") shows up in the sidebar the moment <b>any</b> item nested under it has any permission at all — you no longer need to separately tick "View" on the parent row too. The same is true for every row on its own: ticking just <b>Create</b>, <b>Print</b>, or <b>Approve</b> (say) is enough by itself to make that module appear in the sidebar, even with "View" left unticked — only the specific buttons/screens for what's actually ticked will show once inside. Use the <b>None / View / Entry / Full</b> buttons under each row's name for the most common combinations, or tick individual boxes for anything more specific.
       </p>
       <div class="perm-toolbar">
         <input type="text" class="perm-search" id="permSearchBox" placeholder="🔍 Search modules (e.g. fee, attendance, inventory)…" oninput="filterPermRows(this.value)">
