@@ -4565,8 +4565,23 @@ app.use((err, req, res, next) => {
 // Put your ERP's index.html (and any other static assets) in the "public"
 // folder next to this file — Express serves it directly, same origin as
 // the API, so the frontend's existing fetch('/api/...') calls just work.
-app.use(express.static(path.join(__dirname, 'public')));
+// The HTML shell must always revalidate with the server on every load —
+// every trace of this app's code lives inline in index.html, so a stale
+// cached copy of it means stale JS too, no matter how many times the page
+// itself gets refreshed. Everything ELSE (icons, manifest.json) can still
+// use the browser's normal caching — only index.html is forced to check
+// back, and ETag/Last-Modified still make that check a cheap 304 when
+// nothing actually changed, so this doesn't mean re-downloading the whole
+// file on every visit, just never trusting a copy without asking first.
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('index.html')) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    }
+  },
+}));
 app.get(/.*/, (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 

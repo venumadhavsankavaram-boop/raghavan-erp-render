@@ -6,7 +6,7 @@
      - is network-first for everything it does cache, only falling back to
        the cached copy when the network request itself fails.
    Bump CACHE_NAME whenever the shell changes so old caches get cleared. */
-const CACHE_NAME = 'school-erp-shell-v1';
+const CACHE_NAME = 'school-erp-shell-v2';
 const SHELL_URLS = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {

@@ -3233,8 +3233,19 @@
     // 35-button wall. switchView() below still auto-opens whichever section the
     // signed-in role actually lands on. Once someone has clicked a section
     // header themselves, their saved choices (per key, above) take over.
+    // On mobile this default is different: there's no hover-to-preview (no
+    // mouse), and the off-canvas drawer is already hidden until opened, so
+    // there's none of the "always-visible sidebar getting too tall" problem
+    // that collapsing solves on desktop. Without this, a role with several
+    // permitted modules spread across categories (Manage Fee, Inventory,
+    // Staff, ...) looked like it only had ONE module — whichever one lived
+    // under Overview — because every other section's links were collapsed
+    // behind a header that has to be tapped, easy to miss on a phone. So a
+    // first-ever mobile visit starts with every section already expanded;
+    // a saved per-section choice (from actually tapping a header) still wins.
+    const isMobile = window.innerWidth <= 820;
     SB_SECTION_KEYS.forEach(key => {
-      const collapsed = hasSaved ? !!state[key] : (key !== 'overview');
+      const collapsed = hasSaved ? !!state[key] : (!isMobile && key !== 'overview');
       const group = document.getElementById('sbGroup-'+key);
       const chevron = document.getElementById('sbChevron-'+key);
       if(group) group.classList.toggle('collapsed', collapsed);
