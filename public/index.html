@@ -2805,7 +2805,7 @@
       <form id="subjectForm" onsubmit="return saveSubjectModal(event)">
         <input type="hidden" id="editSubjectOriginalName">
         <div class="form-grid">
-          <div class="f-field"><label>Subject Name <span class="required-star">*</span></label><input type="text" id="subjName" required placeholder="e.g. Mathematics" list="masterSubjectsDatalist"><datalist id="masterSubjectsDatalist"></datalist></div>
+          <div class="f-field"><label>Subject Name <span class="required-star">*</span></label><input type="text" id="subjName" required placeholder="e.g. Mathematics" list="masterSubjectsDatalist" oninput="renderExamSubjStaffBox()"><datalist id="masterSubjectsDatalist"></datalist></div>
           <div class="f-field"><label>Course</label><input type="text" id="subjCourse" disabled></div>
         </div>
         <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:12px 0 6px; display:block;">Sections <span class="required-star">*</span></label>
@@ -2825,6 +2825,35 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" onclick="closeSubjectModal()">Cancel</button>
           <button type="submit" class="btn btn-primary" id="subjectSaveBtn">Add Subject</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="bulkSubjectModalOverlay">
+  <div class="modal" style="max-width:760px;">
+    <div class="modal-inner">
+      <button class="modal-close" onclick="closeBulkSubjectModal()">&times;</button>
+      <h2>Add Subject to Multiple Classes</h2>
+      <p class="modal-sub">One subject, added to as many classes &amp; sections as you tick below — each class still gets its own teacher picker, since that usually differs class to class.</p>
+      <form id="bulkSubjectForm" onsubmit="return saveBulkSubjectModal(event)">
+        <div class="form-grid">
+          <div class="f-field"><label>Subject Name <span class="required-star">*</span></label><input type="text" id="bsName" required placeholder="e.g. Mathematics" list="bulkMasterSubjectsDatalist" oninput="renderBulkSubjectPanels()"><datalist id="bulkMasterSubjectsDatalist"></datalist></div>
+          <div class="f-field"><label>Max Marks</label><input type="number" min="1" id="bsMaxMarks" value="100"></div>
+          <div class="f-field"><label>Exam Date <span class="required-star">*</span></label><input type="date" id="bsDate"></div>
+        </div>
+        <div style="display:flex; gap:30px; margin:4px 0 16px; flex-wrap:wrap;">
+          <label class="admission-toggle"><input type="checkbox" id="bsCountable" checked> Countable for Report Card</label>
+          <label class="admission-toggle"><input type="checkbox" id="bsElective"> Elective Subject</label>
+        </div>
+        <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:0 0 6px; display:block;">Classes <span class="required-star">*</span></label>
+        <p style="font-size:0.76rem; color:var(--ink-soft); margin:0 0 8px;">Tick every class this subject applies to. Each one opens below so you can fine-tune its sections and teacher(s).</p>
+        <div id="bsClassesBox" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px;"></div>
+        <div id="bsClassPanels"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" onclick="closeBulkSubjectModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Add to Selected Classes</button>
         </div>
       </form>
     </div>
@@ -8532,6 +8561,32 @@
     if(!type || !type.scopeClasses || type.scopeClasses.length === 0) return CLASS_LEVELS;
     return CLASS_LEVELS.filter(c => type.scopeClasses.includes(c));
   }
+  // --- Narrowing the Staff picker in the exam Subject modal to the teachers who
+  // actually deal with a given class, using the master Subjects catalog
+  // (Manage Subjects) as the source of truth, so admins aren't scrolling the
+  // whole staff list to find the right teacher for every single subject.
+  function classDealingStaffIds(className){
+    const ids = new Set();
+    subjectsList.filter(s => s.className === className).forEach(s => (s.staffIds||[]).forEach(id => ids.add(id)));
+    return ids;
+  }
+  // If `name` matches a master-subject name for this class, its own assigned
+  // staff is the most precise match; otherwise null (not "unmatched but empty").
+  function masterSubjectStaffIds(className, name){
+    const match = subjectsList.find(s => s.className === className && s.name.trim().toLowerCase() === String(name||'').trim().toLowerCase());
+    return match ? (match.staffIds || []) : null;
+  }
+  // Picks the narrowest useful staff pool for this class/subject: that exact
+  // subject's own teachers if the name matches a master-subject record, else
+  // anyone who teaches this class at all, else (no master-subject data yet)
+  // everyone — label is null in that last case, meaning "nothing to narrow by".
+  function examSubjStaffCandidates(className, name){
+    const bySubject = masterSubjectStaffIds(className, name);
+    if(bySubject && bySubject.length) return { ids: bySubject, label: `teachers assigned to "${name}" in ${className}` };
+    const byClass = classDealingStaffIds(className);
+    if(byClass.size) return { ids: Array.from(byClass), label: `teachers who teach ${className}` };
+    return { ids: staffList.map(s => s.id), label: null };
+  }
   // A class's own start/end for THIS exam, derived from whatever subject
   // dates have actually been set for it (across its sections) — not a
   // separate stored field, so it can never drift out of sync with the real
@@ -8952,9 +9007,11 @@
       </div>`;
     }).join('');
     const type = examTypeByName(exam.examType);
+    const canCreate = canSub('exams_definitions','exams','create');
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToExamsList()">All Exams</a> &nbsp;/&nbsp; ${exam.name} — choose a class to manage its subjects</div>
       ${type && type.scopeClasses && type.scopeClasses.length ? `<p style="font-size:0.82rem; color:var(--ink-soft); margin:-8px 0 16px;">"${exam.examType}" is only offered to ${type.scopeClasses.join(', ')} — other classes are hidden here.</p>` : ''}
+      ${canCreate ? `<button class="btn btn-ghost btn-sm" style="margin-bottom:16px;" onclick="openBulkSubjectModal()">+ Add Subject to Multiple Classes</button>` : ''}
       <div class="class-compact-grid">${rows}</div>
     `;
   }
@@ -9035,12 +9092,43 @@
       <label class="admission-toggle"><input type="checkbox" class="subj-sec-check" value="${sec}" ${existingSections.includes(sec)?'checked':''}> Section ${sec}</label>
     `).join('');
 
-    const existingStaffIds = existing && existing.staffIds ? existing.staffIds : [];
-    document.getElementById('subjStaffBox').innerHTML = staffList.length ? staffList.map(st => `
-      <label class="disc-check-item"><input type="checkbox" class="subj-staff-check" value="${st.id}" ${existingStaffIds.includes(st.id)?'checked':''}> ${st.firstName} ${st.lastName} <span style="color:var(--ink-soft); font-size:0.76rem;">(${st.designation||'Staff'})</span></label>
-    `).join('') : `<div style="font-size:0.82rem; color:var(--ink-soft);">No staff added yet — add some under Manage Staff.</div>`;
+    // Staff picker starts narrowed to this class's own teachers (or this exact
+    // subject's teachers, once the name matches a master-subject record) —
+    // see examSubjStaffCandidates(). An already-assigned teacher is always
+    // kept visible even if a later name edit narrows the pool past them.
+    examSubjStaffShowAll = false;
+    window._subjModalInitialStaffIds = existing && existing.staffIds ? existing.staffIds : [];
+    renderExamSubjStaffBox();
 
     document.getElementById('subjectModalOverlay').classList.add('open');
+  }
+  let examSubjStaffShowAll = false;
+  function renderExamSubjStaffBox(){
+    const box = document.getElementById('subjStaffBox');
+    if(!box) return;
+    const cls = examCurrentClass;
+    const name = document.getElementById('subjName').value;
+    const checkedNow = Array.from(document.querySelectorAll('.subj-staff-check:checked')).map(c => c.value);
+    const keepVisible = new Set(checkedNow.length ? checkedNow : (window._subjModalInitialStaffIds || []));
+
+    const narrowed = examSubjStaffCandidates(cls, name);
+    const useNarrowed = !examSubjStaffShowAll && !!narrowed.label;
+    const ids = useNarrowed ? narrowed.ids.slice() : staffList.map(s => s.id);
+    keepVisible.forEach(id => { if(!ids.includes(id)) ids.push(id); }); // never hide an already-picked teacher
+    const list = ids.map(id => staffList.find(s => s.id === id)).filter(Boolean);
+
+    const toggleLink = narrowed.label
+      ? (useNarrowed
+          ? `<a onclick="examSubjStaffShowAll=true; renderExamSubjStaffBox();" style="cursor:pointer; color:var(--magenta); font-weight:600;">Show all staff instead</a>`
+          : `<a onclick="examSubjStaffShowAll=false; renderExamSubjStaffBox();" style="cursor:pointer; color:var(--magenta); font-weight:600;">Show only ${narrowed.label}</a>`)
+      : '';
+    box.innerHTML = `
+      ${narrowed.label ? `<p style="font-size:0.74rem; color:var(--ink-soft); margin:0 0 6px;">${useNarrowed ? `Showing ${narrowed.label}.` : 'Showing all staff.'} ${toggleLink}</p>` : ''}
+      ${staffList.length ? (list.length ? list.map(st => `
+        <label class="disc-check-item"><input type="checkbox" class="subj-staff-check" value="${st.id}" ${keepVisible.has(st.id)?'checked':''}> ${st.firstName} ${st.lastName} <span style="color:var(--ink-soft); font-size:0.76rem;">(${st.designation||'Staff'})</span></label>
+      `).join('') : `<div style="font-size:0.82rem; color:var(--ink-soft);">No teachers found for this class yet — add subject-teacher assignments under Manage Subjects, or <a onclick="examSubjStaffShowAll=true; renderExamSubjStaffBox();" style="cursor:pointer; color:var(--magenta); font-weight:600;">show all staff</a>.</div>`)
+        : `<div style="font-size:0.82rem; color:var(--ink-soft);">No staff added yet — add some under Manage Staff.</div>`}
+    `;
   }
   function closeSubjectModal(){
     document.getElementById('subjectModalOverlay').classList.remove('open');
@@ -9089,6 +9177,156 @@
     await storageSet(EXAM_DEFS_KEY, examDefs);
     renderExamBody();
     showToast('Subject removed.', 'burst');
+  }
+
+  /* --- Bulk Add Subject: the same subject, added to several classes (and a
+     chosen set of sections within each) in one pass, instead of repeating
+     "Configure Subjects" once per class. Every class still gets its own
+     section list and its own teacher picker — narrowed to that class's
+     teachers via examSubjStaffCandidates(), same as the single-class flow —
+     because different classes are almost always taught by different staff
+     even for the "same" subject name. */
+  let bulkSubjSelectedClasses = [];   // ordered list of classNames currently ticked
+  let bulkSubjClassSections = {};     // className -> Set(section)
+  let bulkSubjClassStaff = {};        // className -> Set(staffId)
+  let bulkSubjClassShowAllStaff = {}; // className -> bool ("show all staff" override for that class's panel)
+
+  function openBulkSubjectModal(){
+    const exam = examDefs.find(e => e.id === examCurrentExamId);
+    if(!exam) return;
+    document.getElementById('bulkSubjectForm').reset();
+    document.getElementById('bsDate').value = exam.startDate || '';
+    document.getElementById('bulkMasterSubjectsDatalist').innerHTML = Array.from(new Set(subjectsList.map(s => s.name)))
+      .map(n => `<option value="${n}">`).join('');
+
+    bulkSubjSelectedClasses = [];
+    bulkSubjClassSections = {};
+    bulkSubjClassStaff = {};
+    bulkSubjClassShowAllStaff = {};
+
+    const allowedClasses = classLevelsForExamType(exam.examType);
+    document.getElementById('bsClassesBox').innerHTML = allowedClasses.map(cls => `
+      <label class="admission-toggle"><input type="checkbox" class="bs-class-check" value="${cls}" onchange="toggleBulkSubjClass('${cls}', this.checked)"> ${cls}</label>
+    `).join('');
+    renderBulkSubjectPanels();
+    document.getElementById('bulkSubjectModalOverlay').classList.add('open');
+  }
+  function closeBulkSubjectModal(){
+    document.getElementById('bulkSubjectModalOverlay').classList.remove('open');
+  }
+  function toggleBulkSubjClass(cls, checked){
+    if(checked){
+      if(!bulkSubjSelectedClasses.includes(cls)) bulkSubjSelectedClasses.push(cls);
+      if(!bulkSubjClassSections[cls]) bulkSubjClassSections[cls] = new Set(sectionsForClass(cls));
+      if(!bulkSubjClassStaff[cls]) bulkSubjClassStaff[cls] = new Set();
+    }else{
+      bulkSubjSelectedClasses = bulkSubjSelectedClasses.filter(c => c !== cls);
+    }
+    renderBulkSubjectPanels();
+  }
+  function toggleBulkSubjSection(cls, sec, checked){
+    const set = bulkSubjClassSections[cls] || (bulkSubjClassSections[cls] = new Set());
+    if(checked) set.add(sec); else set.delete(sec);
+  }
+  function toggleBulkSubjStaff(cls, staffId, checked){
+    const set = bulkSubjClassStaff[cls] || (bulkSubjClassStaff[cls] = new Set());
+    if(checked) set.add(staffId); else set.delete(staffId);
+  }
+  function toggleBulkSubjShowAllStaff(cls){
+    bulkSubjClassShowAllStaff[cls] = !bulkSubjClassShowAllStaff[cls];
+    renderBulkSubjectPanels();
+  }
+  // Applies class[0]'s current teacher selection to every other ticked class
+  // that shares at least one of those teachers on staff — a shortcut for the
+  // common case of one teacher covering the same subject across classes.
+  function copyBulkSubjStaffToAll(fromCls){
+    const source = Array.from(bulkSubjClassStaff[fromCls] || []);
+    if(source.length === 0){ showToast('Pick a teacher for this class first, then copy it to the others.'); return; }
+    // Copies the exact selection across regardless of each class's own
+    // narrowed candidate list — clicking "copy" is itself the admin's
+    // confirmation that this teacher does cover that class too, same as how
+    // an already-picked teacher stays visible even outside the narrowed set.
+    bulkSubjSelectedClasses.forEach(cls => {
+      if(cls === fromCls) return;
+      bulkSubjClassStaff[cls] = new Set(source);
+    });
+    renderBulkSubjectPanels();
+    showToast('Teacher selection copied to all selected classes.', 'burst');
+  }
+  function renderBulkSubjectPanels(){
+    const box = document.getElementById('bsClassPanels');
+    if(!box) return;
+    const name = document.getElementById('bsName').value;
+    box.innerHTML = bulkSubjSelectedClasses.map(cls => {
+      const sections = sectionsForClass(cls);
+      const selectedSections = bulkSubjClassSections[cls] || new Set(sections);
+      const selectedStaff = bulkSubjClassStaff[cls] || new Set();
+      const narrowed = examSubjStaffCandidates(cls, name);
+      const useNarrowed = !bulkSubjClassShowAllStaff[cls] && !!narrowed.label;
+      const ids = useNarrowed ? narrowed.ids.slice() : staffList.map(s => s.id);
+      selectedStaff.forEach(id => { if(!ids.includes(id)) ids.push(id); });
+      const staffOptions = ids.map(id => staffList.find(s => s.id === id)).filter(Boolean);
+      const toggleLink = narrowed.label
+        ? (useNarrowed
+            ? `<a onclick="toggleBulkSubjShowAllStaff('${cls}')" style="cursor:pointer; color:var(--magenta); font-weight:600;">Show all staff instead</a>`
+            : `<a onclick="toggleBulkSubjShowAllStaff('${cls}')" style="cursor:pointer; color:var(--magenta); font-weight:600;">Show only ${narrowed.label}</a>`)
+        : '';
+      return `
+      <div class="profile-card" style="margin-bottom:12px; padding:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+          <b>${cls}</b>
+          ${bulkSubjSelectedClasses.length > 1 ? `<button type="button" class="btn-edit-text" onclick="copyBulkSubjStaffToAll('${cls}')">Copy this class's teacher(s) to all</button>` : ''}
+        </div>
+        <div style="font-size:0.74rem; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Sections</div>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:10px;">
+          ${sections.map(sec => `<label class="admission-toggle"><input type="checkbox" ${selectedSections.has(sec)?'checked':''} onchange="toggleBulkSubjSection('${cls}','${sec}', this.checked)"> Section ${sec}</label>`).join('')}
+        </div>
+        <div style="font-size:0.74rem; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Teacher(s)</div>
+        ${narrowed.label ? `<p style="font-size:0.72rem; color:var(--ink-soft); margin:0 0 6px;">${useNarrowed ? `Showing ${narrowed.label}.` : 'Showing all staff.'} ${toggleLink}</p>` : ''}
+        <div class="disc-checklist" style="max-height:110px;">
+          ${staffList.length ? (staffOptions.length ? staffOptions.map(st => `
+            <label class="disc-check-item"><input type="checkbox" ${selectedStaff.has(st.id)?'checked':''} onchange="toggleBulkSubjStaff('${cls}','${st.id}', this.checked)"> ${st.firstName} ${st.lastName} <span style="color:var(--ink-soft); font-size:0.76rem;">(${st.designation||'Staff'})</span></label>
+          `).join('') : `<div style="font-size:0.8rem; color:var(--ink-soft);">No teachers found for ${cls} yet.</div>`) : `<div style="font-size:0.8rem; color:var(--ink-soft);">No staff added yet.</div>`}
+        </div>
+      </div>`;
+    }).join('') || `<div class="empty-state" style="margin-top:0;"><b>Tick a class above to configure it</b></div>`;
+  }
+  async function saveBulkSubjectModal(e){
+    e.preventDefault();
+    const exam = examDefs.find(x => x.id === examCurrentExamId);
+    const name = document.getElementById('bsName').value.trim();
+    if(!name){ showToast('Enter a subject name.'); return false; }
+    if(bulkSubjSelectedClasses.length === 0){ showToast('Tick at least one class.'); return false; }
+    const dateVal = document.getElementById('bsDate').value;
+    if(!dateVal){ showToast('Set an exam date — it\'s required before hall tickets can be generated.'); return false; }
+    const classesWithSections = bulkSubjSelectedClasses.filter(cls => (bulkSubjClassSections[cls]||new Set()).size > 0);
+    if(classesWithSections.length === 0){ showToast('Tick at least one section for at least one class.'); return false; }
+    const clashingHoliday = holidays.find(h => h.date===dateVal);
+    if(clashingHoliday && !await showConfirmDialog(`${dateVal} is marked as a holiday (${clashingHoliday.name}). Schedule the exam on this date anyway?`)) return false;
+
+    const maxMarks = Number(document.getElementById('bsMaxMarks').value) || 100;
+    const countable = document.getElementById('bsCountable').checked;
+    const elective = document.getElementById('bsElective').checked;
+    exam.classSubjects = exam.classSubjects || {};
+    let sectionCount = 0;
+    classesWithSections.forEach(cls => {
+      const masterMatch = subjectsList.find(s => s.className === cls && s.name.trim().toLowerCase() === name.toLowerCase());
+      const staffIds = Array.from(bulkSubjClassStaff[cls] || []);
+      const subjectData = { name, code: masterMatch ? (masterMatch.code||'') : '', maxMarks, date: dateVal, staffIds, countable, elective };
+      const sections = bulkSubjClassSections[cls];
+      sectionsForClass(cls).forEach(sec => {
+        const key = classSecKey(cls, sec);
+        let list = exam.classSubjects[key] ? exam.classSubjects[key].slice() : (exam.subjects ? exam.subjects.slice() : []);
+        list = list.filter(s => s.name !== name);
+        if(sections.has(sec)){ list.push(subjectData); sectionCount++; }
+        exam.classSubjects[key] = list;
+      });
+    });
+    await storageSet(EXAM_DEFS_KEY, examDefs);
+    closeBulkSubjectModal();
+    showToast(`"${name}" added to ${classesWithSections.length} class${classesWithSections.length===1?'':'es'} (${sectionCount} section${sectionCount===1?'':'s'}).`, 'burst');
+    renderExamBody();
+    return false;
   }
 
   function openExamModal(id){
