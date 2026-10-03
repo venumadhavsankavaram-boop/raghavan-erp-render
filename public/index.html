@@ -8324,6 +8324,16 @@
   }
 
   /* --- Holidays --- */
+  // Formats a Date object back to 'YYYY-MM-DD' using its LOCAL year/month/day
+  // (not .toISOString(), which is always UTC). Holiday dates are built from
+  // 'YYYY-MM-DDT00:00:00' strings with no timezone suffix, so the browser
+  // parses them as local midnight — reading them back with UTC getters (what
+  // .toISOString() does) silently rolls the date back a day for anyone east
+  // of UTC (e.g. India, UTC+5:30). Always pair a local-parsed date with this,
+  // never with .toISOString(), or the two will drift apart by a day.
+  function localDateStr(d){
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
   // Groups consecutive same-named holiday rows (e.g. a 10-day Summer
   // Vacation added as a range) back into one "Jun 1 – Jun 10" display row,
   // so a multi-day break doesn't read as ten separate unrelated entries —
@@ -8337,7 +8347,7 @@
       const prev = groups[groups.length-1];
       const prevNextDay = prev ? new Date(prev.to + 'T00:00:00') : null;
       if(prevNextDay) prevNextDay.setDate(prevNextDay.getDate()+1);
-      if(prev && prev.name === h.name && prevNextDay.toISOString().slice(0,10) === h.date){
+      if(prev && prev.name === h.name && prevNextDay && localDateStr(prevNextDay) === h.date){
         prev.to = h.date;
       }else{
         groups.push({ name: h.name, from: h.date, to: h.date });
@@ -8375,8 +8385,16 @@
     const spanDays = Math.round((new Date(to+'T00:00:00') - new Date(from+'T00:00:00')) / 86400000) + 1;
     if(spanDays > 120){ showToast('That range is ' + spanDays + ' days — double-check the From/To dates.'); return; }
     const dates = [];
+    // Bug fix: `d` here is parsed in the browser's LOCAL timezone (no 'Z'
+    // suffix on the time), but d.toISOString() always serializes in UTC —
+    // for anyone east of UTC (e.g. India, UTC+5:30) that silently rolled
+    // every date back by one day (Sun 4th stored as Sat/Sun-shifted 3rd). A
+    // multi-day range still looked "about right" since the whole span
+    // shifted together, but a single day landed on the wrong date outright.
+    // localDateStr reads the same Date object back with LOCAL getters
+    // instead, so it round-trips to exactly the date that was picked.
     for(let d = new Date(from+'T00:00:00'); d <= new Date(to+'T00:00:00'); d.setDate(d.getDate()+1)){
-      dates.push(d.toISOString().slice(0,10));
+      dates.push(localDateStr(d));
     }
     dates.forEach(date => {
       holidays = holidays.filter(h => h.date !== date);
