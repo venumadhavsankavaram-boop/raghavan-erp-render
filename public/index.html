@@ -1997,6 +1997,7 @@
       <div class="topbar"><div><h1>Accounting</h1><p>What's coming in, what's going out, and your current cash position — all in one place.</p></div></div>
       <div class="mf-tabs">
         <button type="button" class="mf-tab active" id="acttab-overview" onclick="switchAccountingTab('overview')">📊 Overview</button>
+        <button type="button" class="mf-tab" id="acttab-dailycollections" onclick="switchAccountingTab('dailycollections')" style="display:none;">🧾 Daily Collections</button>
         <button type="button" class="mf-tab" id="acttab-income" onclick="switchAccountingTab('income')">💰 Income</button>
         <button type="button" class="mf-tab" id="acttab-expense" onclick="switchAccountingTab('expense')">💸 Expenses</button>
         <button type="button" class="mf-tab" id="acttab-segments" onclick="switchAccountingTab('segments')">📈 P&amp;L by Account</button>
@@ -17204,6 +17205,7 @@
   }
 
   let accountingTab = 'overview';
+  let acctDailyCollectionsDate = new Date().toISOString().slice(0,10);
 
   /* ===== DOUBLE-ENTRY ACCOUNTING ENGINE =====
      Everything below sits ON TOP of the Income/Expense vouchers and Fee
@@ -18076,7 +18078,16 @@
       const btn = document.getElementById('acttab-'+t);
       if(btn) btn.style.display = accessibleTabs.includes(t) ? '' : 'none';
     });
-    if(!accessibleTabs.includes(accountingTab)){
+    // Daily Collections is a hard Admin-only report (cash-handover tool) — it
+    // deliberately bypasses the configurable per-role accounting permissions
+    // above, since it's meant to be visible to Admin alone, full stop.
+    const dcBtn = document.getElementById('acttab-dailycollections');
+    const isAdminUser = currentUser.role === 'Admin';
+    if(dcBtn) dcBtn.style.display = isAdminUser ? '' : 'none';
+    if(accountingTab === 'dailycollections' && !isAdminUser){
+      accountingTab = accessibleTabs[0] || 'overview';
+    }
+    if(!accessibleTabs.includes(accountingTab) && accountingTab !== 'dailycollections'){
       accountingTab = accessibleTabs[0] || 'overview';
     }
     switchAccountingTab(accountingTab);
@@ -18084,6 +18095,8 @@
   function switchAccountingTab(tab){
     accountingTab = tab;
     ACCT_TABS.forEach(t => document.getElementById('acttab-'+t).classList.toggle('active', t===tab));
+    const dcBtn = document.getElementById('acttab-dailycollections');
+    if(dcBtn) dcBtn.classList.toggle('active', tab==='dailycollections');
     renderAccountingBody();
   }
   async function renderAccountingBody(){
@@ -18094,6 +18107,14 @@
     ]);
     const body = document.getElementById('accountingBody');
     if(!body) return;
+    if(accountingTab === 'dailycollections'){
+      if(currentUser.role !== 'Admin'){
+        body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
+        return;
+      }
+      await ensureDataLoaded('inventorySales', loadInventory);
+      return renderAcctDailyCollectionsTab(body);
+    }
     if(!getAccountingTabAccess(currentUser.role, ACCT_TAB_PERM_KEYS[accountingTab])){
       body.innerHTML = `<div class="empty-state"><b>You don't have access to this section.</b></div>`;
       return;
@@ -18190,6 +18211,79 @@
         <table><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Party</th><th>Amount</th></tr></thead>
         <tbody>
         ${recentTx.length ? recentTx.map(t => `<tr><td>${t.date||'—'}</td><td>${t.type}</td><td>${t.category||'—'}</td><td>${t.party||'—'}</td><td style="color:${t.sign>0?'#0f6a63':'var(--magenta)'}; font-weight:600;">${t.sign>0?'+':'-'}${fmtMoney(t.amount)}</td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No transactions yet</b></div></td></tr>`}
+        </tbody></table>
+      </div>
+    `;
+  }
+
+  /* --- Daily Collections: Admin-only cash-handover reconciliation — "how much
+     did we collect today, by every mode, across every source" — pulls from
+     fee/extra-fee payments, other Income vouchers, AND inventory sales to
+     non-Student buyers (Staff/Walk-in), since those never create a `payments`
+     row of their own. Gated to currentUser.role==='Admin' in renderAccountingBody,
+     deliberately bypassing the configurable per-role accounting permissions. */
+  function renderAcctDailyCollectionsTab(body){
+    const d = acctDailyCollectionsDate || acctToday();
+    const todayStr = acctToday();
+    const FEE_CAT_LABELS = { fee:'Tuition Fee', bus:'Bus Fee', stock:'Stock Fee', hostel:'Hostel Fee', extra:'Extra Fees / Inventory (Student)' };
+
+    const feePays = payments.filter(p => pBookedInLedger(p) && p.date === d);
+    const otherInc = acctIncome.filter(i => !i.voided && i.date === d);
+    const invSales = (typeof inventorySales !== 'undefined' ? inventorySales : []).filter(s => s.buyerType !== 'Student' && s.date === d && Number(s.paidAmount||0) !== 0);
+
+    const modeTotals = {};
+    const addMode = (mode, amt) => { const m = mode || 'Unspecified'; modeTotals[m] = (modeTotals[m]||0) + amt; };
+    feePays.forEach(p => addMode(p.mode, Number(p.amount)||0));
+    otherInc.forEach(i => addMode(i.mode, Number(i.amount)||0));
+    invSales.forEach(s => addMode(s.mode, Number(s.paidAmount)||0));
+    const modeRows = Object.entries(modeTotals).sort((a,b) => b[1]-a[1]);
+    const grandTotal = Object.values(modeTotals).reduce((s,v) => s+v, 0);
+
+    const sourceTotals = {};
+    const addSource = (label, amt) => { if(!sourceTotals[label]) sourceTotals[label] = {amt:0,count:0}; sourceTotals[label].amt += amt; sourceTotals[label].count++; };
+    feePays.forEach(p => addSource(FEE_CAT_LABELS[p.category] || p.category || 'Fee Payment', Number(p.amount)||0));
+    otherInc.forEach(i => addSource('Other Income — ' + i.category, Number(i.amount)||0));
+    invSales.forEach(s => addSource('Inventory Sale (Staff / Walk-in)', Number(s.paidAmount)||0));
+    const sourceRows = Object.entries(sourceTotals).sort((a,b) => b[1].amt-a[1].amt);
+
+    const txRows = [
+      ...feePays.map(p => ({ type: Number(p.amount)<0 ? 'Refund' : 'Fee Payment', party: p.studentName||'Student', detail: FEE_CAT_LABELS[p.category]||p.category, mode: p.mode||'—', ref: p.receiptNo||'—', amount: Number(p.amount)||0 })),
+      ...otherInc.map(i => ({ type:'Other Income', party: i.party||'—', detail: i.category, mode: i.mode||'—', ref: i.voucherNo||'—', amount: Number(i.amount)||0 })),
+      ...invSales.map(s => ({ type:'Inventory Sale', party: s.buyerName||s.buyerType, detail: s.itemName, mode: s.mode||'—', ref:'—', amount: Number(s.paidAmount)||0 })),
+    ].sort((a,b) => b.amount-a.amount);
+
+    body.innerHTML = `
+      <div style="display:flex; align-items:flex-end; gap:12px; margin-bottom:18px; flex-wrap:wrap;">
+        <div class="f-field" style="margin:0;">
+          <label>Date</label>
+          <input type="date" id="acctDcDate" value="${d}" max="${todayStr}" onchange="acctDailyCollectionsDate=this.value; renderAcctDailyCollectionsTab(document.getElementById('accountingBody'));">
+        </div>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:0 0 8px;">Everything collected on this date, across every payment mode and every module — fee payments, inventory sales, and other income — so it can be checked against what's physically handed over.</p>
+      </div>
+      <div class="fee-summary-row" style="margin-bottom:24px;">
+        <div class="fee-sum-card"><b style="color:#0f6a63;">${fmtMoney(grandTotal)}</b><span>Total Collected on ${d}</span></div>
+        <div class="fee-sum-card"><b>${txRows.length}</b><span>Transactions</span></div>
+      </div>
+      <div class="dash-section-title"><div><h3>By Payment Mode</h3></div></div>
+      <div class="table-wrap" style="margin-bottom:28px;">
+        <table><thead><tr><th>Mode</th><th>Amount</th><th>% of Total</th></tr></thead>
+        <tbody>
+        ${modeRows.length ? modeRows.map(([mode,amt]) => `<tr><td class="name-cell">${mode}</td><td style="color:${amt>=0?'#0f6a63':'var(--magenta)'}; font-weight:600;">${fmtMoney(amt)}</td><td>${grandTotal!==0?Math.round(amt/grandTotal*100):0}%</td></tr>`).join('') : `<tr><td colspan="3"><div class="empty-state"><b>No collections recorded for this date</b></div></td></tr>`}
+        ${modeRows.length ? `<tr style="font-weight:700; background:rgba(24,143,134,0.06);"><td>Total</td><td style="color:#0f6a63;">${fmtMoney(grandTotal)}</td><td>100%</td></tr>` : ''}
+        </tbody></table>
+      </div>
+      <div class="dash-section-title"><div><h3>By Source</h3></div></div>
+      <div class="table-wrap" style="margin-bottom:28px;">
+        <table><thead><tr><th>Source</th><th>Transactions</th><th>Amount</th></tr></thead>
+        <tbody>
+        ${sourceRows.length ? sourceRows.map(([label,v]) => `<tr><td class="name-cell">${label}</td><td>${v.count}</td><td style="font-weight:600;">${fmtMoney(v.amt)}</td></tr>`).join('') : `<tr><td colspan="3"><div class="empty-state"><b>No collections recorded for this date</b></div></td></tr>`}
+        </tbody></table>
+      </div>
+      <div class="dash-section-title"><div><h3>Transaction Detail</h3></div></div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Type</th><th>Detail</th><th>Party</th><th>Mode</th><th>Receipt/Voucher</th><th>Amount</th></tr></thead>
+        <tbody>
+        ${txRows.length ? txRows.map(t => `<tr><td>${t.type}</td><td>${t.detail||'—'}</td><td>${t.party||'—'}</td><td>${t.mode}</td><td>${t.ref}</td><td style="color:${t.amount>=0?'#0f6a63':'var(--magenta)'}; font-weight:600;">${fmtMoney(t.amount)}</td></tr>`).join('') : `<tr><td colspan="6"><div class="empty-state"><b>No transactions on this date</b></div></td></tr>`}
         </tbody></table>
       </div>
     `;
@@ -21063,6 +21157,7 @@
           <h4>Return to Vendor — ${it.name}</h4>
           <p style="font-size:0.8rem; color:var(--ink-soft); margin:4px 0 14px;">${it.quantity} currently in stock.</p>
           <input type="hidden" id="vretItemId" value="${it.id}">
+          <div class="f-field" style="margin-bottom:10px;"><label>Return Date</label><input type="date" id="vretDate" value="${new Date().toISOString().slice(0,10)}" max="${new Date().toISOString().slice(0,10)}"></div>
           <div class="f-field" style="margin-bottom:10px;"><label>Quantity to Return (max ${it.quantity})</label><input type="number" id="vretQty" min="1" max="${it.quantity}" value="1"></div>
           <div class="f-field" style="margin-bottom:10px;"><label>Vendor / Supplier</label><input type="text" id="vretVendor" placeholder="e.g. name of the supplier"></div>
           <div class="f-field" style="margin-bottom:14px;"><label>Reason</label><input type="text" id="vretReason" placeholder="e.g. unsold, damaged, wrong order"></div>
@@ -21087,7 +21182,11 @@
     if(qty <= 0){ showToast('Enter a valid quantity.'); return; }
     const vendor = document.getElementById('vretVendor').value.trim();
     const reason = document.getElementById('vretReason').value.trim();
-    const today = new Date().toISOString().slice(0,10);
+    const todayStr = new Date().toISOString().slice(0,10);
+    const vretDateInput = document.getElementById('vretDate');
+    const today = vretDateInput ? vretDateInput.value : todayStr;
+    if(!today){ showToast('Set a return date.'); return; }
+    if(today > todayStr){ showToast("Return date can't be in the future."); return; }
     const costReversed = Math.round(qty * (it.costPrice||0) * 100) / 100;
 
     it.quantity -= qty;
@@ -21256,11 +21355,13 @@
   let invCartSearch = '';
   let invCheckoutBuyerType = 'Student', invCheckoutStudentId = '', invCheckoutPaymentMode = 'Cash';
   let invCheckoutSearchMode = 'name', invCheckoutBrowseClass = '', invCheckoutBrowseSection = '';
+  let invCheckoutDate = new Date().toISOString().slice(0,10);
   function openInventorySellCart(){
     invCart = [];
     invCartCategory = 'All'; invCartSubCategory = 'All'; invCartSearch = '';
     invCheckoutBuyerType = 'Student'; invCheckoutStudentId = ''; invCheckoutSearchMode = 'name';
     invCheckoutBrowseClass = ''; invCheckoutBrowseSection = '';
+    invCheckoutDate = new Date().toISOString().slice(0,10);
     inventoryTab = 'sellcart';
     invQuickOpen = false;
     renderInventoryBody();
@@ -21451,6 +21552,8 @@
           </div>
           <div style="background:var(--white); border:1px solid var(--border); border-radius:12px; padding:16px;">
             <div style="font-weight:700; margin-bottom:10px;">Payment</div>
+            <label style="font-size:0.78rem; color:var(--ink-soft);">Sale Date</label>
+            <input class="input" type="date" id="invCheckoutDate" value="${invCheckoutDate}" max="${new Date().toISOString().slice(0,10)}" style="margin:6px 0 12px;" onchange="invCheckoutDate=this.value;">
             <label style="font-size:0.78rem; color:var(--ink-soft);">Payment Mode</label>
             <div style="display:flex; gap:6px; flex-wrap:wrap; margin:6px 0 12px;">
               ${['Cash','UPI','Card','Online','Bank Transfer'].map(m => `<button style="border:1px solid var(--border); border-radius:8px; padding:7px 12px; font-size:0.78rem; cursor:pointer; ${invCheckoutPaymentMode===m?'background:#211A4E; color:#fff; border-color:#211A4E;':'background:none; color:var(--ink);'}" onclick="invCheckoutPaymentMode='${m}'; renderInventoryCheckout(document.getElementById('inventoryBody'));">${m}</button>`).join('')}
@@ -21515,7 +21618,11 @@
     const paidAmountInput = Number(document.getElementById('invCheckoutPaidAmount').value) || 0;
     const notes = document.getElementById('invCheckoutNotes').value.trim();
     const buyerName = invCheckoutBuyerType!=='Student' ? (document.getElementById('invCheckoutBuyerName').value.trim() || invCheckoutBuyerType) : '';
-    const today = new Date().toISOString().slice(0,10);
+    const todayStr = new Date().toISOString().slice(0,10);
+    const dateInput = document.getElementById('invCheckoutDate');
+    const today = dateInput ? dateInput.value : todayStr;
+    if(!today){ showToast('Set a sale date.'); return; }
+    if(today > todayStr){ showToast("Sale date can't be in the future."); return; }
     const grandTotal = invCart.reduce((sum,c) => sum+c.price*c.qty-c.discount, 0);
     const buyerStudent = invCheckoutBuyerType==='Student' ? students.find(s => s.id===invCheckoutStudentId) : null;
     let remainingPaid = paidAmountInput;
@@ -21682,6 +21789,10 @@
           <p style="font-size:0.8rem; color:var(--ink-soft); margin:4px 0 14px;">Sold to ${buyer} on ${s.date} · ${s.qty} unit${s.qty===1?'':'s'}${alreadyReturned>0?` (${alreadyReturned} already returned)`:''}.</p>
           <input type="hidden" id="invRetSaleId" value="${saleId}">
           <div class="f-field" style="margin-bottom:10px;">
+            <label>Return Date</label>
+            <input type="date" id="invRetDate" value="${new Date().toISOString().slice(0,10)}" max="${new Date().toISOString().slice(0,10)}">
+          </div>
+          <div class="f-field" style="margin-bottom:10px;">
             <label>Quantity to Return (max ${returnable})</label>
             <input type="number" id="invRetQty" min="1" max="${returnable}" value="${returnable}" oninput="onInvReturnQtyChange()">
           </div>
@@ -21744,7 +21855,11 @@
     const cashInput = document.getElementById('invRetCashRefund');
     const cashRefunded = cashInput ? Math.max(0, Math.min(Number(cashInput.value)||0, paidForReturn)) : 0;
     const refundMode = document.getElementById('invRetMode') ? document.getElementById('invRetMode').value : '';
-    const today = new Date().toISOString().slice(0,10);
+    const todayStr = new Date().toISOString().slice(0,10);
+    const retDateInput = document.getElementById('invRetDate');
+    const today = retDateInput ? retDateInput.value : todayStr;
+    if(!today){ showToast('Set a return date.'); return; }
+    if(today > todayStr){ showToast("Return date can't be in the future."); return; }
 
     // 1. Restock — the returned units are assumed resellable.
     const item = inventoryItems.find(x => x.id === s.itemId);
