@@ -23,11 +23,11 @@ function certLetterheadTop(){
   let certModalType = null;
   let certModalStudent = null;
 
-  function openCertPicker(type){
+  async function openCertPicker(type){
     document.getElementById('moreActionsMenu').classList.remove('open');
     if(students.length === 0){ showToast('No students available.'); return; }
     const label = type === 'Transfer' ? 'Transfer Certificate' : type === 'Character' ? 'Character Certificate' : 'Migration Certificate';
-    const name = prompt(`Enter the admission number of the student for the ${label}:`);
+    const name = await showPromptDialog(`Enter the admission number of the student for the ${label}:`, { title:label, okText:'Continue', placeholder:'Admission number' });
     if(!name) return;
     const s = students.find(x => x.admissionNo.toLowerCase() === name.trim().toLowerCase());
     if(!s){ showToast('No student found with that admission number.'); return; }
@@ -290,10 +290,10 @@ function certLetterheadTop(){
     if(gender === 'Male') return kind === 'title' ? 'Mr.' : kind === 'possessive' ? 'His' : 'He';
     return kind === 'title' ? '' : kind === 'possessive' ? 'Their' : 'The student';
   }
-  function openStudyCertPicker(){
+  async function openStudyCertPicker(){
     document.getElementById('moreActionsMenu').classList.remove('open');
     if(students.length === 0){ showToast('No students available.'); return; }
-    const name = prompt('Enter the admission number of the student for the Study Certificate:');
+    const name = await showPromptDialog('Enter the admission number of the student for the Study Certificate:', { title:'Study Certificate', okText:'Continue', placeholder:'Admission number' });
     if(!name) return;
     const s = students.find(x => x.admissionNo.toLowerCase() === name.trim().toLowerCase());
     if(!s){ showToast('No student found with that admission number.'); return; }

@@ -800,7 +800,7 @@ function toggleMoreActions(){
     const rows = _trashRowsCache || [];
     const row = rows.find(r => r.id === id);
     const expected = row ? cfg.confirmValue(row) : '';
-    const typed = prompt(`This permanently and irreversibly deletes this record — there is no Restore after this.\n\nType the ${cfg.confirmLabel} (${expected || '—'}) to confirm.`);
+    const typed = await showPromptDialog(`This permanently and irreversibly deletes this record — there is no Restore after this.\n\nType the ${cfg.confirmLabel} (${expected || '—'}) to confirm.`, { title:'Permanently delete', okText:'Delete permanently', placeholder:cfg.confirmLabel });
     if(typed === null) return;
     if(typed.trim().toLowerCase() !== String(expected).trim().toLowerCase()){
       showToast(`That didn't match — nothing was deleted.`);
@@ -891,7 +891,7 @@ function toggleMoreActions(){
     let confirmText = null;
     if(decision === 'Reject'){
       if(!await showConfirmDialog('Are you sure you want to reject this deletion request?')) return;
-      note = prompt('Optional: note for the person who requested this (why it was rejected).') || '';
+      note = (await showPromptDialog('Optional: note for the person who requested this (why it was rejected).', { title:'Reject request', okText:'Reject', placeholder:'Optional note' })) || '';
     }else if(stage === 'Pending'){
       // Step 2 of 3 — nothing is deleted yet, so a plain confirm is enough.
       if(!await showConfirmDialog('Confirm step 2 of 3 for this deletion request? Nothing is deleted yet — one more, final confirmation step will still be needed.')) return;
@@ -903,7 +903,7 @@ function toggleMoreActions(){
       const row = (_deletionRequestsCache || []).find(r => r.id === id);
       const m = row && row.recordLabel ? row.recordLabel.match(/Adm#\s*([^)]+)\)/) : null;
       const expected = m ? m[1].trim() : '';
-      const typed = prompt(`This is the FINAL step — the record will be deleted immediately (recoverable only from Recently Deleted, for a limited time).\n\nType the Admission No (${expected || '—'}) to confirm.`);
+      const typed = await showPromptDialog(`This is the FINAL step — the record will be deleted immediately (recoverable only from Recently Deleted, for a limited time).\n\nType the Admission No (${expected || '—'}) to confirm.`, { title:'Final confirmation', okText:'Delete permanently', placeholder:'Admission number' });
       if(typed === null) return;
       if(typed.trim().toLowerCase() !== String(expected).trim().toLowerCase()){
         showToast(`That didn't match — nothing was deleted.`);

@@ -1301,7 +1301,7 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     const list = type === 'income' ? acctIncome : acctExpenses;
     const v = list.find(x => x.id === id);
     if(!v || v.voided) return;
-    const reason = prompt(`Void voucher ${v.voucherNo}?\n\nEnter a reason (this voucher stays visible, struck through, for audit — it will not be edited or deleted):`);
+    const reason = await showPromptDialog(`Void voucher ${v.voucherNo}?\n\nEnter a reason (this voucher stays visible, struck through, for audit — it will not be edited or deleted):`, { title:'Void voucher', okText:'Void', placeholder:'Reason for voiding' });
     if(reason === null) return;
     if(!reason.trim()){ showToast('A reason is required to void a voucher.'); return; }
     v.voided = true;
@@ -1487,7 +1487,7 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   async function voidJournalVoucher(id){
     const j = acctJournalVouchers.find(x => x.id === id);
     if(!j || j.voided) return;
-    const reason = prompt(`Void voucher ${j.voucherNo}?\n\nEnter a reason (this voucher stays visible, struck through, for audit — it will not be edited or deleted):`);
+    const reason = await showPromptDialog(`Void voucher ${j.voucherNo}?\n\nEnter a reason (this voucher stays visible, struck through, for audit — it will not be edited or deleted):`, { title:'Void voucher', okText:'Void', placeholder:'Reason for voiding' });
     if(reason === null) return;
     if(!reason.trim()){ showToast('A reason is required to void a voucher.'); return; }
     j.voided = true; j.voidReason = reason.trim(); j.voidedBy = currentUser.name; j.voidedAt = new Date().toISOString();

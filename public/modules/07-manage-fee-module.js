@@ -580,7 +580,7 @@ const FEE_TYPES_KEY = "fee-types";
     await ensureDataLoaded('payments', loadPaymentsData);
     const p = payments.find(x => x.id === id);
     if(!p || p.voided) return;
-    const reason = prompt(`Void this payment of ${fmtMoney(p.amount)}?\n\nEnter a reason (it stays visible, marked VOIDED, for audit — the receipt number is never reused):`);
+    const reason = await showPromptDialog(`Void this payment of ${fmtMoney(p.amount)}?\n\nEnter a reason (it stays visible, marked VOIDED, for audit — the receipt number is never reused):`, { title:'Void payment', okText:'Void', placeholder:'Reason for voiding' });
     if(reason === null) return;
     if(!reason.trim()){ showToast('A reason is required to void a payment.'); return; }
     p.voided = true;

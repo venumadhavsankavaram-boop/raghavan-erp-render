@@ -486,6 +486,44 @@ let sbPreSearchCollapse = null;
   document.getElementById('confirmDialogCancelBtn').addEventListener('click', () => _finishConfirmDialog(false));
   document.getElementById('confirmDialogOverlay').addEventListener('mousedown', e => { if(e.target.id === 'confirmDialogOverlay') _finishConfirmDialog(false); });
 
+  // Styled replacement for native window.prompt(). Some browsers/environments
+  // silently suppress window.prompt() (seen in production: clicking a Void
+  // button did nothing at all, in two separate browsers, with no error and
+  // no visible dialog) — an in-page modal has no such failure mode and also
+  // matches the rest of the app's styled-dialog look. Resolves with the
+  // trimmed string the user entered, or null if they cancelled/closed it —
+  // same null-vs-string contract as window.prompt(), so existing call sites
+  // (`if(reason === null) return;`) work unchanged.
+  let _promptDialogResolve = null;
+  function showPromptDialog(message, opts){
+    opts = opts || {};
+    return new Promise(resolve => {
+      _promptDialogResolve = resolve;
+      document.getElementById('promptDialogTitle').textContent = opts.title || 'Please confirm';
+      document.getElementById('promptDialogMessage').textContent = message;
+      const okBtn = document.getElementById('promptDialogOkBtn');
+      okBtn.textContent = opts.okText || 'Confirm';
+      document.getElementById('promptDialogCancelBtn').textContent = opts.cancelText || 'Cancel';
+      const input = document.getElementById('promptDialogInput');
+      input.value = opts.defaultValue || '';
+      input.placeholder = opts.placeholder || '';
+      document.getElementById('promptDialogOverlay').classList.add('open');
+      setTimeout(() => input.focus(), 0);
+    });
+  }
+  function _finishPromptDialog(result){
+    document.getElementById('promptDialogOverlay').classList.remove('open');
+    const resolve = _promptDialogResolve;
+    _promptDialogResolve = null;
+    if(resolve) resolve(result);
+  }
+  document.getElementById('promptDialogOkBtn').addEventListener('click', () => _finishPromptDialog(document.getElementById('promptDialogInput').value.trim()));
+  document.getElementById('promptDialogCancelBtn').addEventListener('click', () => _finishPromptDialog(null));
+  document.getElementById('promptDialogOverlay').addEventListener('mousedown', e => { if(e.target.id === 'promptDialogOverlay') _finishPromptDialog(null); });
+  document.getElementById('promptDialogInput').addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ e.preventDefault(); _finishPromptDialog(document.getElementById('promptDialogInput').value.trim()); }
+  });
+
   let _infoDialogResolve = null;
   function showInfoDialog(message, opts){
     opts = opts || {};
@@ -509,6 +547,7 @@ let sbPreSearchCollapse = null;
   document.addEventListener('keydown', e => {
     if(e.key !== 'Escape') return;
     if(document.getElementById('confirmDialogOverlay').classList.contains('open')) _finishConfirmDialog(false);
+    else if(document.getElementById('promptDialogOverlay').classList.contains('open')) _finishPromptDialog(null);
     else if(document.getElementById('infoDialogOverlay').classList.contains('open')) _finishInfoDialog();
   });
 

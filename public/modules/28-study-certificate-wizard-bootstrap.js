@@ -308,7 +308,7 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
   async function requestDeleteStudent(id){
     const s = students.find(x => x.id === id);
     if(!s) return;
-    const reason = prompt(`Why should ${s.firstName} ${s.lastName}'s record be deleted?\n\nIf this child has simply left the school, use "Mark Inactive" instead — that keeps their data for Transfer Certificates. Deletion is only for genuine mistakes, like a duplicate entry.`);
+    const reason = await showPromptDialog(`Why should ${s.firstName} ${s.lastName}'s record be deleted?\n\nIf this child has simply left the school, use "Mark Inactive" instead — that keeps their data for Transfer Certificates. Deletion is only for genuine mistakes, like a duplicate entry.`, { title:'Request deletion', okText:'Continue', placeholder:'Reason for deletion' });
     if(reason === null) return;
     if(!reason.trim()){ showToast('A reason is required.'); return; }
     if(!await showConfirmDialog(`Start a 3-step deletion request for this record? This is step 1 of 3 — nothing is deleted yet.`)) return;
