@@ -7732,6 +7732,30 @@
     holidays = await storageGet(HOLIDAYS_KEY, []);
     attSettings = await storageGet(ATT_SETTINGS_KEY, { threshold: 75, workingDays: [1,2,3,4,5,6] });
   }
+  const WEEKDAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  // attSettings.workingDays already existed as a Settings checkbox (Sunday
+  // unchecked by default) but was never actually wired into anything — this
+  // is what makes it real. Any weekday NOT in workingDays (Sunday, by
+  // default) is treated as an automatic holiday everywhere a holiday is
+  // checked, without having to add it to the `holidays` list by hand or
+  // storing a row for every single Sunday of the year.
+  function isAutoHolidayWeekday(dateStr){
+    if(!dateStr) return false;
+    const day = new Date(dateStr + 'T00:00:00').getDay();
+    return !(attSettings.workingDays||[1,2,3,4,5,6]).includes(day);
+  }
+  // The one place to ask "is this date a holiday" — a manually-added holiday
+  // (which can now span a date range, see addHoliday) takes priority and
+  // keeps its own name; otherwise an automatic non-working weekday (Sunday
+  // by default) is synthesized on the fly so it never needs to be stored.
+  function holidayFor(dateStr){
+    const h = holidays.find(x => x.date === dateStr);
+    if(h) return h;
+    if(isAutoHolidayWeekday(dateStr)){
+      return { id: dateStr, date: dateStr, name: WEEKDAY_NAMES[new Date(dateStr + 'T00:00:00').getDay()], auto: true };
+    }
+    return null;
+  }
   // attendanceRecords is large and ever-growing (one row per student per
   // day) — loaded lazily on first actual use instead of at login. See
   // ensureDataLoaded().
@@ -7746,6 +7770,19 @@
   let attMarkDate = new Date().toISOString().slice(0,10);
   let attMarkSession = 'Morning';
   let pendingMarks = {};
+  // Lets Admin/Office Assistant mark one status per student that gets saved
+  // to BOTH sessions in a single click — built for backfilling attendance
+  // mid-year, where re-doing the same roster twice (once per session) just
+  // to record "present all day" is pure friction. Teachers marking their own
+  // homeroom day-to-day don't get this toggle: the two sessions usually do
+  // need to be recorded separately (half-day arrivals/departures etc).
+  let attApplyBothSessions = false;
+  function canUseBothSessionsShortcut(){
+    return currentUser.role === 'Admin' || currentUser.role === 'Office Assistant';
+  }
+  function toggleAttBothSessions(checked){
+    attApplyBothSessions = checked;
+  }
 
   async function initAttendanceView(){
     await ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData);
@@ -8113,20 +8150,25 @@
         pendingMarks[s.id] = rec ? rec.status : (legacyRec ? legacyRec.status : 'Present');
       }
     });
-    const isHoliday = holidays.some(h => h.date===attMarkDate);
+    const isHoliday = !!holidayFor(attMarkDate);
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToAttGrid()">All Classes</a> &nbsp;/&nbsp; ${attCurrentClass} — Section ${attCurrentSection}</div>
       <div class="ms-toolbar">
         <div class="ms-toolbar-left">
           <input type="date" class="input" id="attDateInput" value="${attMarkDate}" onchange="changeAttDate(this.value)" style="max-width:200px;">
-          <div class="att-status-row" style="display:inline-flex;">
+          <div class="att-status-row" style="display:inline-flex; ${attApplyBothSessions ? 'opacity:0.45; pointer-events:none;' : ''}">
             ${ATT_SESSIONS.map(sess => `<button type="button" class="att-status-btn ${attMarkSession===sess?'active':''}" onclick="changeAttSession('${sess}')">${sess==='Morning'?'🌅':'🌇'} ${sess}</button>`).join('')}
           </div>
           <button class="btn btn-ghost btn-sm" onclick="markAllStatus('Present')">Mark All Present</button>
           <button class="btn btn-ghost btn-sm" onclick="markAllStatus('Absent')">Mark All Absent</button>
+          ${canUseBothSessionsShortcut() ? `
+            <label style="font-size:0.78rem; color:var(--ink-soft); display:flex; align-items:center; gap:6px; margin-left:8px;" title="Saves the same status to both Morning and Afternoon in one go — handy for backfilling past dates.">
+              <input type="checkbox" ${attApplyBothSessions?'checked':''} onchange="toggleAttBothSessions(this.checked); renderAttendanceBody();"> Apply to both sessions
+            </label>
+          ` : ''}
         </div>
       </div>
-      ${isHoliday ? `<div class="empty-state" style="margin-bottom:16px;"><b>${holidays.find(h=>h.date===attMarkDate).name || 'Holiday'} — school is closed on ${attMarkDate}</b>Attendance isn't taken on a holiday. Pick a working day above, or remove the holiday first if this date shouldn't be one.</div>` : ``}
+      ${isHoliday ? (() => { const h = holidayFor(attMarkDate); return `<div class="empty-state" style="margin-bottom:16px;"><b>${h.name || 'Holiday'} — school is closed on ${attMarkDate}</b>Attendance isn't taken on a holiday. Pick a working day above, or ${h.auto ? 'adjust it under Attendance → Settings → Working Days' : 'remove the holiday first'} if this date shouldn't be one.</div>`; })() : ``}
       <div class="table-wrap" style="${isHoliday ? 'opacity:0.5; pointer-events:none;' : ''}">
         <table><thead><tr><th>Roll No</th><th>Student</th><th>Admission No</th><th>Status</th></tr></thead>
         <tbody>
@@ -8144,7 +8186,7 @@
         </tbody></table>
         ${list.length===0 ? `<div class="empty-state"><b>No students here</b></div>` : ``}
       </div>
-      <div style="margin-top:16px;"><button class="btn btn-primary" ${isHoliday?'disabled':''} onclick="saveAttendance()">Save Attendance</button></div>
+      <div style="margin-top:16px;"><button class="btn btn-primary" ${isHoliday?'disabled':''} onclick="saveAttendance()">Save Attendance${attApplyBothSessions ? ' (Morning &amp; Afternoon)' : ' (' + attMarkSession + ')'}</button></div>
     `;
   }
 
@@ -8170,15 +8212,22 @@
   }
   async function saveAttendance(){
     await ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData);
-    if(holidays.some(h => h.date===attMarkDate)){ showToast("Attendance isn't taken on a holiday."); return; }
+    if(holidayFor(attMarkDate)){ showToast("Attendance isn't taken on a holiday."); return; }
+    // "Apply to both sessions" (Admin/Office Assistant only — see
+    // canUseBothSessionsShortcut) writes the same status into both Morning
+    // and Afternoon records in one save, instead of requiring the whole
+    // roster to be re-marked twice just to record "present all day."
+    const sessionsToSave = (attApplyBothSessions && canUseBothSessionsShortcut()) ? ATT_SESSIONS : [attMarkSession];
     Object.keys(pendingMarks).forEach(studentId => {
       const status = pendingMarks[studentId];
-      let rec = attendanceRecords.find(r => r.studentId===studentId && r.date===attMarkDate && r.session===attMarkSession);
-      if(rec){ rec.status = status; }
-      else { attendanceRecords.push({ id:'att_'+studentId+'_'+attMarkDate+'_'+attMarkSession, studentId, date:attMarkDate, session:attMarkSession, status }); }
+      sessionsToSave.forEach(session => {
+        let rec = attendanceRecords.find(r => r.studentId===studentId && r.date===attMarkDate && r.session===session);
+        if(rec){ rec.status = status; }
+        else { attendanceRecords.push({ id:'att_'+studentId+'_'+attMarkDate+'_'+session, studentId, date:attMarkDate, session, status }); }
+      });
     });
     await storageSet(ATTENDANCE_KEY, attendanceRecords);
-    showToast('Attendance saved for ' + attMarkDate + ' (' + attMarkSession + ').');
+    showToast('Attendance saved for ' + attMarkDate + ' (' + sessionsToSave.join(' & ') + ').');
   }
 
   /* --- Stats --- */
@@ -8266,36 +8315,73 @@
   }
 
   /* --- Holidays --- */
+  // Groups consecutive same-named holiday rows (e.g. a 10-day Summer
+  // Vacation added as a range) back into one "Jun 1 – Jun 10" display row,
+  // so a multi-day break doesn't read as ten separate unrelated entries —
+  // even though each day is still stored as its own row (see addHoliday),
+  // which keeps every other holidayFor()/holidays.find() lookup in the app
+  // working unchanged.
+  function groupedHolidayRanges(){
+    const sorted = holidays.slice().sort((a,b) => a.date.localeCompare(b.date));
+    const groups = [];
+    sorted.forEach(h => {
+      const prev = groups[groups.length-1];
+      const prevNextDay = prev ? new Date(prev.to + 'T00:00:00') : null;
+      if(prevNextDay) prevNextDay.setDate(prevNextDay.getDate()+1);
+      if(prev && prev.name === h.name && prevNextDay.toISOString().slice(0,10) === h.date){
+        prev.to = h.date;
+      }else{
+        groups.push({ name: h.name, from: h.date, to: h.date });
+      }
+    });
+    return groups;
+  }
   function renderHolidaysTab(body){
     body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:600px;">Mark non-working days so they can be excluded from attendance context. Attendance can still be recorded on these dates if needed.</p>
-      <div class="inline-add-form">
-        <input type="date" class="input" id="newHolidayDate" style="max-width:180px;">
+      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:6px; max-width:600px;">Mark non-working days so they can be excluded from attendance context. Attendance can still be recorded on these dates if needed. For a multi-day break (Dasara, Pongal, Summer Vacation), set a From and To date — every day in between is added under the same name.</p>
+      <p style="font-size:0.78rem; color:var(--ink-soft); margin-bottom:16px; max-width:600px;">Sundays (and any other weekday turned off under <a onclick="switchAttTab('settings')" style="cursor:pointer; color:var(--magenta); font-weight:600;">Settings → Working Days</a>) are already treated as holidays automatically — no need to add them here.</p>
+      <div class="inline-add-form" style="flex-wrap:wrap;">
+        <label style="font-size:0.78rem; color:var(--ink-soft); display:flex; align-items:center; gap:6px;">From <input type="date" class="input" id="newHolidayFrom" style="max-width:170px;"></label>
+        <label style="font-size:0.78rem; color:var(--ink-soft); display:flex; align-items:center; gap:6px;">To <input type="date" class="input" id="newHolidayTo" style="max-width:170px;"></label>
         <input class="input" id="newHolidayName" placeholder="e.g. Dasara Break" style="max-width:220px;">
         <button class="btn btn-primary" onclick="addHoliday()">+ Add Holiday</button>
       </div>
-      ${holidays.slice().sort((a,b) => a.date.localeCompare(b.date)).map(h => `
-        <div class="list-manage-row"><div><div class="lm-name">${h.name}</div><div class="lm-meta">${h.date}</div></div>
-        <button class="btn-danger-text" onclick="removeHoliday('${h.date}')">Remove</button></div>
+      ${groupedHolidayRanges().map(g => `
+        <div class="list-manage-row"><div><div class="lm-name">${g.name}</div><div class="lm-meta">${g.from === g.to ? g.from : g.from + ' to ' + g.to}</div></div>
+        <button class="btn-danger-text" onclick="removeHolidayRange('${g.from}','${g.to}')">Remove</button></div>
       `).join('') || `<div class="empty-state"><b>No holidays added yet</b></div>`}
     `;
   }
   async function addHoliday(){
-    const date = document.getElementById('newHolidayDate').value;
+    const fromInput = document.getElementById('newHolidayFrom');
+    const toInput = document.getElementById('newHolidayTo');
+    const from = fromInput.value;
+    const to = toInput.value || from;
     const name = document.getElementById('newHolidayName').value.trim();
-    if(!date || !name) return;
-    holidays = holidays.filter(h => h.date !== date);
-    holidays.push({ id: date, date, name });
+    if(!from || !name) return;
+    if(to < from){ showToast("The 'To' date can't be before the 'From' date."); return; }
+    // A long range (e.g. an accidental year instead of a day) would silently
+    // create thousands of rows — 120 days is generous enough for any real
+    // school break (Summer Vacation included) while catching that mistake.
+    const spanDays = Math.round((new Date(to+'T00:00:00') - new Date(from+'T00:00:00')) / 86400000) + 1;
+    if(spanDays > 120){ showToast('That range is ' + spanDays + ' days — double-check the From/To dates.'); return; }
+    const dates = [];
+    for(let d = new Date(from+'T00:00:00'); d <= new Date(to+'T00:00:00'); d.setDate(d.getDate()+1)){
+      dates.push(d.toISOString().slice(0,10));
+    }
+    dates.forEach(date => {
+      holidays = holidays.filter(h => h.date !== date);
+      holidays.push({ id: date, date, name });
+    });
     await storageSet(HOLIDAYS_KEY, holidays);
     renderHolidaysTab(document.getElementById('attendanceBody'));
-    showToast('Holiday added.', 'burst');
+    showToast(dates.length > 1 ? `Holiday added for ${dates.length} days.` : 'Holiday added.', 'burst');
   }
-  async function removeHoliday(date){
-    holidays = holidays.filter(h => h.date !== date);
+  async function removeHolidayRange(from, to){
+    holidays = holidays.filter(h => h.date < from || h.date > to);
     await storageSet(HOLIDAYS_KEY, holidays);
     renderHolidaysTab(document.getElementById('attendanceBody'));
   }
-
   /* --- Settings --- */
   function renderAttSettingsTab(body){
     const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -9168,7 +9254,7 @@
     if(sections.length === 0){ showToast('Select at least one section.'); return false; }
     const dateVal = document.getElementById('subjDate').value;
     if(!dateVal){ showToast('Set an exam date for this subject — it\'s required before hall tickets can be generated.'); return false; }
-    const clashingHoliday = holidays.find(h => h.date===dateVal);
+    const clashingHoliday = holidayFor(dateVal);
     if(clashingHoliday && !await showConfirmDialog(`${dateVal} is marked as a holiday (${clashingHoliday.name}). Schedule the exam on this date anyway?`)) return false;
     const staffIds = Array.from(document.querySelectorAll('.subj-staff-check:checked')).map(c => c.value);
     const masterMatch = subjectsList.find(s => s.className === examCurrentClass && s.name.trim().toLowerCase() === name.toLowerCase());
@@ -9327,7 +9413,7 @@
     if(!dateVal){ showToast('Set an exam date — it\'s required before hall tickets can be generated.'); return false; }
     const classesWithSections = bulkSubjSelectedClasses.filter(cls => (bulkSubjClassSections[cls]||new Set()).size > 0);
     if(classesWithSections.length === 0){ showToast('Tick at least one section for at least one class.'); return false; }
-    const clashingHoliday = holidays.find(h => h.date===dateVal);
+    const clashingHoliday = holidayFor(dateVal);
     if(clashingHoliday && !await showConfirmDialog(`${dateVal} is marked as a holiday (${clashingHoliday.name}). Schedule the exam on this date anyway?`)) return false;
 
     const maxMarks = Number(document.getElementById('bsMaxMarks').value) || 100;
