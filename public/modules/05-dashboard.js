@@ -244,11 +244,15 @@ function ringSVG(pct, color, size, stroke, trackColor){
 
   async function renderDashboard(){
     // Dashboard summary cards + trend charts read payments, attendanceRecords
-    // and staffAttendanceRecords — all three lazily-loaded.
+    // and staffAttendanceRecords. These must always reflect the latest data
+    // (a payment just recorded in Manage Fee, attendance just marked, etc.),
+    // so we force a fresh re-fetch every time the Dashboard renders instead
+    // of reusing whatever was cached the first time any tab touched these
+    // keys — same fix as the earlier Staff Activity stale-data bug.
     await Promise.all([
-      ensureDataLoaded('payments', loadPaymentsData),
-      ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData),
-      ensureDataLoaded('staffAttendanceRecords', loadStaffAttendance),
+      reloadDataset('payments', loadPaymentsData),
+      reloadDataset('attendanceRecords', loadAttendanceRecordsData),
+      reloadDataset('staffAttendanceRecords', loadStaffAttendance),
     ]);
     const el = document.getElementById('view-dashboard');
     const { perCat, totals } = computeFinance();

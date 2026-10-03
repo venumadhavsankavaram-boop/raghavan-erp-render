@@ -548,6 +548,10 @@ let refundPaymentId = null;
       <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:18px 0 8px; display:block;">Student Fees — Apply Discount <span class="required-star">*</span></label>
       <div id="discStudentFeePanels"></div>
 
+      ${currentUser.role==='Admin' ? `
+      <p style="font-size:0.78rem; color:var(--ink-soft); margin:14px 0;">
+        You're recording this as Admin, so it's approved immediately — no separate sign-off needed.
+      </p>` : `
       <div class="form-grid" style="margin-top:16px;">
         <div class="f-field full">
           <label>Select Approver <span class="required-star">*</span></label>
@@ -559,8 +563,8 @@ let refundPaymentId = null;
       </div>
 
       <p style="font-size:0.78rem; color:var(--ink-soft); margin:14px 0;">
-        This request will need the selected approver's sign-off before it reduces the fee — even if you're Admin, someone else must verify it.
-      </p>
+        This request will need the selected approver's sign-off before it reduces the fee.
+      </p>`}
 
       <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:10px;">
         <button class="btn btn-ghost" onclick="backToDiscList()">Cancel</button>
@@ -708,9 +712,13 @@ let refundPaymentId = null;
 
   async function submitDiscCreate(){
     if(discSelectedStudents.length === 0){ showToast('Select at least one student.'); return; }
-    const approverSel = document.getElementById('discCreateApprover');
-    if(!approverSel.value){ showToast('Select an approver.'); return; }
-    const approver = users.find(u => u.id === approverSel.value);
+    const isAdminSelfApprove = currentUser.role === 'Admin';
+    let approver = null;
+    if(!isAdminSelfApprove){
+      const approverSel = document.getElementById('discCreateApprover');
+      if(!approverSel.value){ showToast('Select an approver.'); return; }
+      approver = users.find(u => u.id === approverSel.value);
+    }
     const type = document.getElementById('discCreateType').value;
     const note = document.getElementById('discCreateNote').value.trim();
     if(type === 'General Discount' && !note){ showToast('Remark is mandatory for General Discount.'); return; }
@@ -720,7 +728,10 @@ let refundPaymentId = null;
       .filter(x => x.value > 0);
     if(perStudentAmounts.length === 0){ showToast('Enter a discount amount for at least one fee type.'); return; }
 
-    const status = 'Pending'; // Always requires the selected approver's sign-off — even Admin-created discounts get a second check.
+    // Admin-recorded discounts are approved immediately — Admin is trusted to
+    // self-approve rather than needing a Principal's sign-off. Anyone else
+    // still needs the selected approver (Admin or Principal) to sign off.
+    const status = isAdminSelfApprove ? 'Approved' : 'Pending';
     const batchId = 'batch_' + Date.now();
 
     perStudentAmounts.forEach(entry => {
@@ -730,7 +741,8 @@ let refundPaymentId = null;
         note, status,
         requestedBy: currentUser.name, requestedRole: currentUser.role, requestedByUserId: currentUser.id,
         requestedDate: new Date().toISOString().slice(0,10),
-        approverId: approver.id, approverName: approver.name,
+        approverId: isAdminSelfApprove ? currentUser.id : approver.id,
+        approverName: isAdminSelfApprove ? currentUser.name : approver.name,
         ...(status==='Approved' ? { approvedBy: currentUser.name, approvedDate: new Date().toISOString().slice(0,10) } : {}),
       });
     });
