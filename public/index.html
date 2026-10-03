@@ -15315,7 +15315,7 @@
           <div class="profile-row"><span>Email</span><span>${st.email||'—'}</span></div>
           <div class="profile-row"><span>Address</span><span>${st.address||'—'}</span></div>
           <div class="profile-row"><span>Emergency Contact</span><span>${st.emergencyName ? st.emergencyName+(st.emergencyPhone?' — '+st.emergencyPhone:'') : '—'}</span></div>
-          <div class="profile-row"><span>Login Access</span><span>${st.linkedUserId ? '<span class="pill">Enabled</span>' : '<span style="color:var(--ink-soft);">Not set up</span>'}</span></div>
+          <div class="profile-row"><span>Login Access</span><span>${st.linkedUserId && users.some(u => u.id === st.linkedUserId) ? '<span class="pill">Enabled</span>' : (st.linkedUserId ? '<span style="color:var(--magenta);">Broken link — recreate it</span>' : '<span style="color:var(--ink-soft);">Not set up</span>')}</span></div>
         </div>
         ${renderStaffPayrollPerformanceCard(st)}
       </div>
@@ -16096,23 +16096,31 @@
       const pwd = g('stfPassword');
       if(uname){
         const dupe = users.find(u => u.username.toLowerCase()===uname.toLowerCase() && u.id !== staffRecord.linkedUserId);
+        // staffRecord.linkedUserId existing is NOT proof a login still exists —
+        // if a prior attempt updated the staff record but the matching users
+        // save then silently failed (see the storageSet comment below), the
+        // staff record is left pointing at a user id that was never actually
+        // created. Treating that as "a login exists, just update it" meant
+        // finding nothing and doing nothing at all — no new login, no error,
+        // completely silent. Looking the id up in the real `users` array (not
+        // just checking the field is non-empty) and falling through to the
+        // create-a-new-login branch when it's stale is the actual fix.
+        const existingLinkedUser = staffRecord.linkedUserId ? users.find(x => x.id === staffRecord.linkedUserId) : null;
         if(dupe){
           showToast('That username is already taken — staff record saved, but login was not created.');
-        }else if(staffRecord.linkedUserId){
-          const u = users.find(x => x.id === staffRecord.linkedUserId);
-          if(u){
-            const prevUserSnapshot = { ...u };
-            u.username = uname; u.name = data.firstName+' '+data.lastName; u.role = g('stfSystemRole'); if(pwd) u.password = pwd;
-            // storageSet never throws on a server rejection — it just falls back to
-            // localStorage and pops a toast — so without checking the actual result
-            // here, a rejected save (wrong permission, dropped connection) would look
-            // identical to a successful one and the login change would quietly never
-            // reach the database. See the matching fix in saveUser() for the full story.
-            const saved = await storageSet(USERS_KEY, users);
-            if(!saved){
-              Object.assign(u, prevUserSnapshot);
-              alert("The staff record was saved, but this login's changes could NOT be saved to the server — nothing changed for their account. Please try again from here or from Configuration → Users & Roles.");
-            }
+        }else if(existingLinkedUser){
+          const u = existingLinkedUser;
+          const prevUserSnapshot = { ...u };
+          u.username = uname; u.name = data.firstName+' '+data.lastName; u.role = g('stfSystemRole'); if(pwd) u.password = pwd;
+          // storageSet never throws on a server rejection — it just falls back to
+          // localStorage and pops a toast — so without checking the actual result
+          // here, a rejected save (wrong permission, dropped connection) would look
+          // identical to a successful one and the login change would quietly never
+          // reach the database. See the matching fix in saveUser() for the full story.
+          const saved = await storageSet(USERS_KEY, users);
+          if(!saved){
+            Object.assign(u, prevUserSnapshot);
+            alert("The staff record was saved, but this login's changes could NOT be saved to the server — nothing changed for their account. Please try again from here or from Configuration → Users & Roles.");
           }
         }else{
           const newUser = {
