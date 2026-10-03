@@ -2740,9 +2740,10 @@
             <div class="f-field"><label>Emergency Contact Name</label><input type="text" id="stfEmergencyName" placeholder="Optional"></div>
             <div class="f-field"><label>Emergency Contact Phone</label><input type="text" id="stfEmergencyPhone" placeholder="Optional" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
           </div>
-          <label class="admission-toggle" style="justify-content:flex-start; margin:16px 0 4px;">
+          <label class="admission-toggle" id="stfCreateLoginLabel" style="justify-content:flex-start; margin:16px 0 4px;">
             <input type="checkbox" id="stfCreateLogin" onchange="toggleStaffLoginFields()"> Also create a login for this staff member
           </label>
+          <p id="stfCreateLoginAdminNote" style="display:none; font-size:0.78rem; color:var(--ink-soft); margin:16px 0 4px;">Only an Admin can create or edit a staff member's login — ask an Admin to do this from here, or from Configuration → Users &amp; Roles.</p>
           <div id="staffLoginFieldsWrap" style="display:none; margin-top:10px;">
             <div class="form-grid">
               <div class="f-field"><label>Username</label><input type="text" id="stfUsername" placeholder="e.g. lakshmi.k"></div>
@@ -4030,7 +4031,14 @@
   function myTeacherScope(){
     if(!currentUser || currentUser.role !== 'Teacher') return null;
     const myStaff = staffList.find(st => st.linkedUserId === currentUser.id);
-    if(!myStaff) return { staffId: null, classTeacherOf: null, subjectSections: [] };
+    // `unlinked: true` means this login has no staff record pointing back at
+    // it at all (staff.linkedUserId never got set/persisted) — distinct from
+    // a real staff record that simply has no class/subject assigned yet, so
+    // Attendance/Marks Entry can tell a teacher the actual problem instead of
+    // implying their timetable assignment is missing when it's really just
+    // their login that needs linking (see openLoginForStaff/saveUser and the
+    // Staff-edit Contact tab's "create a login" flow).
+    if(!myStaff) return { staffId: null, classTeacherOf: null, subjectSections: [], unlinked: true };
     const classTeacherOf = (myStaff.classTeacherClass && myStaff.classTeacherSection)
       ? { className: myStaff.classTeacherClass, section: myStaff.classTeacherSection } : null;
     const subjectSections = [];
@@ -6346,6 +6354,9 @@
           <input type="number" min="0" id="quickPayAmt" placeholder="Enter amount" style="max-width:150px;" oninput="onQuickPayInput()" onkeydown="submitOnEnter(event, () => submitLedgerPayments('${s.id}'))">
           <span style="font-size:0.76rem; color:var(--ink-soft);">Max ${fmtMoney(totalPendingOutstanding)}</span>
           <select id="ledgerPayMode" style="margin-left:16px;"><option>Cash</option><option>Online</option><option>Cheque</option></select>
+          <label style="margin-left:16px; font-size:0.78rem; color:var(--ink-soft); display:flex; align-items:center; gap:6px;">Date
+            <input type="date" id="ledgerPayDate" value="${new Date().toISOString().slice(0,10)}" max="${new Date().toISOString().slice(0,10)}" style="padding:5px 8px; border-radius:7px; border:1.5px solid var(--border);">
+          </label>
         </div>
       </div>
       <div class="table-wrap" style="overflow-x:auto;">
@@ -6386,7 +6397,7 @@
           const paidAmt = Number(e.paidAmount)||0;
           const statusHtml = paidAmt >= e.amount ? '<span class="pill">Paid</span>' : paidAmt > 0 ? `<span class="balance-tag due">Partially Paid (${fmtMoney(paidAmt)} of ${fmtMoney(e.amount)})</span>` : '<span class="balance-tag due">Unpaid</span>';
           return `<tr><td>${e.name}</td><td>${fmtMoney(e.amount)}</td><td>${statusHtml}</td>
-          <td>${paidAmt>0?`<button class="btn-edit-text" onclick="printReceiptForExtraFee('${e.id}')">Print Receipt</button>&nbsp;·&nbsp;`:``}${currentUser.role==='Admin'?`<button class="btn-danger-text" onclick="removeExtraFee('${e.id}')">Remove</button>`:``}</td></tr>`;
+          <td>${paidAmt>0?`<button class="btn-edit-text" onclick="printReceiptForExtraFee('${e.id}')">Print Receipt</button>&nbsp;·&nbsp;`:``}${canSub('managefee_collection','managefee','delete')?`<button class="btn-danger-text" onclick="removeExtraFee('${e.id}')">Remove</button>`:``}</td></tr>`;
         }).join('')}
       </tbody></table></div>` : ``}
       <div class="dash-section-title"><div><h3>Payment History</h3></div></div>
@@ -6397,8 +6408,8 @@
             : `<span class="pill">Recorded</span>`;
           const actions = [];
           if(!p.voided && canSub('managefee_collection','managefee','print')) actions.push(`<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button>`);
-          if(currentUser.role==='Admin' && !p.voided) actions.push(`<button class="btn-danger-text" onclick="voidPayment('${p.id}')">Void</button>`);
-          if(currentUser.role==='Admin' && !p.voided) actions.push(`<button class="btn-danger-text" onclick="openRefundPaymentModal('${p.id}')">Refund</button>`);
+          if(!p.voided && canSub('managefee_collection','managefee','delete')) actions.push(`<button class="btn-danger-text" onclick="voidPayment('${p.id}')">Void</button>`);
+          if(!p.voided && canSub('managefee_collection','managefee','delete')) actions.push(`<button class="btn-danger-text" onclick="openRefundPaymentModal('${p.id}')">Refund</button>`);
           return `<tr${p.voided?' style="opacity:.6;"':''}><td>${p.date||'—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${p.mode||'—'}</td><td>${p.voided?`<s>${fmtMoney(p.amount)}</s>`:fmtMoney(p.amount)}</td><td>${fmtMoney(p.discount)}</td><td>${statusHtml}</td><td>${actions.join('&nbsp;·&nbsp;')}</td></tr>`;
         }).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
       </tbody></table></div>
@@ -6450,6 +6461,11 @@
     if(entries.length === 0){ showToast('Enter an amount to pay for at least one fee item.'); return; }
     const student = students.find(x => x.id === studentId);
     const today = new Date().toISOString().slice(0,10);
+    // Defaults to today, but editable — needed when catching up fee entry for
+    // payments that were actually collected earlier in the academic year.
+    const dateInput = document.getElementById('ledgerPayDate');
+    const payDate = (dateInput && dateInput.value) ? dateInput.value : today;
+    if(payDate > today){ showToast('Payment date can\'t be in the future.'); return; }
     let lastId = null;
     entries.forEach(e => {
       if(e.type === 'extra'){
@@ -6463,7 +6479,7 @@
           receiptNo: nextReceiptNo(),
           studentId, studentName: student.name,
           category: 'extra', extraFeeName: fee ? fee.name : 'Extra Fee', extraFeeId: e.key,
-          mode, amount: e.amt, discount: 0, instalment: '', date: today, note: '',
+          mode, amount: e.amt, discount: 0, instalment: '', date: payDate, note: '',
           classAtPayment: student.className,
         };
         payments.push(record);
@@ -6474,7 +6490,7 @@
         id: 'pay_' + Date.now() + '_' + e.key,
         receiptNo: nextReceiptNo(),
         studentId, studentName: student.name,
-        category: e.key, mode, amount: e.amt, discount: 0, instalment: '', date: today, note: '',
+        category: e.key, mode, amount: e.amt, discount: 0, instalment: '', date: payDate, note: '',
         classAtPayment: student.className,
       };
       payments.push(record);
@@ -6504,7 +6520,7 @@
   // is only for correcting a mis-entered payment, so no accounting outflow
   // is posted here.
   async function voidPayment(id){
-    if(currentUser.role !== 'Admin'){ showToast('Only Admin can void a payment.'); return; }
+    if(!canSub('managefee_collection','managefee','delete')){ showToast("You don't have permission to void payments."); return; }
     await ensureDataLoaded('payments', loadPaymentsData);
     const p = payments.find(x => x.id === id);
     if(!p || p.voided) return;
@@ -6548,7 +6564,7 @@
   let refundPaymentId = null;
   const FEE_REFUND_CATEGORY = 'Fee Refund';
   async function openRefundPaymentModal(paymentId){
-    if(currentUser.role !== 'Admin'){ showToast('Only Admin can issue a refund.'); return; }
+    if(!canSub('managefee_collection','managefee','delete')){ showToast("You don't have permission to issue refunds."); return; }
     // Needs both: the payment itself, and the Accounting ledger's bank/cash
     // accounts for the "Refund From" dropdown — a genuine cross-module read
     // from outside the Accounting tab.
@@ -7454,7 +7470,7 @@
     });
   }
   async function removeExtraFee(id){
-    if(currentUser.role !== 'Admin'){ showToast('Only Admin can remove an assigned fee.'); return; }
+    if(!canSub('managefee_collection','managefee','delete')){ showToast("You don't have permission to remove an assigned fee."); return; }
     const fee = studentExtraFees.find(e => e.id === id);
     if(!fee) return;
     // Removing the assignment outright would silently orphan any payment(s)
@@ -8047,6 +8063,10 @@
   function renderAttClassGrid(body){
     const classF = document.getElementById('atClassFilter').value;
     const scope = myTeacherScope();
+    if(scope && scope.unlinked){
+      body.innerHTML = `<div class="empty-state"><b>Your login isn't linked to a staff record</b>Ask an Admin to re-link your login under Staff Directory (🔑 Grant login access), or re-save it from Configuration → Users &amp; Roles — otherwise Class Teacher and Subject Teacher assignments can never reach your account.</div>`;
+      return;
+    }
     if(scope && !scope.classTeacherOf){
       body.innerHTML = `<div class="empty-state"><b>You're not set as a Class Teacher for any class yet</b>Attendance can only be marked by that class's Class Teacher — ask an admin to assign you one under Staff.</div>`;
       return;
@@ -9397,6 +9417,10 @@
     const examOptions = examDefs.map(ex => `<option value="${ex.id}" ${examCurrentExamId===ex.id?'selected':''}>${ex.name}</option>`).join('');
     const currentExam = examDefs.find(e => e.id === examCurrentExamId);
     const scope = myTeacherScope();
+    if(scope && scope.unlinked){
+      body.innerHTML = `<div class="empty-state"><b>Your login isn't linked to a staff record</b>Ask an Admin to re-link your login under Staff Directory (🔑 Grant login access), or re-save it from Configuration → Users &amp; Roles — otherwise Subject Teacher assignments can never reach your account.</div>`;
+      return;
+    }
     if(scope && !scope.subjectSections.length){
       body.innerHTML = `<div class="empty-state"><b>You're not assigned as a Subject Teacher for any class yet</b>Marks can only be entered by that subject's assigned teacher — ask an admin to assign you one under Subjects.</div>`;
       return;
@@ -15210,9 +15234,19 @@
     `;
   }
   function backToStaffGrid(){ staffView = 'table'; renderStaffBody(); }
+  // Set right before the "Add Staff User" modal opens, and consumed by
+  // saveUser() once that new login is actually saved — this is what makes
+  // the 🔑 "Grant login access" shortcut (unlike the Staff-edit Contact tab's
+  // own checkbox, which sets staffRecord.linkedUserId itself) link the new
+  // Users & Roles account back onto this exact staff record. Without this,
+  // the login exists in Users & Roles but myTeacherScope() can never find it
+  // from a Teacher's own session, so their Class/Subject assignments never
+  // translate into Attendance/Marks Entry access.
+  let pendingStaffLoginLinkId = null;
   function openLoginForStaff(staffId){
     const st = staffList.find(x => x.id === staffId);
     if(!st) return;
+    pendingStaffLoginLinkId = staffId;
     switchView('usersroles');
     setTimeout(() => openUserModal(st.firstName + ' ' + st.lastName, undefined, undefined, 'staff'), 60);
   }
@@ -15828,6 +15862,16 @@
     document.getElementById('staffForm').reset();
     document.getElementById('editStaffId').value = id || '';
     document.getElementById('staffModalTitle').textContent = id ? 'Edit Staff' : 'Add Staff';
+    // Writes to Users & Roles are Admin-only server-side (server.js rejects
+    // any other role with a 403, which storageSet() swallows into a toast and
+    // a local-only fallback) — so a non-Admin who checks this box would see
+    // "login created" here but it would never actually reach Users & Roles,
+    // and myTeacherScope() would then have nothing to find for that teacher.
+    // Hiding the control for non-Admins keeps the UI honest about what it can
+    // actually do; Admins see it exactly as before.
+    const isAdmin = currentUser.role === 'Admin';
+    document.getElementById('stfCreateLoginLabel').style.display = isAdmin ? '' : 'none';
+    document.getElementById('stfCreateLoginAdminNote').style.display = isAdmin ? 'none' : 'block';
     staffPhotoData = '';
     document.getElementById('staffPhotoPreview').style.display = 'none';
     document.getElementById('staffPhotoPlaceholder').style.display = 'block';
@@ -16037,7 +16081,7 @@
       showToast('New staff member added.');
     }
 
-    if(document.getElementById('stfCreateLogin').checked){
+    if(currentUser.role === 'Admin' && document.getElementById('stfCreateLogin').checked){
       const uname = g('stfUsername').trim();
       const pwd = g('stfPassword');
       if(uname){
@@ -22650,6 +22694,7 @@
     document.getElementById('uPassword').value = generateLoginPassword();
   }
   function openUserModal(presetName, presetRole, presetStudentId, mode){
+    if(mode !== 'staff') pendingStaffLoginLinkId = null; // only the staff-login shortcut above should link back
     document.getElementById('userModalTitle').textContent = mode === 'studentparent' ? 'Add Student/Parent Login' : (mode === 'staff' ? 'Add Staff User' : 'Add User');
     document.getElementById('userForm').reset();
     document.getElementById('editUserId').value = '';
@@ -22668,6 +22713,7 @@
     document.getElementById('userModalOverlay').classList.add('open');
   }
   function closeUserModal(){
+    pendingStaffLoginLinkId = null;
     document.getElementById('userModalOverlay').classList.remove('open');
   }
   function toggleUserStudentField(){
@@ -22738,6 +22784,7 @@
       linkedStudentId: document.getElementById('uLinkedStudent').value,
       recoveryCode: document.getElementById('uRecoveryCode').value,
     };
+    let linkedStaff = null;
     if(editId){
       const idx = users.findIndex(u => u.id === editId);
       users[idx] = { ...users[idx], ...data };
@@ -22745,9 +22792,20 @@
     }else{
       data.id = 'u_' + Date.now();
       users.push(data);
+      // If this login was created via the Staff Directory's 🔑 "Grant login
+      // access" shortcut, link it straight back onto that staff record —
+      // otherwise this user would exist in Users & Roles but myTeacherScope()
+      // could never trace it back to the staff member's class/subject
+      // assignments (see openLoginForStaff above).
+      if(pendingStaffLoginLinkId){
+        linkedStaff = staffList.find(st => st.id === pendingStaffLoginLinkId);
+        if(linkedStaff) linkedStaff.linkedUserId = data.id;
+      }
       showToast('User created.');
     }
     await storageSet(USERS_KEY, users);
+    if(linkedStaff) await storageSet(STAFF_KEY, staffList);
+    pendingStaffLoginLinkId = null;
     closeUserModal();
     refreshUserListViews();
     return false;
