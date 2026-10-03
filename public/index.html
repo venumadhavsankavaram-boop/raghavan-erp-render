@@ -4883,10 +4883,15 @@
       // get misreported as a failed one.
       try{ localStorage.setItem(key, JSON.stringify(newArray)); }catch(e){}
       usingLocalFallback = false;
+      return true;
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast("Could not save to the server (" + e.message + ") — kept locally only on this device.");
       try{ localStorage.setItem(key, JSON.stringify(newArray)); }catch(e2){}
       if(e.message !== 'SESSION_EXPIRED') usingLocalFallback = true;
+      // Callers that need to know the server save genuinely failed (not just
+      // "fell back to local storage") check this return value — see saveUser()
+      // for why that matters for anything tied to a login account.
+      return false;
     }
   }
   // Thin wrapper: drives the ambient "Loading (your file)" badge around every
@@ -15221,7 +15226,7 @@
           <td>${st.doj||'—'}</td>
           <td>
             <div style="display:flex; gap:10px;">
-              ${canDo('staff','edit') ? `<button title="Grant login access" onclick="openLoginForStaff('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">🔑</button>` : ''}
+              ${currentUser.role === 'Admin' ? `<button title="Grant login access" onclick="openLoginForStaff('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">🔑</button>` : ''}
               <button title="View profile" onclick="openStaffProfile('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">👁</button>
               ${canDo('staff','edit') ? `<button title="Edit" onclick="openStaffWizard('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--teal); font-size:1rem;">✎</button>` : ''}
               ${canDo('staff','delete') ? `<button title="Delete" onclick="deleteStaff('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">🗑</button>` : ''}
@@ -15244,6 +15249,11 @@
   // translate into Attendance/Marks Entry access.
   let pendingStaffLoginLinkId = null;
   function openLoginForStaff(staffId){
+    // Belt-and-suspenders: the 🔑 button itself is Admin-only now, but
+    // creating/editing a login is hard-locked to Admin server-side
+    // regardless (see server.js), so guard here too rather than letting a
+    // non-Admin get as far as a modal whose save will just be rejected.
+    if(currentUser.role !== 'Admin'){ showToast("Only an Admin can grant a staff login."); return; }
     const st = staffList.find(x => x.id === staffId);
     if(!st) return;
     pendingStaffLoginLinkId = staffId;
@@ -22785,13 +22795,17 @@
       recoveryCode: document.getElementById('uRecoveryCode').value,
     };
     let linkedStaff = null;
+    let prevLinkedUserId;
+    let prevUserSnapshot = null;
+    let pushedNewUser = false;
     if(editId){
       const idx = users.findIndex(u => u.id === editId);
+      prevUserSnapshot = { ...users[idx] };
       users[idx] = { ...users[idx], ...data };
-      showToast('User updated.');
     }else{
       data.id = 'u_' + Date.now();
       users.push(data);
+      pushedNewUser = true;
       // If this login was created via the Staff Directory's 🔑 "Grant login
       // access" shortcut, link it straight back onto that staff record —
       // otherwise this user would exist in Users & Roles but myTeacherScope()
@@ -22799,12 +22813,38 @@
       // assignments (see openLoginForStaff above).
       if(pendingStaffLoginLinkId){
         linkedStaff = staffList.find(st => st.id === pendingStaffLoginLinkId);
-        if(linkedStaff) linkedStaff.linkedUserId = data.id;
+        if(linkedStaff){
+          prevLinkedUserId = linkedStaff.linkedUserId;
+          linkedStaff.linkedUserId = data.id;
+        }
       }
-      showToast('User created.');
     }
-    await storageSet(USERS_KEY, users);
-    if(linkedStaff) await storageSet(STAFF_KEY, staffList);
+    // storageSet/syncArrayToApi never throws — on a server/permission/network
+    // failure it silently falls back to localStorage and only pops a
+    // dismissible toast, so without this check saveUser would carry on as if
+    // the login had really been created: the modal would close, "User
+    // created" would show, and the admin would have no reason to look again
+    // until it mysteriously wasn't in Users & Roles after a reload. Checking
+    // the real result here and refusing to pretend it worked is the fix.
+    const saved = await storageSet(USERS_KEY, users);
+    if(!saved){
+      if(pushedNewUser){
+        users.pop();
+        if(linkedStaff) linkedStaff.linkedUserId = prevLinkedUserId;
+      }else{
+        const idx = users.findIndex(u => u.id === editId);
+        users[idx] = prevUserSnapshot;
+      }
+      alert("This login could NOT be saved to the server — nothing was created or changed. This usually means the save was rejected (e.g. you're not signed in as Admin) or the connection dropped. Please check and try again; the form stays open so you don't lose what you typed.");
+      return false;
+    }
+    if(linkedStaff){
+      const staffLinkSaved = await storageSet(STAFF_KEY, staffList);
+      if(!staffLinkSaved){
+        showToast("Login created, but couldn't link it to the staff record — attendance and marks-entry access won't work for them yet. Try the 🔑 button again from Staff Directory.");
+      }
+    }
+    showToast(editId ? 'User updated.' : 'User created.');
     pendingStaffLoginLinkId = null;
     closeUserModal();
     refreshUserListViews();
