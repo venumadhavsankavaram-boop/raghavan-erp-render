@@ -4619,6 +4619,20 @@ app.use(express.static(path.join(__dirname, 'public'), {
     if (filePath.endsWith('index.html')) {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     }
+    // The app's JS used to be entirely inline inside index.html, so the
+    // no-cache rule above was enough to guarantee every fix reached every
+    // browser on the next load. Now that the same code is split into
+    // public/modules/*.js (loaded via <script src>), those files need the
+    // SAME no-cache treatment — otherwise a browser (or an intermediate
+    // cache/CDN) could keep serving an old, already-fixed-elsewhere module
+    // file indefinitely, which would look exactly like the "stale tab"
+    // confusion we've hit before, just caused by HTTP caching instead of an
+    // open tab. ETag/Last-Modified still make the revalidation a cheap 304
+    // when nothing changed, so this doesn't mean re-downloading on every
+    // visit — just never trusting a cached copy without asking first.
+    if (filePath.includes(path.join('public', 'modules') + path.sep) && filePath.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    }
   },
 }));
 app.get(/.*/, (req, res) => {
