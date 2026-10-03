@@ -4643,6 +4643,14 @@
 
   /* ===== VIEW SWITCHING ===== */
   function switchView(view){
+    // Safety net: if a teacher was mid-way through Marks Entry and clicks
+    // straight to another sidebar item (skipping "Save Marks" and the
+    // in-sheet "All Classes" back-link), flush any pending auto-save first
+    // so the last few keystrokes aren't lost. Fire-and-forget is fine — the
+    // save completes in the background even as the view switches.
+    if(typeof examMarksView !== 'undefined' && examMarksView === 'sheet' && typeof flushMarksAutoSaveIfPending === 'function'){
+      flushMarksAutoSaveIfPending();
+    }
     // Legacy alias: the old single "Manage Staff" page is now 6 separate sidebar pages.
     // Anything still asking for the bare 'staff' view lands on the best one it can access.
     if(view === 'staff'){
@@ -9546,7 +9554,8 @@
     examMarksView = 'sheet';
     renderExamBody();
   }
-  function backToMarksGrid(){
+  async function backToMarksGrid(){
+    await flushMarksAutoSaveIfPending();
     window.scrollTo({top:0,left:0,behavior:'instant'});
     examMarksView = 'grid';
     renderExamBody();
@@ -9580,8 +9589,12 @@
     const getResult = (studentId, subject) => examResults.find(r => r.examId===exam.id && r.studentId===studentId && r.subject===subject);
     const canEnterMarks = canSub('exams_marks','exams','edit');
     body.innerHTML = `
-      <div class="breadcrumb"><a onclick="backToMarksGrid()">All Classes</a> &nbsp;/&nbsp; ${examCurrentClass} — Section ${examCurrentSection} &nbsp;/&nbsp; ${exam.name}</div>
-      ${canEnterMarks ? `<div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+      <div class="breadcrumb" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <span><a onclick="backToMarksGrid()">All Classes</a> &nbsp;/&nbsp; ${examCurrentClass} — Section ${examCurrentSection} &nbsp;/&nbsp; ${exam.name}</span>
+        ${canEnterMarks ? `<span id="marksAutoSaveStatus" style="font-size:0.78rem; color:var(--ink-soft);"></span>` : ''}
+      </div>
+      ${canEnterMarks ? `<p style="font-size:0.76rem; color:var(--ink-soft); margin:2px 0 10px;">Marks are saved automatically as you type — "Save Marks" is just there to double-check everything looks right.</p>
+      <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
         <label class="btn btn-ghost btn-sm" style="cursor:pointer;">📤 Upload via Excel<input type="file" accept=".xlsx,.xls" id="marksExcelInput" style="display:none;" onchange="importMarksExcel(event)"></label>
       </div>` : ''}
       <div class="table-wrap" style="overflow-x:auto;">
@@ -9601,7 +9614,7 @@
               const markVal = r && !isAbsent ? r.marks : '';
               return `<td>
                 <div style="display:flex; align-items:center; gap:5px;">
-                  <input type="number" class="marks-input" min="0" max="${subj.maxMarks}" data-student="${s.id}" data-subject="${subj.name.replace(/"/g,'&quot;')}" value="${markVal}" ${(isAbsent||!canEnterMarks)?'disabled':''} style="width:64px;">
+                  <input type="number" class="marks-input" min="0" max="${subj.maxMarks}" data-student="${s.id}" data-subject="${subj.name.replace(/"/g,'&quot;')}" value="${markVal}" ${(isAbsent||!canEnterMarks)?'disabled':''} style="width:64px;" oninput="scheduleMarksAutoSave()">
                   <label style="font-size:0.68rem; color:var(--ink-soft); display:flex; align-items:center; gap:2px; cursor:pointer;" title="Mark absent for this subject">
                     <input type="checkbox" class="marks-absent-check" data-student="${s.id}" data-subject="${subj.name.replace(/"/g,'&quot;')}" ${isAbsent?'checked':''} ${!canEnterMarks?'disabled':''} onchange="onMarksAbsentToggle(this)"> Abs
                   </label>
@@ -9621,9 +9634,71 @@
     const input = row.querySelector('.marks-input');
     if(el.checked){ input.value = ''; input.disabled = true; }
     else { input.disabled = false; }
+    scheduleMarksAutoSave();
+  }
+
+  /* --- Auto-save for Marks Entry: teachers can enter marks for dozens of
+     students, and relying on a single "Save Marks" button at the end risked
+     losing everything if they navigated away or closed the tab first. Every
+     keystroke/absent-toggle schedules a debounced save; an invalid cell is
+     highlighted and simply skipped (never blocks the rest from saving), and
+     any pending save is flushed immediately before leaving the sheet. --- */
+  let marksAutoSaveTimer = null;
+  function marksBeforeUnloadGuard(e){ e.preventDefault(); e.returnValue = ''; return ''; }
+  function scheduleMarksAutoSave(){
+    const status = document.getElementById('marksAutoSaveStatus');
+    if(status) status.textContent = '⏳ Saving…';
+    if(marksAutoSaveTimer) clearTimeout(marksAutoSaveTimer);
+    else window.addEventListener('beforeunload', marksBeforeUnloadGuard);
+    marksAutoSaveTimer = setTimeout(autoSaveMarksSheet, 900);
+  }
+  async function flushMarksAutoSaveIfPending(){
+    if(marksAutoSaveTimer){
+      clearTimeout(marksAutoSaveTimer);
+      marksAutoSaveTimer = null;
+      await autoSaveMarksSheet();
+    }
+  }
+  async function autoSaveMarksSheet(){
+    marksAutoSaveTimer = null;
+    try{
+      const exam = examDefs.find(e => e.id === examCurrentExamId);
+      const status = document.getElementById('marksAutoSaveStatus');
+      if(!exam) return;
+      const markInputs = document.querySelectorAll('.marks-input');
+      if(!markInputs.length) return;
+      await ensureDataLoaded('examResults', loadExamResultsData);
+      let hasInvalid = false;
+      markInputs.forEach(inp => {
+        const studentId = inp.dataset.student;
+        const subject = inp.dataset.subject;
+        if(!studentId || !subject) return;
+        const maxAllowed = inp.max === '' ? null : Number(inp.max);
+        const raw = inp.value;
+        const val = raw === '' ? null : Number(raw);
+        const invalid = !inp.disabled && raw !== '' && (isNaN(val) || val < 0 || (maxAllowed !== null && val > maxAllowed));
+        inp.style.borderColor = invalid ? 'var(--magenta)' : '';
+        if(invalid){ hasInvalid = true; return; }
+        const absentBox = document.querySelector(`.marks-absent-check[data-student="${studentId}"][data-subject="${CSS.escape(subject)}"]`);
+        const isAbsent = absentBox ? absentBox.checked : false;
+        let r = examResults.find(r => r.examId===exam.id && r.studentId===studentId && r.subject===subject);
+        if(val === null && !isAbsent){
+          if(r) examResults = examResults.filter(x => x !== r);
+          return;
+        }
+        if(r){ r.marks = isAbsent ? null : val; r.absent = isAbsent; }
+        else { examResults.push({ id:'res_'+studentId+'_'+exam.id+'_'+subject.replace(/\s/g,''), examId:exam.id, studentId, subject, marks: isAbsent ? null : val, absent:isAbsent }); }
+      });
+      await storageSet(EXAM_RESULTS_KEY, examResults);
+      if(status) status.textContent = hasInvalid ? '⚠️ Saved — fix the highlighted mark(s)' : '✅ All changes saved';
+    } finally {
+      if(!marksAutoSaveTimer) window.removeEventListener('beforeunload', marksBeforeUnloadGuard);
+    }
   }
 
   async function saveMarksSheet(){
+    if(marksAutoSaveTimer){ clearTimeout(marksAutoSaveTimer); marksAutoSaveTimer = null; }
+    window.removeEventListener('beforeunload', marksBeforeUnloadGuard);
     await ensureDataLoaded('examResults', loadExamResultsData);
     const exam = examDefs.find(e => e.id === examCurrentExamId);
     const markInputs = document.querySelectorAll('.marks-input');
@@ -9652,6 +9727,8 @@
       else { examResults.push({ id:'res_'+studentId+'_'+exam.id+'_'+subject.replace(/\s/g,''), examId:exam.id, studentId, subject, marks: isAbsent ? null : val, absent: isAbsent }); }
     });
     await storageSet(EXAM_RESULTS_KEY, examResults);
+    const status = document.getElementById('marksAutoSaveStatus');
+    if(status) status.textContent = '✅ All changes saved';
     showToast('Marks saved.', 'burst');
   }
 
