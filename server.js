@@ -4611,6 +4611,10 @@ app.use((err, req, res, next) => {
 // nothing actually changed, so this doesn't mean re-downloading the whole
 // file on every visit, just never trusting a copy without asking first.
 app.use(express.static(path.join(__dirname, 'public'), {
+  // 'allow' (not the Express default 'ignore') so /.well-known/assetlinks.json
+  // is actually servable — that file is how the Android app (a Trusted Web
+  // Activity) proves it's allowed to open this site without a browser URL bar.
+  dotfiles: 'allow',
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('index.html')) {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
