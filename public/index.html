@@ -3453,6 +3453,17 @@
     if(!_lazyDataPromises[key]) _lazyDataPromises[key] = loaderFn();
     return _lazyDataPromises[key];
   }
+  // Forces a fresh re-fetch of a lazily-loaded dataset, replacing whatever
+  // ensureDataLoaded() had cached for this key — for views (like the Staff
+  // Activity dashboard) that must always show this session's latest data
+  // rather than whatever happened to be loaded the first time any tab
+  // touched this key. Every other call site keeps using ensureDataLoaded()
+  // and transparently sees the refreshed data too, since the underlying
+  // variable (examResults, attendanceRecords, ...) is reassigned in place.
+  function reloadDataset(key, loaderFn){
+    _lazyDataPromises[key] = loaderFn();
+    return _lazyDataPromises[key];
+  }
 
   // Your uploaded "Loading" Lottie file, inlined so the page stays a single
   // file — played wherever a data fetch needs a real loading indicator
@@ -9555,12 +9566,22 @@
     body.innerHTML = `
       <div class="f-field" style="max-width:320px; margin-bottom:20px;">
         <label>Exam</label>
-        <select id="marksExamSelect" onchange="examCurrentExamId=this.value;">${examOptions}</select>
+        <select id="marksExamSelect" onchange="onMarksExamSelectChange(this.value)">${examOptions}</select>
       </div>
       ${gridHtml}
     `;
   }
 
+  // Switching the exam must re-render the class grid immediately, because
+  // which classes/sections show up depends on the NEW exam's type
+  // (classLevelsForExamType) — just updating examCurrentExamId and leaving
+  // the old grid on screen is why teachers saw "no classes" after picking
+  // an exam, until they left the tab and came back (which forces a fresh
+  // render that picks up the already-updated variable).
+  function onMarksExamSelectChange(examId){
+    examCurrentExamId = examId;
+    renderMarksClassGrid(document.getElementById('examBody'));
+  }
   function openMarksSection(cls, sec){
     const scope = myTeacherScope();
     if(scope && !scope.subjectSections.some(ss => ss.className===cls && ss.section===sec)){
@@ -15002,18 +15023,28 @@
   let staffActivityExamId = '';
   function renderStaffActivityTab(body){
     if(!body) return;
-    body.innerHTML = `<div class="empty-state"><b>Loading staff activity…</b></div>`;
+    body.innerHTML = `<div class="empty-state"><div class="mo-lottie-mini"></div><b>Loading staff activity…</b></div>`;
+    moMountLotties();
     // Marks-entry progress (examResults), homeroom attendance and each
     // staff member's own attendance today (attendanceRecords /
-    // staffAttendanceRecords) are all lazily-loaded — needed even when
-    // this dashboard is opened without ever visiting Exams or Attendance.
+    // staffAttendanceRecords) are what a teacher/staff member may have just
+    // changed elsewhere (entered marks, marked attendance) in a DIFFERENT
+    // session — so this dashboard always force-refetches them with
+    // reloadDataset() instead of ensureDataLoaded(), which would silently
+    // keep serving whatever was cached the first time any tab touched that
+    // key in THIS session. loadInboxConcerns/loadInboxSubmissions already
+    // hit the server fresh on every call, so they don't need that treatment.
     Promise.all([
       loadInboxConcerns(), loadInboxSubmissions(),
-      ensureDataLoaded('examResults', loadExamResultsData),
-      ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData),
-      ensureDataLoaded('staffAttendanceRecords', loadStaffAttendance),
+      reloadDataset('examResults', loadExamResultsData),
+      reloadDataset('attendanceRecords', loadAttendanceRecordsData),
+      reloadDataset('staffAttendanceRecords', loadStaffAttendance),
     ]).then(() => renderStaffActivityBody(body));
   }
+  // Also used as the dashboard's visible manual "Refresh" button — since
+  // renderStaffActivityTab() now always force-refetches (see above), this
+  // reliably pulls in anything entered/marked elsewhere since this tab was
+  // last opened, not just whatever was first cached this session.
   function refreshStaffActivityTab(){ renderStaffActivityTab(document.getElementById('stfActivityBody')); }
   function onStaffActivitySearch(v){ staffActivitySearch = v; renderStaffActivityBody(document.getElementById('stfActivityBody')); }
   function onStaffActivityRangeChange(v){ staffActivityRange = Number(v)||7; renderStaffActivityBody(document.getElementById('stfActivityBody')); }
@@ -15237,8 +15268,13 @@
   }
   function renderStaffActivityBody(body){
     if(!body) return;
-    const today = new Date().toISOString().slice(0,10);
-    const sinceDate = new Date(Date.now() - staffActivityRange*24*60*60*1000).toISOString().slice(0,10);
+    // localDateStr(), not .toISOString() — see its definition for why: for
+    // anyone east of UTC (e.g. India), .toISOString() can land on the wrong
+    // calendar day, which would make "today" miss attendance/marks that
+    // were in fact entered today.
+    const today = localDateStr(new Date());
+    const since = new Date(); since.setDate(since.getDate() - staffActivityRange);
+    const sinceDate = localDateStr(since);
     if(!staffActivityExamId && examDefs.length) staffActivityExamId = examDefs[examDefs.length-1].id;
     const activeStaff = staffList.filter(staffIsActive);
     const q = staffActivitySearch.trim().toLowerCase();
