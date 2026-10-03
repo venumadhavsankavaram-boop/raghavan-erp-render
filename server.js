@@ -177,6 +177,27 @@ async function ensureSchema() {
     amount DECIMAL(14,2) DEFAULT 0, discount DECIMAL(14,2) DEFAULT 0, instalment TEXT, date VARCHAR(32), note TEXT,
     class_at_payment TEXT, extra_fee_name TEXT, extra_fee_id TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
+  // Void/refund columns didn't exist when this table was first created —
+  // same gap as the 'users.photo' column above: the frontend's voidPayment()
+  // and openRefundPaymentModal() have always set p.voided/voidType/voidReason/
+  // voidedBy/voidedAt on the in-memory record and PUT it to /api/payments,
+  // but with no matching column AND no matching entry in
+  // SIMPLE_RESOURCES.payments.fields below, the generic PUT handler's column
+  // whitelist silently dropped every one of those fields — the write
+  // returned 200 OK, the UI looked like it worked, and the very next GET
+  // (or the next page load) came back with the payment still unvoided. Void
+  // and Refund have therefore never actually persisted, in any environment.
+  await addColumnIfMissing('payments', 'voided BOOLEAN DEFAULT false');
+  await addColumnIfMissing('payments', 'void_type TEXT');
+  await addColumnIfMissing('payments', 'void_reason TEXT');
+  await addColumnIfMissing('payments', 'voided_by TEXT');
+  // TEXT, not DATETIME: the frontend always sends a full ISO timestamp
+  // string (new Date().toISOString()), and simpleToAppShape() below only
+  // reformats an actual Date instance (truncating it to a bare date) — a
+  // DATETIME column would come back from the driver as a Date object and
+  // silently lose the time-of-day on every read. approved_date/requested_date
+  // on student_discounts use the same TEXT-for-timestamp-strings approach.
+  await addColumnIfMissing('payments', 'voided_at TEXT');
   await sql`CREATE TABLE IF NOT EXISTS student_discounts (
     id VARCHAR(191) PRIMARY KEY, batch_id VARCHAR(191), student_id VARCHAR(191), type TEXT, applies_to TEXT, mode TEXT,
     value DECIMAL(14,2) DEFAULT 0, note TEXT, status TEXT, requested_by TEXT, requested_role TEXT, requested_date TEXT,
@@ -1080,6 +1101,8 @@ const SIMPLE_RESOURCES = {
       { app: 'amount', col: 'amount', numeric: true }, { app: 'discount', col: 'discount', numeric: true }, { app: 'instalment', col: 'instalment' },
       { app: 'date', col: 'date' }, { app: 'note', col: 'note' }, { app: 'classAtPayment', col: 'class_at_payment' },
       { app: 'extraFeeName', col: 'extra_fee_name' }, { app: 'extraFeeId', col: 'extra_fee_id' },
+      { app: 'voided', col: 'voided' }, { app: 'voidType', col: 'void_type' }, { app: 'voidReason', col: 'void_reason' },
+      { app: 'voidedBy', col: 'voided_by' }, { app: 'voidedAt', col: 'voided_at' },
     ],
   },
   discounts: {
