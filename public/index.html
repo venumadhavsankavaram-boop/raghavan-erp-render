@@ -16100,8 +16100,20 @@
           showToast('That username is already taken — staff record saved, but login was not created.');
         }else if(staffRecord.linkedUserId){
           const u = users.find(x => x.id === staffRecord.linkedUserId);
-          if(u){ u.username = uname; u.name = data.firstName+' '+data.lastName; u.role = g('stfSystemRole'); if(pwd) u.password = pwd; }
-          await storageSet(USERS_KEY, users);
+          if(u){
+            const prevUserSnapshot = { ...u };
+            u.username = uname; u.name = data.firstName+' '+data.lastName; u.role = g('stfSystemRole'); if(pwd) u.password = pwd;
+            // storageSet never throws on a server rejection — it just falls back to
+            // localStorage and pops a toast — so without checking the actual result
+            // here, a rejected save (wrong permission, dropped connection) would look
+            // identical to a successful one and the login change would quietly never
+            // reach the database. See the matching fix in saveUser() for the full story.
+            const saved = await storageSet(USERS_KEY, users);
+            if(!saved){
+              Object.assign(u, prevUserSnapshot);
+              alert("The staff record was saved, but this login's changes could NOT be saved to the server — nothing changed for their account. Please try again from here or from Configuration → Users & Roles.");
+            }
+          }
         }else{
           const newUser = {
             id: 'u_' + Date.now(), name: data.firstName+' '+data.lastName, username: uname,
@@ -16109,8 +16121,14 @@
             linkedStudentId: '', recoveryCode: generateRecoveryCode(),
           };
           users.push(newUser);
+          const prevLinkedUserId = staffRecord.linkedUserId;
           staffRecord.linkedUserId = newUser.id;
-          await storageSet(USERS_KEY, users);
+          const saved = await storageSet(USERS_KEY, users);
+          if(!saved){
+            users.pop();
+            staffRecord.linkedUserId = prevLinkedUserId;
+            alert("The staff record was saved, but this login could NOT be created on the server — it will NOT appear in Configuration → Users & Roles. Please try again, either from here or using the 🔑 button in Staff Directory.");
+          }
         }
       }
     }
