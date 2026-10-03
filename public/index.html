@@ -8102,7 +8102,7 @@
 
   function renderAttRoster(body){
     const list = students.filter(s => s.className===attCurrentClass && s.section===attCurrentSection && isActive(s))
-      .sort((a,b) => (a.firstName||'').localeCompare(b.firstName||''));
+      .sort(compareByRoll);
     list.forEach(s => {
       if(pendingMarks[s.id] === undefined){
         const rec = attendanceRecords.find(r => r.studentId===s.id && r.date===attMarkDate && r.session===attMarkSession);
@@ -8128,10 +8128,11 @@
       </div>
       ${isHoliday ? `<div class="empty-state" style="margin-bottom:16px;"><b>${holidays.find(h=>h.date===attMarkDate).name || 'Holiday'} — school is closed on ${attMarkDate}</b>Attendance isn't taken on a holiday. Pick a working day above, or remove the holiday first if this date shouldn't be one.</div>` : ``}
       <div class="table-wrap" style="${isHoliday ? 'opacity:0.5; pointer-events:none;' : ''}">
-        <table><thead><tr><th>Student</th><th>Admission No</th><th>Status</th></tr></thead>
+        <table><thead><tr><th>Roll No</th><th>Student</th><th>Admission No</th><th>Status</th></tr></thead>
         <tbody>
         ${list.map(s => `
           <tr>
+            <td class="id-cell">${s.rollNo||'—'}</td>
             <td class="name-cell">${s.firstName} ${s.lastName}</td>
             <td class="id-cell">${s.admissionNo}</td>
             <td>
@@ -9488,7 +9489,7 @@
       return;
     }
     const list = students.filter(s => s.className===examCurrentClass && s.section===examCurrentSection && isActive(s))
-      .sort((a,b) => (a.firstName||'').localeCompare(b.firstName||''));
+      .sort(compareByRoll);
     const getResult = (studentId, subject) => examResults.find(r => r.examId===exam.id && r.studentId===studentId && r.subject===subject);
     const canEnterMarks = canSub('exams_marks','exams','edit');
     body.innerHTML = `
@@ -9498,12 +9499,14 @@
       </div>` : ''}
       <div class="table-wrap" style="overflow-x:auto;">
         <table><thead><tr>
+          <th>Roll No</th>
           <th>Student</th>
           ${subjects.map(s => `<th>${s.name} <span style="font-weight:400; color:var(--ink-soft);">(/${s.maxMarks}${s.date ? ' · '+s.date : ''})</span></th>`).join('')}
         </tr></thead>
         <tbody>
         ${list.map(s => `
           <tr>
+            <td class="id-cell">${s.rollNo||'—'}</td>
             <td class="name-cell">${s.firstName} ${s.lastName}</td>
             ${subjects.map(subj => {
               const r = getResult(s.id, subj.name);
@@ -11565,7 +11568,7 @@
     const subjects = getExamSubjects(exam, admitCardsClass, admitCardsSection);
     const missingDates = subjects.filter(s => !s.date);
     const list = students.filter(s => s.className===admitCardsClass && s.section===admitCardsSection && isActive(s))
-      .sort((a,b) => (a.firstName||'').localeCompare(b.firstName||''));
+      .sort(compareByRoll);
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToAdmitCardsGrid()">All Classes</a> &nbsp;/&nbsp; ${admitCardsClass} — Section ${admitCardsSection} &nbsp;/&nbsp; ${exam.name}</div>
       ${subjects.length===0 ? `<div class="empty-state" style="margin-bottom:16px;"><b>No subjects configured yet</b>Hall tickets need at least one dated subject — configure subjects for this class &amp; section under the "Exams" tab first.</div>` : ``}
@@ -23415,6 +23418,22 @@
   function isActive(s){
     return (s.status||'Active').toString().trim().toLowerCase() === 'active';
   }
+  // Roll-call order for a class/section roster: by Roll Number (numeric, so
+  // "2" sorts before "10" — a plain string sort would not), students with no
+  // roll number set pushed to the end (alphabetically among themselves)
+  // rather than mixed in ahead of numbered students. Used anywhere a teacher
+  // or admin needs the physical register order — Attendance Entry, Marks
+  // Entry, Admit Cards, and the Manage Student class/section list — instead
+  // of the alphabetical-by-first-name order those previously defaulted to.
+  function compareByRoll(a, b){
+    const ra = parseInt(a.rollNo, 10);
+    const rb = parseInt(b.rollNo, 10);
+    const aHas = !isNaN(ra), bHas = !isNaN(rb);
+    if(aHas && bHas) return ra - rb;
+    if(aHas) return -1;
+    if(bHas) return 1;
+    return (a.firstName||'').localeCompare(b.firstName||'');
+  }
 
   // Walks the WHOLE connected sibling group, not just one hop. A sibling
   // link is stored on just one side (see the wizard's sibling picker), so
@@ -23504,7 +23523,7 @@
   function renderSectionList(body){
     const rows = students
       .filter(s => s.className===currentClass && s.section===currentSection && statusMatches(s))
-      .sort((a,b) => (a.firstName||'').localeCompare(b.firstName||''));
+      .sort(compareByRoll);
 
     const tableRows = rows.map((s,idx) => `
       <tr onclick="rowClickToProfile(event,'${s.id}')" style="cursor:pointer;">
