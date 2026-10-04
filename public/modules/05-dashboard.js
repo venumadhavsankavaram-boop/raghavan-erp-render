@@ -302,6 +302,15 @@ function ringSVG(pct, color, size, stroke, trackColor){
       // latest figures every time the Dashboard renders, same reasoning as
       // the three reloads above.
       reloadDataset('feeExtras', loadFeeExtras),
+      // The "Stock" category here is a per-class structural fee (like Tuition)
+      // that this school has never actually configured a rate for in Fee
+      // Structure Setup — so it is genuinely ₹0 with zero payments, which is
+      // what made the Stock card look broken/empty. The real stock movement
+      // (uniforms, books, etc.) happens through the separate Inventory module
+      // and is recorded as inventorySales, not as a 'stock'-category payment.
+      // Loaded fresh here so the Stock card/drill-down can surface that real
+      // activity instead of just showing zero.
+      reloadDataset('inventory', loadInventory),
     ]);
     const el = document.getElementById('view-dashboard');
     const { perCat, totals } = computeFinance();
@@ -406,6 +415,17 @@ function ringSVG(pct, color, size, stroke, trackColor){
       .filter(p => p.category === 'extra' && !p.voided)
       .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
+    // The real stock/inventory movement (uniforms, books, stationery sold to
+    // students) lives in the Inventory module's own sales log, not as
+    // 'stock'-category payments — see the reloadDataset comment above. Used
+    // to give the By-Category "Stock" card something real to show when, as
+    // here, no per-class Stock fee rate has ever been configured.
+    const stockInventoryRevenue = inventorySales.reduce((sum,s) => sum + (Number(s.totalAmount)||0), 0)
+      - inventoryReturns.reduce((sum,r) => sum + (Number(r.refundAmount)||0), 0);
+    const stockInventoryCollected = inventorySales.reduce((sum,s) => sum + (Number(s.paidAmount)||0), 0)
+      - inventoryReturns.reduce((sum,r) => sum + (Number(r.cashRefunded)||0), 0);
+    const stockInventorySaleCount = inventorySales.length;
+
     const totalActive = students.filter(s => (s.status||'Active').toString().trim().toLowerCase() === 'active').length;
     const strengthActivePct = students.length ? Math.round((totalActive / students.length) * 100) : 100;
 
@@ -415,7 +435,10 @@ function ringSVG(pct, color, size, stroke, trackColor){
           <h1>Dashboard</h1>
           <p>Overall analytics and insights, updated live from your ERP data.</p>
         </div>
-        <div class="live-badge"><span class="live-dot"></span> Last updated ${nowStr}</div>
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+          <span class="ay-badge" title="Current academic year — change it from Initial Setup → Academic Year">AY ${currentAcademicYearValue}</span>
+          <div class="live-badge"><span class="live-dot"></span> Last updated ${nowStr}</div>
+        </div>
       </div>
 
       <div class="strength-hero-wrap">
@@ -532,7 +555,8 @@ function ringSVG(pct, color, size, stroke, trackColor){
       <div class="cat-grid">
         ${Object.keys(CATS).map(c => {
           const pctC = perCat[c].expected > 0 ? Math.round((perCat[c].collected / perCat[c].expected) * 100) : 0;
-          const txnCount = payments.filter(p => p.category===c && !p.voided).length;
+          const feeTxnCount = payments.filter(p => p.category===c && !p.voided).length;
+          const txnCount = c === 'stock' ? feeTxnCount + stockInventorySaleCount : feeTxnCount;
           return `
           <button type="button" class="cat-card" onclick="openCategoryTransactions('${c}')" title="View ${CATS[c]} transactions">
             <h4><span class="cat-swatch" style="background:${CAT_COLORS[c]}"></span>${CATS[c]}</h4>
@@ -540,6 +564,7 @@ function ringSVG(pct, color, size, stroke, trackColor){
             ${c !== 'stock' ? `<div class="cat-row"><span>Discount</span><b>${fmtMoney(perCat[c].discount)}</b></div>` : ``}
             <div class="cat-row"><span>Collected</span><b>${fmtMoney(perCat[c].collected)}</b></div>
             <div class="cat-row"><span>Receivable</span><b>${fmtMoney(perCat[c].receivable)}</b></div>
+            ${c === 'stock' ? `<div class="cat-row"><span>Inventory Sales</span><b>${fmtMoney(stockInventoryRevenue)}</b></div>` : ``}
             <div class="progress-track" style="margin-top:10px;"><div class="progress-fill" style="width:${Math.min(pctC,100)}%; background:${CAT_COLORS[c]};"></div></div>
             <div class="cat-pct">${pctC}% collected</div>
             <div class="cat-card-cta">View ${txnCount} transaction${txnCount===1?'':'s'} →</div>
@@ -688,6 +713,59 @@ function ringSVG(pct, color, size, stroke, trackColor){
     const rows = payments
       .filter(p => p.category === cat && !p.voided)
       .sort((a,b) => paymentEntryMillis(b) - paymentEntryMillis(a));
+
+    // "Stock" has two unrelated meanings in this app: the per-class Stock FEE
+    // (a payments category, like Tuition) and actual Inventory/stock-item
+    // sales (uniforms, books, etc.), logged separately as inventorySales.
+    // This school has never configured a Stock fee rate, so the fee side is
+    // always empty here — showing the real inventory sales alongside it is
+    // what makes this view actually useful for "Stock".
+    const invRows = cat === 'stock'
+      ? inventorySales.slice().sort((a,b) => String(b.id).localeCompare(String(a.id)))
+      : [];
+
+    const feeSection = `
+      <div class="table-wrap" style="box-shadow:none; border:1px solid var(--border);">
+        <table>
+          <thead><tr><th>Date</th><th>Student</th><th>Mode</th><th>Amount</th>${cat!=='stock'?'<th>Discount</th>':''}<th></th></tr></thead>
+          <tbody>
+            ${rows.length ? rows.map(p => `
+              <tr>
+                <td>${p.date || '—'}</td>
+                <td class="name-cell">${p.studentName}</td>
+                <td>${p.mode || '—'}</td>
+                <td>${fmtMoney(p.amount)}</td>
+                ${cat!=='stock'?`<td>${fmtMoney(p.discount)}</td>`:''}
+                <td>${canSub('managefee_collection','managefee','print') ? `<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print</button>` : ''}</td>
+              </tr>
+            `).join('') : `<tr><td colspan="6"><div class="empty-state"><b>No ${CATS[cat]} fee payments recorded yet${cat==='stock'?' (no per-class Stock fee rate is configured)':''}</b></div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    const invSection = cat !== 'stock' ? '' : `
+      <div class="dash-section-title" style="margin:22px 0 12px;"><div><h3 style="font-size:0.95rem;">Inventory / Stock Sales</h3></div></div>
+      <div class="table-wrap" style="box-shadow:none; border:1px solid var(--border);">
+        <table>
+          <thead><tr><th>Date</th><th>Item</th><th>Buyer</th><th>Qty</th><th>Amount</th><th>Collected</th></tr></thead>
+          <tbody>
+            ${invRows.length ? invRows.map(s => `
+              <tr>
+                <td>${s.date || '—'}</td>
+                <td class="name-cell">${s.itemName}</td>
+                <td>${s.buyerName || '—'}</td>
+                <td>${s.qty}</td>
+                <td>${fmtMoney(s.totalAmount)}</td>
+                <td>${fmtMoney(s.paidAmount)}</td>
+              </tr>
+            `).join('') : `<tr><td colspan="6"><div class="empty-state"><b>No inventory sales recorded yet</b></div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    const totalCount = rows.length + invRows.length;
     wrap.innerHTML = `
       <div style="position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:999; padding:20px;" onclick="if(event.target===this) closeCategoryTransactions();">
         <div class="profile-card" style="width:100%; max-width:860px; max-height:82vh; overflow:auto;">
@@ -695,24 +773,9 @@ function ringSVG(pct, color, size, stroke, trackColor){
             <h4><span class="cat-swatch" style="background:${CAT_COLORS[cat]}"></span>${CATS[cat]} — Transactions</h4>
             <button class="btn btn-ghost btn-sm" onclick="closeCategoryTransactions()">Close ✕</button>
           </div>
-          <p style="font-size:0.8rem; color:var(--ink-soft); margin:4px 0 14px;">${rows.length} payment${rows.length===1?'':'s'} recorded against ${CATS[cat]}, most recent first.</p>
-          <div class="table-wrap" style="box-shadow:none; border:1px solid var(--border);">
-            <table>
-              <thead><tr><th>Date</th><th>Student</th><th>Mode</th><th>Amount</th>${cat!=='stock'?'<th>Discount</th>':''}<th></th></tr></thead>
-              <tbody>
-                ${rows.length ? rows.map(p => `
-                  <tr>
-                    <td>${p.date || '—'}</td>
-                    <td class="name-cell">${p.studentName}</td>
-                    <td>${p.mode || '—'}</td>
-                    <td>${fmtMoney(p.amount)}</td>
-                    ${cat!=='stock'?`<td>${fmtMoney(p.discount)}</td>`:''}
-                    <td>${canSub('managefee_collection','managefee','print') ? `<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print</button>` : ''}</td>
-                  </tr>
-                `).join('') : `<tr><td colspan="6"><div class="empty-state"><b>No ${CATS[cat]} payments recorded yet</b></div></td></tr>`}
-              </tbody>
-            </table>
-          </div>
+          <p style="font-size:0.8rem; color:var(--ink-soft); margin:4px 0 14px;">${totalCount} transaction${totalCount===1?'':'s'}${cat==='stock'?' (fee payments + inventory sales)' : ` recorded against ${CATS[cat]}`}, most recent first.</p>
+          ${feeSection}
+          ${invSection}
         </div>
       </div>
     `;
