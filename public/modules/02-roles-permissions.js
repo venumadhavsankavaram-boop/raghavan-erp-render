@@ -452,15 +452,12 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     document.getElementById('loginAudienceStaffBtn').setAttribute('aria-selected', audience === 'staff');
     document.getElementById('loginAudienceParentBtn').classList.toggle('active', audience === 'parent');
     document.getElementById('loginAudienceParentBtn').setAttribute('aria-selected', audience === 'parent');
-    const hint = document.getElementById('loginHint');
-    if(hint) hint.style.display = audience === 'staff' ? 'block' : 'none';
     document.getElementById('loginError').style.display = 'none';
   }
 
   function toggleForgotPassword(show){
     document.getElementById('loginForm').style.display = show ? 'none' : 'block';
     document.getElementById('forgotForm').style.display = show ? 'block' : 'none';
-    document.querySelector('.login-hint').style.display = show ? 'none' : 'block';
     document.getElementById('forgotError').style.display = 'none';
     document.getElementById('forgotSuccess').style.display = 'none';
   }
