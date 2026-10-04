@@ -8,6 +8,7 @@
 // already tested and confirmed working.
 
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
@@ -4633,11 +4634,47 @@ app.use((err, req, res, next) => {
 // back, and ETag/Last-Modified still make that check a cheap 304 when
 // nothing actually changed, so this doesn't mean re-downloading the whole
 // file on every visit, just never trusting a copy without asking first.
+//
+// The no-cache header below is what the APP intends, but it only binds this
+// Node process — a hosting platform's own edge/CDN layer in front of it can
+// (and on GoDaddy's "airoapp" preview/live hosting, does) apply its OWN
+// default long-lived cache policy to recognizable static file types like
+// .js, overriding whatever Cache-Control this server sends. That's exactly
+// what made the Oct 2026 "Extra Fees Collected" deploy invisible on a
+// browser that had already loaded the ERP before: the server was correctly
+// serving the new module file, but the edge cache kept handing out a
+// month-old copy under the SAME url regardless.
+//
+// The fix that survives an edge cache we don't control: never ask the same
+// URL to change its meaning. APP_BUILD is a fresh value every time this
+// process starts (i.e. every deploy/restart), and every module <script src>
+// in index.html gets "?v=<APP_BUILD>" appended when the shell is served.
+// index.html itself is never cached (see above), so every visitor's next
+// page load immediately asks for the NEW versioned urls — a request no
+// cache (browser or CDN) has ever seen before, so it can only be answered
+// by hitting this server fresh. The old, unversioned-request cache entries
+// are simply never asked for again; they age out on their own instead of
+// needing to be invalidated.
+const APP_BUILD = String(Date.now());
+const INDEX_HTML_PATH = path.join(__dirname, 'public', 'index.html');
+function renderIndexHtml(){
+  const raw = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  return raw.replace(/(<script src="modules\/[^"]+\.js)(")/g, `$1?v=${APP_BUILD}$2`);
+}
+function sendIndexHtml(res){
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.type('html').send(renderIndexHtml());
+}
 app.use(express.static(path.join(__dirname, 'public'), {
   // 'allow' (not the Express default 'ignore') so /.well-known/assetlinks.json
   // is actually servable — that file is how the Android app (a Trusted Web
   // Activity) proves it's allowed to open this site without a browser URL bar.
   dotfiles: 'allow',
+  // index.html is served through sendIndexHtml() below instead (it needs
+  // the module urls rewritten with the cache-busting query string above),
+  // so the static middleware must never hand out the raw, unrewritten file
+  // for '/' or an explicit '/index.html' request.
+  index: false,
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('index.html')) {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
@@ -4653,14 +4690,20 @@ app.use(express.static(path.join(__dirname, 'public'), {
     // open tab. ETag/Last-Modified still make the revalidation a cheap 304
     // when nothing changed, so this doesn't mean re-downloading on every
     // visit — just never trusting a cached copy without asking first.
+    // Belt-and-braces alongside the cache-busted "?v=" query string above:
+    // that handles a CDN that ignores this header for .js files, this
+    // handles any path that fetches a module file WITHOUT the query string
+    // (e.g. a stale already-open tab re-requesting its own old <script src>).
     if (filePath.includes(path.join('public', 'modules') + path.sep) && filePath.endsWith('.js')) {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     }
   },
 }));
+app.get(['/', '/index.html'], (req, res) => {
+  sendIndexHtml(res);
+});
 app.get(/.*/, (req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  sendIndexHtml(res);
 });
 
 const PORT = process.env.PORT || 3000;
