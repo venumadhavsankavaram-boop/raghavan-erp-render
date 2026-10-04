@@ -375,15 +375,17 @@ function ringSVG(pct, color, size, stroke, trackColor){
       oldbalance: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="13" r="8" stroke="currentColor" stroke-width="2"/><path d="M12 9V13L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 3L5 6M16 3L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
     };
 
-    // "Old Balance" = dues carried forward from a previous class/year via
-    // Promote & Transfer's carry-forward option (see CARRYFORWARD_LABELS in
-    // the Promote & Transfer module) — stored as studentExtraFees records
-    // named e.g. "Previous Year Dues" / "Fee (Carried Forward)". This is the
-    // one place in the app that already models an opening/previous-year
-    // balance, so the Dashboard surfaces it under that name rather than
-    // inventing a separate, disconnected concept.
+    // "Old Balance" = dues carried forward from a previous class/year. The
+    // Promote & Transfer carry-forward option stores these as studentExtraFees
+    // records named from CARRYFORWARD_LABELS (e.g. "Previous Year Dues"), but
+    // this school has also been recording the same concept by hand as a
+    // free-text Extra Fee literally named "Old Balance" (and similar wording)
+    // well before that automated flow existed — real collected money that a
+    // strict match against CARRYFORWARD_LABELS alone would miss entirely.
+    // Matching the pattern below alongside the exact labels catches both.
     const carryForwardNames = new Set(Object.values(CARRYFORWARD_LABELS));
-    const oldBalanceEntries = studentExtraFees.filter(e => carryForwardNames.has(e.name));
+    const oldBalanceNamePattern = /old\s*balance|previous\s*year|carried\s*forward/i;
+    const oldBalanceEntries = studentExtraFees.filter(e => carryForwardNames.has(e.name) || oldBalanceNamePattern.test(e.name||''));
     const oldBalanceExpected = oldBalanceEntries.reduce((sum,e) => sum + (Number(e.amount)||0), 0);
     const oldBalanceCollected = oldBalanceEntries.reduce((sum,e) => {
       const amt = Number(e.amount) || 0;
