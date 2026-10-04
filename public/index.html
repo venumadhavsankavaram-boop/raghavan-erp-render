@@ -1119,6 +1119,7 @@
   .dh-card.receivable .dh-icon{color:var(--magenta); background:linear-gradient(150deg, rgba(209,16,115,0.18), rgba(209,16,115,0.07)); box-shadow:inset 0 0 0 1px rgba(209,16,115,0.16);}
   .dh-card.discount .dh-icon{color:var(--navy); background:linear-gradient(150deg, rgba(33,26,78,0.16), rgba(33,26,78,0.06)); box-shadow:inset 0 0 0 1px rgba(33,26,78,0.14);}
   .dh-card.extra .dh-icon{color:#8E44AD; background:linear-gradient(150deg, rgba(142,68,173,0.18), rgba(142,68,173,0.07)); box-shadow:inset 0 0 0 1px rgba(142,68,173,0.16);}
+  .dh-card.oldbalance .dh-icon{color:#C0622B; background:linear-gradient(150deg, rgba(192,98,43,0.18), rgba(192,98,43,0.07)); box-shadow:inset 0 0 0 1px rgba(192,98,43,0.16);}
 
   .dh-spark{position:absolute; right:0; bottom:0; left:0; height:34px; opacity:0.9; pointer-events:none; z-index:0;}
   .dh-spark svg{display:block; width:100%; height:100%;}
@@ -1157,7 +1158,7 @@
   .dh-card .dh-label{font-size:0.78rem; color:var(--ink-soft); font-weight:600; margin-bottom:10px;}
   .dh-card .dh-amount{font-family:'Baloo 2',cursive; font-size:1.72rem; color:var(--navy);}
   .dh-card .dh-sub{font-size:0.78rem; color:var(--ink-soft); margin-top:6px; position:relative; z-index:1;}
-  .dh-card.expected::before, .dh-card.collected::before, .dh-card.receivable::before, .dh-card.discount::before, .dh-card.extra::before{
+  .dh-card.expected::before, .dh-card.collected::before, .dh-card.receivable::before, .dh-card.discount::before, .dh-card.extra::before, .dh-card.oldbalance::before{
     content:''; position:absolute; top:0; left:0; right:0; height:4px; border-radius:20px 20px 0 0;
   }
   .dh-card.expected::before{background:linear-gradient(90deg,var(--gold),#F2CE7E);}
@@ -1165,6 +1166,7 @@
   .dh-card.receivable::before{background:linear-gradient(90deg,var(--magenta),#EC4498);}
   .dh-card.discount::before{background:linear-gradient(90deg,var(--navy),#4A3E8C);}
   .dh-card.extra::before{background:linear-gradient(90deg,#8E44AD,#B07CC6);}
+  .dh-card.oldbalance::before{background:linear-gradient(90deg,#C0622B,#D98A54);}
   .dh-pct{display:inline-block; margin-left:8px; font-size:0.78rem; font-weight:700; color:var(--teal);}
   .progress-track{height:7px; background:var(--cream); border-radius:6px; margin-top:10px; overflow:hidden;}
   .progress-fill{height:100%; background:linear-gradient(90deg,var(--teal),#28C0B4); border-radius:6px;}
@@ -1173,8 +1175,19 @@
   .dash-section-title h3{font-size:1.1rem;}
   .dash-section-title .eyebrow-sm{font-family:'IBM Plex Mono',monospace; font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--magenta); font-weight:600;}
 
+  .cat-donut-panel{
+    display:flex; align-items:center; gap:40px; background:var(--white); border-radius:22px;
+    padding:28px 36px; box-shadow:0 18px 40px -20px rgba(33,26,78,0.22), var(--shadow); margin-bottom:24px; flex-wrap:wrap;
+    border:1px solid rgba(33,26,78,0.05);
+  }
+  .cat-donut-wrap{flex-shrink:0; width:176px; height:176px;}
+  .cat-donut-wrap svg{display:block;}
+  .cat-donut-legend{flex:1; min-width:220px; display:flex; flex-direction:column; gap:12px;}
+  .cat-donut-legend-title{font-size:0.78rem; font-weight:600; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:2px;}
+
   .cat-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:16px;}
   .cat-card{
+    display:block; width:100%; text-align:left; font:inherit; cursor:pointer; appearance:none;
     background:var(--white); border-radius:18px; padding:20px 22px; box-shadow:0 10px 26px -16px rgba(33,26,78,0.2), var(--shadow-sm, var(--shadow));
     border:1px solid rgba(33,26,78,0.05); transition:transform 0.2s ease, box-shadow 0.2s ease;
   }
@@ -1184,7 +1197,7 @@
   .cat-row{display:flex; justify-content:space-between; font-size:0.82rem; padding:5px 0; color:var(--ink-soft); border-bottom:1px dashed var(--border);}
   .cat-row:last-child{border-bottom:none;}
   .cat-row b{color:var(--ink);}
-  .cat-card button{margin-top:12px; width:100%;}
+  .cat-card-cta{margin-top:12px; font-size:0.78rem; font-weight:600; color:var(--magenta);}
 
   .demo-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:18px;}
   .demo-card{

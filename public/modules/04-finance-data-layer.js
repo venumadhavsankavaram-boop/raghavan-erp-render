@@ -249,7 +249,7 @@ const SETTINGS_KEY = "finance-settings";
     Object.keys(CATS).forEach(c => {
       const catPayments = payments.filter(p => p.category === c && !p.voided);
       const collected = catPayments.reduce((s,p) => s + (Number(p.amount)||0), 0);
-      const discount = c === 'stock' ? 0 : catPayments.reduce((s,p) => s + (Number(p.discount)||0), 0);
+      let discount = c === 'stock' ? 0 : catPayments.reduce((s,p) => s + (Number(p.discount)||0), 0);
 
       let expected = 0;
       if(c === 'hostel'){
@@ -261,6 +261,28 @@ const SETTINGS_KEY = "finance-settings";
           const rate = Number(classStruct(cls)[c]) || 0;
           if(rate <= 0) return;
           expected += rate * activeStudents.filter(s => s.className===cls).length;
+        });
+      }
+      // Approved "Discount Card" entries (studentDiscounts, granted in Manage
+      // Fee -> Discounts) are a separate mechanism from the ad-hoc "Discount"
+      // amount typed in at the moment a payment is collected. computeStudentFinance()
+      // already folds approved studentDiscounts into each student's own totals,
+      // but this school-wide version only ever summed payments' own .discount
+      // field — so a discount granted via the Discount Card that hadn't also
+      // been re-entered on a payment never showed up here, making the
+      // Dashboard's "Total Discount Allowed" and By-Category discount figures
+      // disagree with what a student's own ledger/profile shows. Mirrored here
+      // so both stay consistent.
+      if(c !== 'stock'){
+        activeStudents.forEach(s => {
+          const approved = studentDiscounts.filter(d => d.studentId===s.id && d.status==='Approved' && d.appliesTo===c);
+          if(!approved.length) return;
+          const catExpectedForStudent = c==='hostel' ? (s.isBoarder==='Yes' ? studentHostelFee(s) : 0)
+            : c==='bus' ? (s.needsTransport==='Yes' ? studentBusFare(s) : 0)
+            : Number(classStruct(s.className)[c]) || 0;
+          approved.forEach(d => {
+            discount += d.mode === 'percentage' ? Math.round(catExpectedForStudent * (Number(d.value)||0) / 100) : (Number(d.value)||0);
+          });
         });
       }
       const netPayable = Math.max(expected - discount, 0);

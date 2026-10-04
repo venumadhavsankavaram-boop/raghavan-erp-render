@@ -137,6 +137,49 @@ function ringSVG(pct, color, size, stroke, trackColor){
     `;
   }
 
+  // Payment ids are 'pay_<millis>_<key>' — the exact moment the entry was
+  // recorded, used wherever payments need ordering by true entry time
+  // rather than just their (user-editable, date-only) `date` field.
+  function paymentEntryMillis(p){
+    const m = String(p.id||'').match(/^pay_(\d+)_/);
+    return m ? Number(m[1]) : 0;
+  }
+
+  // Donut/pie chart in the same hand-drawn-SVG house style as ringSVG() —
+  // `segments` is [{label, value, color}], drawn in the order given (never
+  // re-sorted/re-colored by value, so a category's slice always keeps its
+  // own fixed color — see CAT_COLORS). A thin surface-colored gap separates
+  // adjacent slices, and each slice carries a native <title> tooltip.
+  function donutChartSVG(segments, size, stroke){
+    size = size || 176; stroke = stroke || 30;
+    const r = (size - stroke) / 2;
+    const c = 2 * Math.PI * r;
+    const total = segments.reduce((s,seg) => s + Math.max(0, seg.value), 0);
+    const gapPx = 3;
+    if(total <= 0){
+      return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--cream)" stroke-width="${stroke}"/>
+      </svg>`;
+    }
+    let running = 0;
+    const arcs = segments.filter(seg => seg.value > 0).map(seg => {
+      const segLen = (seg.value / total) * c;
+      const dash = Math.max(0, segLen - gapPx);
+      const dashOffset = -(running + gapPx/2);
+      running += segLen;
+      return `<circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${seg.color}" stroke-width="${stroke}"
+        stroke-dasharray="${dash.toFixed(2)} ${(c-dash).toFixed(2)}" stroke-dashoffset="${dashOffset.toFixed(2)}" stroke-linecap="butt">
+        <title>${seg.label}: ${fmtMoney(seg.value)} (${Math.round((seg.value/total)*100)}%)</title>
+      </circle>`;
+    }).join('');
+    return `
+      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);" role="img" aria-label="Collected amount by category">
+        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--cream)" stroke-width="${stroke}"/>
+        ${arcs}
+      </svg>
+    `;
+  }
+
   // Rounds an axis max up to a clean human step (1/2/2.5/5/10 ×10^n) so
   // gridline labels read as 0/25/50/75/100 rather than an arbitrary
   // fraction of the raw data max. Mirrors the same fix already validated
@@ -253,6 +296,12 @@ function ringSVG(pct, color, size, stroke, trackColor){
       reloadDataset('payments', loadPaymentsData),
       reloadDataset('attendanceRecords', loadAttendanceRecordsData),
       reloadDataset('staffAttendanceRecords', loadStaffAttendance),
+      // studentExtraFees/studentDiscounts (loaded together by loadFeeExtras)
+      // only ever got fetched once at login — fine for most tabs, but the
+      // Old Balance card and the discount totals below need this session's
+      // latest figures every time the Dashboard renders, same reasoning as
+      // the three reloads above.
+      reloadDataset('feeExtras', loadFeeExtras),
     ]);
     const el = document.getElementById('view-dashboard');
     const { perCat, totals } = computeFinance();
@@ -278,7 +327,22 @@ function ringSVG(pct, color, size, stroke, trackColor){
     students.forEach(s => { if(isActive(s) && classCounts[s.className] !== undefined) classCounts[s.className]++; });
     const maxClassCount = Math.max(1, ...Object.values(classCounts));
 
-    const recentPayments = [...payments].sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0,8);
+    // Payment ids are 'pay_<millis>_<key>' — the exact moment the entry was
+    // recorded. Sorting by the `date` field alone (the old behavior) can't
+    // tell today's 3rd payment from today's 1st apart, and a backdated entry
+    // (date set to an earlier day, entered just now) would sort below
+    // same/later-dated rows even though it's the most recently recorded
+    // transaction — this is what "latest transactions not shown" was about.
+    // Date stays the primary sort (so the list still reads chronologically);
+    // the embedded timestamp breaks ties within the same date. Voided
+    // payments are excluded — a reversed payment isn't a "latest transaction".
+    const recentPayments = [...payments]
+      .filter(p => !p.voided)
+      .sort((a,b) => {
+        const byDate = (b.date||'').localeCompare(a.date||'');
+        return byDate !== 0 ? byDate : paymentEntryMillis(b) - paymentEntryMillis(a);
+      })
+      .slice(0,8);
     const nowStr = new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
 
     const feeTrend = monthlyFeeTrend(6);
@@ -299,6 +363,7 @@ function ringSVG(pct, color, size, stroke, trackColor){
       { label:'Staff Directory', view:'staffdirectory', rgb:'33,26,78', icon:'<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19 C3.5 15.2 6 13.3 9 13.3 C12 13.3 14.5 15.2 14.5 19"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 13.5 C18 13.7 20.5 15.3 20.5 19"/>' },
       { label:'Timetable', view:'timetable', rgb:'209,16,115', icon:'<circle cx="12" cy="12" r="8.5"/><line x1="12" y1="12" x2="12" y2="7.5"/><line x1="12" y1="12" x2="15.5" y2="13.5"/>' },
       { label:'Reports', view:'reports', rgb:'24,143,134', icon:'<line x1="5" y1="20" x2="5" y2="12"/><line x1="12" y1="20" x2="12" y2="7"/><line x1="19" y1="20" x2="19" y2="15"/><line x1="3" y1="20" x2="21" y2="20"/>' },
+      { label:'Inventory', view:'inventory', rgb:'33,26,78', icon:'<path d="M3 7.5 L12 3 L21 7.5 L12 12 Z"/><path d="M3 7.5 V16.5 L12 21 L21 16.5 V7.5"/><line x1="12" y1="12" x2="12" y2="21"/>' },
     ];
 
     const ICONS = {
@@ -307,7 +372,25 @@ function ringSVG(pct, color, size, stroke, trackColor){
       receivable: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7V12L15.5 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
       discount: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 12L12 3H19V10L10 19L3 12Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="14.5" cy="8.5" r="1.4" fill="currentColor"/></svg>`,
       extra: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 7.5C7 6 8.8 5 12 5C15.2 5 17 6 17 7.5C17 10.5 7 10 7 13.5C7 15 8.8 16 12 16C15.2 16 17 15 17 13.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+      oldbalance: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="13" r="8" stroke="currentColor" stroke-width="2"/><path d="M12 9V13L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 3L5 6M16 3L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
     };
+
+    // "Old Balance" = dues carried forward from a previous class/year via
+    // Promote & Transfer's carry-forward option (see CARRYFORWARD_LABELS in
+    // the Promote & Transfer module) — stored as studentExtraFees records
+    // named e.g. "Previous Year Dues" / "Fee (Carried Forward)". This is the
+    // one place in the app that already models an opening/previous-year
+    // balance, so the Dashboard surfaces it under that name rather than
+    // inventing a separate, disconnected concept.
+    const carryForwardNames = new Set(Object.values(CARRYFORWARD_LABELS));
+    const oldBalanceEntries = studentExtraFees.filter(e => carryForwardNames.has(e.name));
+    const oldBalanceExpected = oldBalanceEntries.reduce((sum,e) => sum + (Number(e.amount)||0), 0);
+    const oldBalanceCollected = oldBalanceEntries.reduce((sum,e) => {
+      const amt = Number(e.amount) || 0;
+      const paid = e.paidAmount != null ? Number(e.paidAmount)||0 : (e.paid ? amt : 0);
+      return sum + Math.min(paid, amt);
+    }, 0);
+    const oldBalanceReceivable = Math.max(0, oldBalanceExpected - oldBalanceCollected);
 
     // Dashboard's main totals (expected/collected/receivable/discount) only
     // ever tracked the four per-class fee categories (Fee/Bus/Stock/Hostel) —
@@ -407,6 +490,12 @@ function ringSVG(pct, color, size, stroke, trackColor){
           <div class="dh-amount">${fmtMoney(extraFeesCollected)}</div>
           <div class="dh-sub">Admission Fee, Inventory, Fines, etc.</div>
         </div>
+        <div class="dh-card oldbalance">
+          <div class="dh-icon">${ICONS.oldbalance}</div>
+          <div class="dh-label">Old Balance (Previous Year Dues)</div>
+          <div class="dh-amount">${fmtMoney(oldBalanceReceivable)}</div>
+          <div class="dh-sub">${fmtMoney(oldBalanceCollected)} collected of ${fmtMoney(oldBalanceExpected)} carried forward</div>
+        </div>
       </div>
 
       <div class="dash-section-title">
@@ -428,11 +517,22 @@ function ringSVG(pct, color, size, stroke, trackColor){
       <div class="dash-section-title">
         <div><span class="eyebrow-sm">By Category</span><h3>Fee, Bus, Stock &amp; Hostel Breakdown</h3></div>
       </div>
+      <div class="cat-donut-panel">
+        <div class="cat-donut-wrap">${donutChartSVG(Object.keys(CATS).map(c => ({ label: CATS[c], value: perCat[c].collected, color: CAT_COLORS[c] })))}</div>
+        <div class="cat-donut-legend">
+          <div class="cat-donut-legend-title">Collected, by Category</div>
+          ${Object.keys(CATS).map(c => {
+            const sharePct = totals.collected > 0 ? Math.round((perCat[c].collected / totals.collected) * 100) : 0;
+            return `<div class="ov-row"><span class="ov-swatch" style="background:${CAT_COLORS[c]};"></span>${CATS[c]}<b>${fmtMoney(perCat[c].collected)}<span style="color:var(--ink-soft); font-weight:500; margin-left:6px;">${sharePct}%</span></b></div>`;
+          }).join('')}
+        </div>
+      </div>
       <div class="cat-grid">
         ${Object.keys(CATS).map(c => {
           const pctC = perCat[c].expected > 0 ? Math.round((perCat[c].collected / perCat[c].expected) * 100) : 0;
+          const txnCount = payments.filter(p => p.category===c && !p.voided).length;
           return `
-          <div class="cat-card">
+          <button type="button" class="cat-card" onclick="openCategoryTransactions('${c}')" title="View ${CATS[c]} transactions">
             <h4><span class="cat-swatch" style="background:${CAT_COLORS[c]}"></span>${CATS[c]}</h4>
             <div class="cat-row"><span>Expected</span><b>${fmtMoney(perCat[c].expected)}</b></div>
             ${c !== 'stock' ? `<div class="cat-row"><span>Discount</span><b>${fmtMoney(perCat[c].discount)}</b></div>` : ``}
@@ -440,10 +540,12 @@ function ringSVG(pct, color, size, stroke, trackColor){
             <div class="cat-row"><span>Receivable</span><b>${fmtMoney(perCat[c].receivable)}</b></div>
             <div class="progress-track" style="margin-top:10px;"><div class="progress-fill" style="width:${Math.min(pctC,100)}%; background:${CAT_COLORS[c]};"></div></div>
             <div class="cat-pct">${pctC}% collected</div>
-          </div>
+            <div class="cat-card-cta">View ${txnCount} transaction${txnCount===1?'':'s'} →</div>
+          </button>
         `;
         }).join('')}
       </div>
+      <div id="dashCatTxnModalWrap"></div>
 
       <div class="dash-section-title">
         <div><span class="eyebrow-sm">Students</span><h3>Student Demographics</h3></div>
@@ -572,6 +674,50 @@ function ringSVG(pct, color, size, stroke, trackColor){
     }
     animateCountUp(document.querySelector('.sh-num'), totalActive);
     renderCasteBody();
+  }
+
+  // Drill-down for a "By Category" card — the cards used to be static
+  // numbers only, with no way to see which actual payments made up a
+  // category's Collected figure. Reuses the same house-style modal pattern
+  // as Inventory's "Return to Vendor" dialog.
+  function openCategoryTransactions(cat){
+    const wrap = document.getElementById('dashCatTxnModalWrap');
+    if(!wrap) return;
+    const rows = payments
+      .filter(p => p.category === cat && !p.voided)
+      .sort((a,b) => paymentEntryMillis(b) - paymentEntryMillis(a));
+    wrap.innerHTML = `
+      <div style="position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:999; padding:20px;" onclick="if(event.target===this) closeCategoryTransactions();">
+        <div class="profile-card" style="width:100%; max-width:860px; max-height:82vh; overflow:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:4px;">
+            <h4><span class="cat-swatch" style="background:${CAT_COLORS[cat]}"></span>${CATS[cat]} — Transactions</h4>
+            <button class="btn btn-ghost btn-sm" onclick="closeCategoryTransactions()">Close ✕</button>
+          </div>
+          <p style="font-size:0.8rem; color:var(--ink-soft); margin:4px 0 14px;">${rows.length} payment${rows.length===1?'':'s'} recorded against ${CATS[cat]}, most recent first.</p>
+          <div class="table-wrap" style="box-shadow:none; border:1px solid var(--border);">
+            <table>
+              <thead><tr><th>Date</th><th>Student</th><th>Mode</th><th>Amount</th>${cat!=='stock'?'<th>Discount</th>':''}<th></th></tr></thead>
+              <tbody>
+                ${rows.length ? rows.map(p => `
+                  <tr>
+                    <td>${p.date || '—'}</td>
+                    <td class="name-cell">${p.studentName}</td>
+                    <td>${p.mode || '—'}</td>
+                    <td>${fmtMoney(p.amount)}</td>
+                    ${cat!=='stock'?`<td>${fmtMoney(p.discount)}</td>`:''}
+                    <td>${canSub('managefee_collection','managefee','print') ? `<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print</button>` : ''}</td>
+                  </tr>
+                `).join('') : `<tr><td colspan="6"><div class="empty-state"><b>No ${CATS[cat]} payments recorded yet</b></div></td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  function closeCategoryTransactions(){
+    const wrap = document.getElementById('dashCatTxnModalWrap');
+    if(wrap) wrap.innerHTML = '';
   }
 
   function onCasteFilterChange(){
