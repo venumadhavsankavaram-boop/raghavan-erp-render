@@ -1119,6 +1119,7 @@
   .dh-card.collected .dh-icon{color:var(--teal); background:linear-gradient(150deg, rgba(24,143,134,0.2), rgba(24,143,134,0.08)); box-shadow:inset 0 0 0 1px rgba(24,143,134,0.18);}
   .dh-card.receivable .dh-icon{color:var(--magenta); background:linear-gradient(150deg, rgba(209,16,115,0.18), rgba(209,16,115,0.07)); box-shadow:inset 0 0 0 1px rgba(209,16,115,0.16);}
   .dh-card.discount .dh-icon{color:var(--navy); background:linear-gradient(150deg, rgba(33,26,78,0.16), rgba(33,26,78,0.06)); box-shadow:inset 0 0 0 1px rgba(33,26,78,0.14);}
+  .dh-card.extra .dh-icon{color:#8E44AD; background:linear-gradient(150deg, rgba(142,68,173,0.18), rgba(142,68,173,0.07)); box-shadow:inset 0 0 0 1px rgba(142,68,173,0.16);}
 
   .dh-spark{position:absolute; right:0; bottom:0; left:0; height:34px; opacity:0.9; pointer-events:none; z-index:0;}
   .dh-spark svg{display:block; width:100%; height:100%;}
@@ -1157,13 +1158,14 @@
   .dh-card .dh-label{font-size:0.78rem; color:var(--ink-soft); font-weight:600; margin-bottom:10px;}
   .dh-card .dh-amount{font-family:'Baloo 2',cursive; font-size:1.72rem; color:var(--navy);}
   .dh-card .dh-sub{font-size:0.78rem; color:var(--ink-soft); margin-top:6px; position:relative; z-index:1;}
-  .dh-card.expected::before, .dh-card.collected::before, .dh-card.receivable::before, .dh-card.discount::before{
+  .dh-card.expected::before, .dh-card.collected::before, .dh-card.receivable::before, .dh-card.discount::before, .dh-card.extra::before{
     content:''; position:absolute; top:0; left:0; right:0; height:4px; border-radius:20px 20px 0 0;
   }
   .dh-card.expected::before{background:linear-gradient(90deg,var(--gold),#F2CE7E);}
   .dh-card.collected::before{background:linear-gradient(90deg,var(--teal),#28C0B4);}
   .dh-card.receivable::before{background:linear-gradient(90deg,var(--magenta),#EC4498);}
   .dh-card.discount::before{background:linear-gradient(90deg,var(--navy),#4A3E8C);}
+  .dh-card.extra::before{background:linear-gradient(90deg,#8E44AD,#B07CC6);}
   .dh-pct{display:inline-block; margin-left:8px; font-size:0.78rem; font-weight:700; color:var(--teal);}
   .progress-track{height:7px; background:var(--cream); border-radius:6px; margin-top:10px; overflow:hidden;}
   .progress-fill{height:100%; background:linear-gradient(90deg,var(--teal),#28C0B4); border-radius:6px;}

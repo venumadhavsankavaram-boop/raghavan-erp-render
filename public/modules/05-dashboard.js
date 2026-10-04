@@ -306,7 +306,20 @@ function ringSVG(pct, color, size, stroke, trackColor){
       collected: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M8 12.5L10.5 15L16 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
       receivable: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7V12L15.5 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
       discount: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 12L12 3H19V10L10 19L3 12Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="14.5" cy="8.5" r="1.4" fill="currentColor"/></svg>`,
+      extra: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3V21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 7.5C7 6 8.8 5 12 5C15.2 5 17 6 17 7.5C17 10.5 7 10 7 13.5C7 15 8.8 16 12 16C15.2 16 17 15 17 13.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
     };
+
+    // Dashboard's main totals (expected/collected/receivable/discount) only
+    // ever tracked the four per-class fee categories (Fee/Bus/Stock/Hostel) —
+    // a one-off "Extra Fee" like Admission Fee, Inventory sales, or a fine
+    // is a different kind of record with no fixed per-class rate, and never
+    // got counted here, even though it's real money collected and already
+    // shows correctly in Accounting and on each student's own fee page. This
+    // card surfaces that money on the Dashboard too, instead of only being
+    // visible via Accounting → Overview or Fees → Recent Payment History.
+    const extraFeesCollected = payments
+      .filter(p => p.category === 'extra' && !p.voided)
+      .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
     const totalActive = students.filter(s => (s.status||'Active').toString().trim().toLowerCase() === 'active').length;
     const strengthActivePct = students.length ? Math.round((totalActive / students.length) * 100) : 100;
@@ -387,6 +400,12 @@ function ringSVG(pct, color, size, stroke, trackColor){
           <div class="dh-label">Total Discount Allowed</div>
           <div class="dh-amount">${fmtMoney(totals.discount)}</div>
           <div class="dh-sub">Fee + Bus Fee + Hostel</div>
+        </div>
+        <div class="dh-card extra">
+          <div class="dh-icon">${ICONS.extra}</div>
+          <div class="dh-label">Extra Fees Collected</div>
+          <div class="dh-amount">${fmtMoney(extraFeesCollected)}</div>
+          <div class="dh-sub">Admission Fee, Inventory, Fines, etc.</div>
         </div>
       </div>
 
