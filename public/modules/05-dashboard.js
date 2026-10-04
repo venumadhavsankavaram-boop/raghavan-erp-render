@@ -425,6 +425,12 @@ function ringSVG(pct, color, size, stroke, trackColor){
     const stockInventoryCollected = inventorySales.reduce((sum,s) => sum + (Number(s.paidAmount)||0), 0)
       - inventoryReturns.reduce((sum,r) => sum + (Number(r.cashRefunded)||0), 0);
     const stockInventorySaleCount = inventorySales.length;
+    // For the "By Category" donut/legend only: Stock's real contribution is its
+    // Inventory Sales collections (the Stock fee category itself is unconfigured
+    // and always 0). This keeps perCat/totals — used everywhere else for the
+    // fee-structure math — untouched, while making Stock actually show up here.
+    const catChartCollected = (c) => perCat[c].collected + (c === 'stock' ? stockInventoryCollected : 0);
+    const chartTotalCollected = totals.collected + stockInventoryCollected;
 
     const totalActive = students.filter(s => (s.status||'Active').toString().trim().toLowerCase() === 'active').length;
     const strengthActivePct = students.length ? Math.round((totalActive / students.length) * 100) : 100;
@@ -543,13 +549,14 @@ function ringSVG(pct, color, size, stroke, trackColor){
         <div><span class="eyebrow-sm">By Category</span><h3>Fee, Bus, Stock &amp; Hostel Breakdown</h3></div>
       </div>
       <div class="cat-donut-panel">
-        <div class="cat-donut-wrap">${donutChartSVG(Object.keys(CATS).map(c => ({ label: CATS[c], value: perCat[c].collected, color: CAT_COLORS[c] })))}</div>
+        <div class="cat-donut-wrap">${donutChartSVG(Object.keys(CATS).map(c => ({ label: CATS[c], value: catChartCollected(c), color: CAT_COLORS[c] })))}</div>
         <div class="cat-donut-legend">
           <div class="cat-donut-legend-title">Collected, by Category</div>
           ${Object.keys(CATS).map(c => {
-            const sharePct = totals.collected > 0 ? Math.round((perCat[c].collected / totals.collected) * 100) : 0;
-            return `<div class="ov-row"><span class="ov-swatch" style="background:${CAT_COLORS[c]};"></span>${CATS[c]}<b>${fmtMoney(perCat[c].collected)}<span style="color:var(--ink-soft); font-weight:500; margin-left:6px;">${sharePct}%</span></b></div>`;
+            const sharePct = chartTotalCollected > 0 ? Math.round((catChartCollected(c) / chartTotalCollected) * 100) : 0;
+            return `<div class="ov-row"><span class="ov-swatch" style="background:${CAT_COLORS[c]};"></span>${CATS[c]}<b>${fmtMoney(catChartCollected(c))}<span style="color:var(--ink-soft); font-weight:500; margin-left:6px;">${sharePct}%</span></b></div>`;
           }).join('')}
+          <div style="font-size:0.72rem; color:var(--ink-soft); margin-top:8px;">Stock includes Inventory Sales collections</div>
         </div>
       </div>
       <div class="cat-grid">
