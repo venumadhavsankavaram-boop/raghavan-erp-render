@@ -787,53 +787,6 @@
   .sec-pill:hover{border-color:var(--teal); background:var(--white); transform:translateY(-1px);}
   .sec-pill b{font-family:'Baloo 2',cursive; color:var(--magenta); font-size:0.92rem;}
 
-  /* ===== Manage Fees: modern class/section picker ===== */
-  .fee-modern-grid{
-    display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:16px;
-  }
-  .fee-modern-card{
-    background:var(--white); border-radius:18px; box-shadow:var(--shadow-sm,var(--shadow));
-    position:relative; overflow:hidden; border:1px solid var(--border);
-    transition:transform .18s cubic-bezier(.4,0,.2,1), box-shadow .18s ease;
-  }
-  .fee-modern-card::before{
-    content:''; position:absolute; top:0; left:0; right:0; height:4px;
-    background:linear-gradient(90deg, var(--gold), var(--gold-soft));
-  }
-  .fee-modern-card[data-idx="1"]::before{background:linear-gradient(90deg, var(--magenta), var(--magenta-deep));}
-  .fee-modern-card[data-idx="2"]::before{background:linear-gradient(90deg, var(--teal), var(--success-ink));}
-  .fee-modern-card[data-idx="3"]::before{background:linear-gradient(90deg, var(--navy), var(--navy-deep));}
-  .fee-modern-card:hover{transform:translateY(-3px); box-shadow:var(--shadow-hover,var(--shadow));}
-  .fee-modern-header{
-    display:flex; align-items:center; gap:12px; padding:18px 16px 14px; cursor:pointer;
-  }
-  .fee-modern-icon{
-    flex-shrink:0; width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center;
-    background:linear-gradient(135deg, rgba(24,143,134,0.14), rgba(24,143,134,0.05)); font-size:1.15rem;
-  }
-  .fee-modern-titlewrap{flex:1; min-width:0;}
-  .fee-modern-name{font-size:0.98rem; font-weight:700; color:var(--navy); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
-  .fee-modern-meta{font-size:0.72rem; color:var(--ink-soft); margin-top:3px; font-weight:500;}
-  .fee-modern-pending{color:#b7791f; font-weight:700;}
-  .fee-modern-clear{color:var(--success-ink,#188f86); font-weight:700;}
-  .fee-modern-chevron{
-    color:var(--ink-soft); flex-shrink:0; box-sizing:border-box; width:28px; height:28px; padding:6px;
-    border-radius:50%; background:var(--cream); transition:transform .2s ease, background .15s ease, color .15s ease;
-  }
-  .fee-modern-card.expanded .fee-modern-chevron{transform:rotate(180deg); color:#fff; background:var(--magenta);}
-  .fee-modern-chips{
-    max-height:0; overflow:hidden; transition:max-height .22s ease, padding .22s ease;
-    display:flex; flex-wrap:wrap; gap:8px; padding:0 16px;
-  }
-  .fee-modern-card.expanded .fee-modern-chips{max-height:220px; padding:0 16px 16px;}
-  .fee-sec-chip{
-    display:flex; align-items:center; gap:7px; background:var(--cream); border:1.5px solid var(--border);
-    border-radius:999px; padding:7px 12px 7px 14px; font-size:0.76rem; font-weight:600; color:var(--navy);
-    cursor:pointer; transition:border-color .15s ease, background .15s ease, transform .15s ease; font-family:inherit;
-  }
-  .fee-sec-chip:hover{border-color:var(--teal); background:var(--white); transform:translateY(-1px);}
-  .fee-chip-count{font-family:'Baloo 2',cursive; color:var(--magenta); font-size:0.9rem;}
-  .fee-chip-dot{width:7px; height:7px; border-radius:50%; background:#e0a72e; box-shadow:0 0 0 2px rgba(224,167,46,0.25);}
   .fee-chip-clear .fee-chip-count{color:var(--success-ink,#188f86);}
 
   /* ===== Generic modern class/section picker — same visual language as the
@@ -1414,6 +1367,108 @@
     .fsch-monthly{grid-template-columns:1fr 1fr;}
   }
 
+
+  /* ===== Student Fees (Manage Fee): overview, section list, ledger ===== */
+  .sf-kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; margin-bottom:22px;}
+  .sf-kpi{background:var(--white); border:1px solid var(--border); border-radius:16px; padding:16px 18px; box-shadow:var(--shadow); position:relative; overflow:hidden;}
+  .sf-kpi::before{content:''; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--border);}
+  .sf-kpi--good::before{background:var(--teal);} .sf-kpi--danger::before{background:var(--magenta);} .sf-kpi--warn::before{background:var(--gold);}
+  .sf-kpi span{display:block; font-size:0.72rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--ink-soft);}
+  .sf-kpi b{display:block; font-family:'Baloo 2',cursive; font-size:1.55rem; line-height:1.25; color:var(--ink);}
+  .sf-kpi--danger b{color:var(--magenta);}
+  .sf-kpi small{font-size:0.74rem; color:var(--ink-soft);}
+
+  .sf-badge{display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:999px; font-size:0.72rem; font-weight:700; white-space:nowrap; background:var(--cream); color:var(--ink-soft);}
+  .sf-badge--paid{background:var(--success-bg); color:var(--success-ink);}
+  .sf-badge--overdue{background:var(--danger-bg); color:var(--danger-ink);}
+  .sf-badge--due,.sf-badge--pending{background:var(--warning-bg); color:var(--warning-ink);}
+  .sf-badge--upcoming{background:var(--info-bg); color:var(--info-ink);}
+
+  .sf-bar{height:6px; border-radius:99px; background:var(--border); overflow:hidden; margin-top:6px;}
+  .sf-bar i{display:block; height:100%; border-radius:99px; background:var(--teal);}
+
+  .sf-avatar{width:40px; height:40px; border-radius:50%; flex:none; object-fit:cover; display:inline-flex; align-items:center; justify-content:center;
+    background:var(--brand-navy); color:var(--white); font-weight:700; font-size:0.85rem;}
+
+  /* class overview */
+  .sf-classes{display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:18px;}
+  .sf-class{background:var(--white); border:1px solid var(--border); border-radius:20px; padding:20px; box-shadow:var(--shadow); transition:transform .18s ease, box-shadow .18s ease;}
+  .sf-class:hover{transform:translateY(-3px); box-shadow:var(--shadow-hover);}
+  .sf-class header{display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:12px;}
+  .sf-class h3{margin:0; font-size:1.05rem; color:var(--navy);}
+  .sf-class header small{font-size:0.74rem; color:var(--ink-soft);}
+  .sf-class-pct{font-family:'Baloo 2',cursive; font-size:1.5rem; line-height:1; color:var(--teal); text-align:right;}
+  .sf-class-pct small{display:block; font-family:inherit; font-size:0.66rem; color:var(--ink-soft); font-weight:600;}
+  .sf-class-money{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0;}
+  .sf-class-money dt{font-size:0.68rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-soft); font-weight:700;}
+  .sf-class-money dd{margin:0; font-weight:700; color:var(--ink);}
+  .sf-class-money dd.is-due{color:var(--magenta);}
+  .sf-chips{display:flex; flex-wrap:wrap; gap:8px;}
+  .sf-chip{display:flex; flex-direction:column; align-items:flex-start; gap:1px; text-align:left; background:var(--cream); border:1.5px solid var(--border); border-radius:12px;
+    padding:8px 12px; cursor:pointer; font-family:inherit; color:var(--ink); transition:border-color .15s ease, transform .15s ease;}
+  .sf-chip:hover{border-color:var(--teal); transform:translateY(-1px);}
+  .sf-chip b{font-size:0.8rem; color:var(--navy);} .sf-chip span{font-size:0.68rem; color:var(--ink-soft);}
+  .sf-chip em{font-style:normal; font-size:0.68rem; font-weight:700;}
+  .sf-chip em.is-overdue{color:var(--danger-ink);} .sf-chip em.is-pending{color:var(--warning-ink);} .sf-chip em.is-clear{color:var(--success-ink);}
+
+  /* section list */
+  .sf-toolbar{display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-bottom:14px;}
+  .sf-search{flex:1 1 240px; max-width:340px;}
+  .sf-count{margin-left:auto; font-size:0.78rem; color:var(--ink-soft);}
+  .sf-segments{display:inline-flex; background:var(--cream); border:1px solid var(--border); border-radius:999px; padding:3px;}
+  .sf-segments button{border:0; background:transparent; font:inherit; font-size:0.78rem; font-weight:600; color:var(--ink-soft); padding:6px 14px; border-radius:999px; cursor:pointer;}
+  .sf-segments button.active{background:var(--brand-navy); color:var(--white);}
+  .sf-segments--solo{margin-bottom:16px;}
+  .sf-card{background:var(--white); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); overflow:hidden;}
+  .sf-table td{vertical-align:middle;}
+  .sf-table small, .sf-inst small{display:block; font-size:0.7rem; color:var(--ink-soft); font-weight:400;}
+  .sf-table .is-due, .sf-inst .is-due{color:var(--magenta);}
+  .sf-student{display:flex; align-items:center; gap:12px; cursor:pointer; color:inherit; text-decoration:none;}
+  .sf-student b{display:block; color:var(--navy);} .sf-student:hover b{text-decoration:underline;}
+  .sf-paid{min-width:120px;} .sf-disc{color:var(--teal);} .sf-fam{margin-top:2px;}
+  .sf-actions{white-space:nowrap;}
+
+  /* ledger */
+  .sf-hero{display:flex; flex-wrap:wrap; align-items:center; gap:16px; background:var(--white); border:1px solid var(--border); border-radius:20px; padding:20px 22px; box-shadow:var(--shadow); margin-bottom:20px;}
+  .sf-hero .sf-avatar{width:56px; height:56px; font-size:1.1rem;}
+  .sf-hero-id{flex:1 1 220px; min-width:0;}
+  .sf-hero-id h2{margin:0; font-size:1.3rem; color:var(--navy);}
+  .sf-hero-id p{margin:4px 0 0; font-size:0.84rem; color:var(--ink-soft);}
+  .sf-hero-state{display:flex; flex-direction:column; align-items:flex-end; gap:2px;}
+  .sf-hero-state b{font-family:'Baloo 2',cursive; font-size:1.7rem; line-height:1.1; color:var(--ink);}
+  .sf-hero-state small{font-size:0.7rem; color:var(--ink-soft);}
+  .sf-hero .profile-actions{display:flex; flex-wrap:wrap; gap:10px;}
+  .sf-heads{display:grid; grid-template-columns:minmax(0,1fr); gap:16px; margin-bottom:18px;}
+  .sf-head{min-width:0; background:var(--white); border:1px solid var(--border); border-radius:18px; padding:18px 20px; box-shadow:var(--shadow);}
+  .sf-head header{display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:12px;}
+  .sf-head h4{margin:0; display:flex; align-items:center; gap:8px; font-size:1rem; color:var(--navy);}
+  .sf-freq{font-size:0.7rem; font-weight:700; color:var(--ink-soft); background:var(--cream); border-radius:999px; padding:3px 10px;}
+  .sf-late{margin-left:auto; font-size:0.74rem; font-weight:700; color:var(--danger-ink); background:var(--danger-bg); border-radius:999px; padding:3px 10px;}
+  .sf-head-grid{display:grid; grid-template-columns:1fr minmax(170px,220px); gap:20px; align-items:end; margin-bottom:12px;}
+  .sf-head-money{display:grid; grid-template-columns:repeat(4,1fr); gap:10px;}
+  .sf-head-money .sf-bar{grid-column:1 / -1; margin-top:0;}
+  .sf-head-money span, .sf-pay span, .sf-field span, .sf-paybar-total span{display:block; font-size:0.68rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--ink-soft);}
+  .sf-head-money b{font-size:0.98rem; color:var(--ink);} .sf-head-money .is-due b{color:var(--magenta);}
+  .sf-pay input{width:100%; padding:9px 12px; border-radius:10px; border:1.5px solid var(--border); font:inherit; font-weight:600; box-sizing:border-box;}
+  .sf-pay small{font-size:0.7rem; color:var(--ink-soft);}
+  .sf-due-note{display:flex; align-items:center; gap:10px; font-size:0.82rem; color:var(--ink-soft); padding-top:4px;}
+  .sf-inst{width:100%; font-size:0.84rem;}
+  .sf-inst tr.is-paid{opacity:.65;}
+  .sf-paybar{position:sticky; bottom:12px; z-index:5; display:flex; flex-wrap:wrap; align-items:flex-end; gap:14px; background:var(--white);
+    border:1px solid var(--border); border-radius:18px; padding:14px 18px; box-shadow:var(--shadow-hover); margin:0 0 28px;}
+  .sf-field input, .sf-field select{display:block; margin-top:4px; padding:8px 10px; border-radius:9px; border:1.5px solid var(--border); font:inherit; max-width:160px;}
+  .sf-paybar-total{margin-left:auto; text-align:right;}
+  .sf-paybar-total b{display:block; font-family:'Baloo 2',cursive; font-size:1.5rem; line-height:1.1; color:var(--teal);}
+  .sf-paybar-total small{font-size:0.7rem; color:var(--ink-soft);}
+  @media (max-width:720px){
+    .sf-head-grid{grid-template-columns:1fr;}
+    .sf-head-money{grid-template-columns:repeat(2,1fr);}
+    .sf-hero-state{align-items:flex-start;}
+    .sf-hero .profile-actions{width:100%;}
+    .sf-hero .profile-actions .btn{flex:1 1 100%;}
+    .sf-paybar{position:static;} .sf-paybar-total{margin-left:0; text-align:left; width:100%;}
+    .sf-search{max-width:none;} .sf-count{margin-left:0;}
+  }
 </style>
 <script>
   /* ===== AUTOMATIC WEBSITE THEME SYNC =====
@@ -3226,6 +3281,7 @@
 <script src="modules/05-dashboard.js"></script>
 <script src="modules/06-payment-modal.js"></script>
 <script src="modules/07-manage-fee-module.js"></script>
+<script src="modules/07b-student-fees-ui.js"></script>
 <script src="modules/08-fees-ledger-refunds.js"></script>
 <script src="modules/09-fees-subtabs.js"></script>
 <script src="modules/10-attendance-exams.js"></script>
