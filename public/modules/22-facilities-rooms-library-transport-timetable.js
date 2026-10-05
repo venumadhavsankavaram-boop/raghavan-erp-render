@@ -404,65 +404,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     if(inventoryTab === 'stockoverview') return renderInventoryStockOverviewTab(body);
   }
 
-  /* --- Items list (professional table) --- */
-  function renderInventoryItemsList(body){
-    const isAdmin = currentUser.role === 'Admin';
-    const q = invSearchQuery.toLowerCase();
-    const filtered = inventoryItems.filter(it => (it.type||'Sellable')===invFilterType && (!q || it.name.toLowerCase().includes(q)));
-    body.innerHTML = `
-      <div style="display:flex; justify-content:center; margin-bottom:20px;">
-        <div style="display:inline-flex; background:#F2EDE1; border-radius:10px; padding:4px; gap:2px;">
-          <button style="border:none; border-radius:8px; padding:9px 18px; font-size:0.85rem; font-weight:600; cursor:pointer; ${invFilterType==='Sellable'?'background:#211A4E; color:#fff;':'background:transparent; color:var(--ink-soft);'}" onclick="setInvFilterType('Sellable')">🏷️ Sellable</button>
-          <button style="border:none; border-radius:8px; padding:9px 18px; font-size:0.85rem; font-weight:600; cursor:pointer; ${invFilterType==='Non-Sellable'?'background:#211A4E; color:#fff;':'background:transparent; color:var(--ink-soft);'}" onclick="setInvFilterType('Non-Sellable')">📋 Non-Sellable</button>
-        </div>
-      </div>
-      <div style="display:flex; gap:10px; align-items:flex-start; margin-bottom:16px; flex-wrap:wrap;">
-        <input class="input" style="max-width:280px;" placeholder="Search products..." value="${invSearchQuery}" oninput="invSearchQuery=this.value; renderInventoryItemsList(document.getElementById('inventoryBody'));">
-        <div style="margin-left:auto; display:flex; gap:10px;">
-          <div style="position:relative;">
-            <button class="btn btn-ghost btn-sm" onclick="toggleInvQuickMenu(event)">☰ Quick Actions ▾</button>
-            ${invQuickOpen ? `
-            <div style="position:absolute; right:0; top:calc(100% + 4px); background:var(--white); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,0.15); z-index:30; min-width:190px; overflow:hidden;">
-              ${getInventoryTabAccess(currentUser.role,'inventory_approvals') ? `<button style="display:block; width:100%; text-align:left; padding:10px 14px; border:none; background:none; cursor:pointer; font-size:0.85rem;" onclick="switchInventoryTab('approvals')">✅ Approvals${pendingInventoryApprovalsCount()>0?` (${pendingInventoryApprovalsCount()})`:''}</button>` : ''}
-              ${getInventoryTabAccess(currentUser.role,'inventory_saleshistory') ? `<button style="display:block; width:100%; text-align:left; padding:10px 14px; border:none; background:none; cursor:pointer; font-size:0.85rem;" onclick="switchInventoryTab('saleshistory')">🧾 Sales History</button>` : ''}
-              ${getInventoryTabAccess(currentUser.role,'inventory_stockoverview') ? `<button style="display:block; width:100%; text-align:left; padding:10px 14px; border:none; background:none; cursor:pointer; font-size:0.85rem;" onclick="switchInventoryTab('stockoverview')">📊 Stock Overview</button>` : ''}
-            </div>` : ``}
-          </div>
-          ${canSub('inventory_sell','inventory','create') ? `<button class="btn btn-ghost btn-sm" onclick="openInventorySellCart()">🛒 Sell</button>` : ''}
-          ${canSub('inventory_items','inventory','create') ? `<button class="btn btn-primary btn-sm" onclick="openInventoryItemEditor()">+ Add Product</button>` : ''}
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table><thead><tr><th>Name</th><th>Type</th><th>Category</th><th>Qty/Stock</th><th>Total Sold</th><th>Price</th><th>Status</th><th>Created By</th><th>Actions</th></tr></thead>
-        <tbody>
-        ${filtered.length ? filtered.map(it => {
-          const sold = inventorySales.filter(s => s.itemId===it.id).reduce((sum,s) => sum+s.qty, 0);
-          const out = it.quantity <= 0;
-          const low = !out && it.quantity <= it.threshold;
-          const disabled = it.active === false;
-          return `<tr style="${disabled?'opacity:0.5;':''}">
-            <td class="name-cell">${it.name}${it.size ? ` <span class="pill" style="font-size:0.6rem;">${it.size}</span>` : ''}</td>
-            <td><span class="pill" style="font-size:0.62rem; ${(it.type||'Sellable')==='Sellable'?'background:rgba(24,143,134,0.15); color:#0f6a63;':'background:rgba(203,154,46,0.18); color:#8a6a1f;'}">${it.type||'Sellable'}</span></td>
-            <td>${it.category||'General'}${it.subCategory ? ` <span style="color:var(--ink-soft); font-size:0.75rem;">— ${it.subCategory}</span>` : ''}</td>
-            <td style="color:${out?'var(--magenta)':low?'#8a6a1f':'#0f6a63'}; font-weight:700;">${it.quantity}</td>
-            <td>${sold}</td>
-            <td>${fmtMoney(it.sellingPrice)}</td>
-            <td>${out?`<span class="balance-tag due">Out of Stock</span>`:low?`<span class="pill" style="background:rgba(203,154,46,0.18); color:#8a6a1f;">Low Stock</span>`:`<span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">In Stock</span>`}</td>
-            <td style="font-size:0.78rem; color:var(--ink-soft);">${it.createdBy||'—'}</td>
-            <td style="white-space:nowrap;">
-              ${canSub('inventory_items','inventory','edit') ? `<button class="btn-edit-text" onclick="openInventoryItemEditor('${it.id}')">Edit</button>` : ''}
-              ${canSub('inventory_sell','inventory','create') ? `&nbsp;·&nbsp;<button class="btn-edit-text" onclick="quickSellItem('${it.id}')">Sell</button>` : ''}
-              ${canSub('inventory_items','inventory','edit') && it.quantity>0 ? `&nbsp;·&nbsp;<button class="btn-edit-text" onclick="openVendorReturnModal('${it.id}')">Return to Vendor</button>` : ''}
-              ${isAdmin ? `&nbsp;·&nbsp;<button class="btn-edit-text" onclick="toggleInventoryItemActive('${it.id}')">${disabled?'Enable':'Disable'}</button>` : ''}
-              ${isAdmin ? `&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteInventoryItem('${it.id}')">Delete</button>` : ''}
-            </td>
-          </tr>`;
-        }).join('') : `<tr><td colspan="9"><div class="empty-state"><b>No ${invFilterType.toLowerCase()} items${invSearchQuery?' match your search':''}</b>${invSearchQuery?'':'Click "+ Add Product" to list your first item.'}</div></td></tr>`}
-        </tbody></table>
-      </div>
-      <div id="vendorReturnModalWrap"></div>
-    `;
-  }
   function setInvFilterType(t){ invFilterType = t; renderInventoryItemsList(document.getElementById('inventoryBody')); }
   /* --- Return unsold stock to the vendor/supplier: reduces quantity & stock
      value only — never touches Revenue, Collected or Profit, since no sale or
@@ -705,69 +646,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     inventoryTab = 'items';
     renderInventoryBody();
   }
-  function renderInventorySellCart(body){
-    const q = invCartSearch.toLowerCase();
-    const sellablePool = inventoryItems.filter(it => (it.type||'Sellable')==='Sellable' && it.active!==false);
-    const cats = ['All', ...Array.from(new Set(sellablePool.map(it => it.category||'General')))];
-    // Items within the currently-selected category — the pool the sub-category
-    // row is built from, so "Books" only offers sub-categories that Books
-    // actually has stock in (Govt Text Books, IIT Books, Diary, etc.), never a
-    // stale list left over from another category.
-    const categoryPool = invCartCategory==='All' ? [] : sellablePool.filter(it => (it.category||'General')===invCartCategory);
-    const subcats = Array.from(new Set(categoryPool.map(it => it.subCategory||'Other')));
-    // Only worth showing when there's actually more than one sub-category to
-    // choose between — a single-subcategory (or no-subcategory) category like
-    // Sports shouldn't grow an extra, pointless filter row.
-    const showSubcats = invCartCategory!=='All' && subcats.length > 1;
-    const pool = sellablePool.filter(it =>
-      (invCartCategory==='All'||(it.category||'General')===invCartCategory) &&
-      (!showSubcats||invCartSubCategory==='All'||(it.subCategory||'Other')===invCartSubCategory) &&
-      (!q || it.name.toLowerCase().includes(q))
-    );
-    const cartTotal = invCart.reduce((sum,c) => sum+(c.price*c.qty - c.discount), 0);
-    body.innerHTML = `
-      <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap;">
-        <button class="btn btn-ghost btn-sm" onclick="closeInventorySell()">← Back</button>
-        <div style="font-weight:700; color:var(--navy);">🛒 Add Items <span class="pill" style="margin-left:8px; background:#211A4E; color:#fff;">1. Add Items</span> <span style="color:var(--ink-soft); margin:0 4px;">›</span> <span style="color:var(--ink-soft);">2. Checkout</span></div>
-      </div>
-      <div style="display:grid; grid-template-columns:1fr 300px; gap:20px; align-items:start;">
-        <div>
-          <input class="input" style="margin-bottom:12px; max-width:100%;" placeholder="Search products by name..." value="${invCartSearch}" oninput="invCartSearch=this.value; renderInventorySellCart(document.getElementById('inventoryBody'));">
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:${showSubcats?'8px':'16px'};">
-            ${cats.map(c => `<button style="border:none; border-radius:999px; padding:7px 14px; font-size:0.78rem; font-weight:600; cursor:pointer; ${invCartCategory===c?'background:#211A4E; color:#fff;':'background:#F2EDE1; color:var(--ink-soft);'}" onclick="setInvCartCategory('${c.replace(/'/g,"\\'")}')">${c} (${c==='All'?sellablePool.length:sellablePool.filter(it=>(it.category||'General')===c).length})</button>`).join('')}
-          </div>
-          ${showSubcats ? `
-          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; padding:8px 10px; background:#F8F5EE; border-radius:10px;">
-            <span style="font-size:0.72rem; color:var(--ink-soft); font-weight:600; align-self:center; margin-right:2px;">${invCartCategory}:</span>
-            ${['All', ...subcats].map(sc => `<button style="border:1px solid var(--border); border-radius:999px; padding:5px 12px; font-size:0.74rem; font-weight:600; cursor:pointer; ${invCartSubCategory===sc?'background:var(--navy); color:#fff; border-color:var(--navy);':'background:var(--white); color:var(--ink-soft);'}" onclick="setInvCartSubCategory('${sc.replace(/'/g,"\\'")}')">${sc}${sc!=='All'?' ('+categoryPool.filter(it=>(it.subCategory||'Other')===sc).length+')':''}</button>`).join('')}
-          </div>
-          ` : ''}
-          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:12px;">
-            ${pool.length ? pool.map(it => {
-              const out = it.quantity <= 0;
-              return `<div style="background:var(--white); border:1px solid var(--border); border-radius:10px; padding:14px; text-align:center; cursor:${out?'not-allowed':'pointer'}; opacity:${out?0.5:1};" onclick="${out?'':`addToInvCart('${it.id}')`}">
-                <div style="font-size:1.6rem; margin-bottom:6px;">🏷️</div>
-                <div style="font-weight:600; font-size:0.82rem; margin-bottom:4px;">${it.name}</div>
-                <div style="font-weight:700; color:var(--magenta); margin-bottom:4px;">${fmtMoney(it.sellingPrice)}</div>
-                <div style="font-size:0.72rem; color:${out?'var(--magenta)':'var(--ink-soft)'};">${out?'Out of Stock':'Stock: '+it.quantity}</div>
-              </div>`;
-            }).join('') : `<div class="empty-state" style="grid-column:1/-1;"><b>No items found</b></div>`}
-          </div>
-        </div>
-        <div style="background:var(--white); border:1px solid var(--border); border-radius:12px; padding:16px; position:sticky; top:16px;">
-          <div style="font-weight:700; margin-bottom:12px;">🛒 Your Cart</div>
-          ${invCart.length ? `
-            ${invCart.map((c,i) => `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:0.82rem;">
-              <div><div style="font-weight:600;">${c.name}</div><div style="color:var(--ink-soft);">${fmtMoney(c.price)} × ${c.qty}</div></div>
-              <button onclick="removeFromInvCart(${i})" style="background:none; border:none; color:var(--magenta); cursor:pointer; font-size:1.1rem;">&times;</button>
-            </div>`).join('')}
-            <div style="display:flex; justify-content:space-between; font-weight:700; margin-top:12px; padding-top:12px; border-top:1px solid var(--border);"><span>Total</span><span>${fmtMoney(cartTotal)}</span></div>
-            <button class="btn btn-primary" style="width:100%; margin-top:14px;" onclick="goToInvCheckout()">Proceed to Checkout</button>
-          ` : `<div style="text-align:center; color:var(--ink-soft); font-size:0.85rem; padding:30px 0;">Cart is empty<br><span style="font-size:0.75rem;">Click a product to add it</span></div>`}
-        </div>
-      </div>
-    `;
-  }
   let invCartLastAddTime = {};
   function addToInvCart(itemId){
     const now = Date.now();
@@ -782,11 +660,11 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     }else{
       invCart.push({ itemId, name:it.name, price:it.sellingPrice, cost:it.costPrice, qty:1, discount:0, stock:it.quantity });
     }
-    renderInventorySellCart(document.getElementById('inventoryBody'));
+    renderInventoryBody();
   }
   function removeFromInvCart(i){
     invCart.splice(i,1);
-    renderInventorySellCart(document.getElementById('inventoryBody'));
+    renderInventoryBody();
   }
   function goToInvCheckout(){
     if(invCart.length === 0){ showToast('Add at least one item.'); return; }
@@ -797,109 +675,17 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     inventoryTab = 'sellcart';
     renderInventoryBody();
   }
-  function renderInventoryCheckout(body){
-    const subtotal = invCart.reduce((sum,c) => sum+c.price*c.qty, 0);
-    const totalDiscount = invCart.reduce((sum,c) => sum+(c.discount||0), 0);
-    const grandTotal = subtotal - totalDiscount;
-    const student = invCheckoutStudentId ? students.find(s => s.id === invCheckoutStudentId) : null;
-    body.innerHTML = `
-      <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap;">
-        <button class="btn btn-ghost btn-sm" onclick="backToInvCart()">← Cart</button>
-        <div style="font-weight:700; color:var(--navy);">🛒 Checkout <span style="color:var(--ink-soft); margin:0 4px;">›</span> <span class="pill" style="background:#211A4E; color:#fff;">2. Checkout</span></div>
-      </div>
-      <div style="display:grid; grid-template-columns:1fr 380px; gap:20px; align-items:start;">
-        <div style="background:var(--white); border:1px solid var(--border); border-radius:12px; padding:16px;">
-          <div style="font-weight:700; margin-bottom:12px;">Order Summary</div>
-          <table style="width:100%; font-size:0.85rem;">
-            <thead><tr style="text-align:left; color:var(--ink-soft);"><th style="padding-bottom:8px;">Product</th><th>Price</th><th>Qty</th><th>Discount ₹</th><th>Total</th><th></th></tr></thead>
-            <tbody>
-            ${invCart.map((c,i) => `<tr>
-              <td style="padding:8px 0;">${c.name}</td>
-              <td>${fmtMoney(c.price)}</td>
-              <td>
-                <button onclick="adjustInvCartQty(${i},-1)" style="border:1px solid var(--border); background:none; border-radius:6px; width:24px; cursor:pointer;">-</button>
-                <span style="margin:0 6px;">${c.qty}</span>
-                <button onclick="adjustInvCartQty(${i},1)" style="border:1px solid var(--border); background:none; border-radius:6px; width:24px; cursor:pointer;">+</button>
-              </td>
-              <td><input type="number" value="${c.discount}" min="0" style="width:60px;" onchange="setInvCartDiscount(${i},this.value)"></td>
-              <td>${fmtMoney(c.price*c.qty - c.discount)}</td>
-              <td><button onclick="removeFromInvCart(${i}); renderInventoryCheckout(document.getElementById('inventoryBody'));" style="background:none; border:none; color:var(--magenta); cursor:pointer;">🗑️</button></td>
-            </tr>`).join('')}
-            </tbody>
-          </table>
-          <div style="border-top:1px solid var(--border); margin-top:10px; padding-top:10px; font-size:0.85rem;">
-            <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
-            <div style="display:flex; justify-content:space-between; padding:3px 0;"><span>Discount</span><span>-${fmtMoney(totalDiscount)}</span></div>
-            <div style="display:flex; justify-content:space-between; padding:6px 0; font-weight:700; font-size:1rem;"><span>Grand Total</span><span>${fmtMoney(grandTotal)}</span></div>
-          </div>
-        </div>
-        <div style="display:flex; flex-direction:column; gap:16px;">
-          <div style="background:var(--white); border:1px solid var(--border); border-radius:12px; padding:16px;">
-            <div style="font-weight:700; margin-bottom:10px;">Buyer Information</div>
-            <div style="display:flex; gap:6px; margin-bottom:10px;">
-              ${['Student','Staff','Walk-in'].map(t => `<button style="flex:1; border:none; border-radius:8px; padding:8px; font-size:0.8rem; font-weight:600; cursor:pointer; ${invCheckoutBuyerType===t?'background:#211A4E; color:#fff;':'background:#F2EDE1; color:var(--ink-soft);'}" onclick="invCheckoutBuyerType='${t}'; renderInventoryCheckout(document.getElementById('inventoryBody'));">${t}</button>`).join('')}
-            </div>
-            ${invCheckoutBuyerType==='Student' ? `
-              <div style="display:flex; gap:6px; margin-bottom:10px;">
-                <button style="flex:1; border:1px solid var(--border); border-radius:8px; padding:6px; font-size:0.76rem; font-weight:600; cursor:pointer; ${invCheckoutSearchMode==='name'?'background:#F2EDE1; color:var(--navy); border-color:var(--navy);':'background:none; color:var(--ink-soft);'}" onclick="invCheckoutSearchMode='name'; renderInventoryCheckout(document.getElementById('inventoryBody'));">🔍 Search by Name</button>
-                <button style="flex:1; border:1px solid var(--border); border-radius:8px; padding:6px; font-size:0.76rem; font-weight:600; cursor:pointer; ${invCheckoutSearchMode==='class'?'background:#F2EDE1; color:var(--navy); border-color:var(--navy);':'background:none; color:var(--ink-soft);'}" onclick="invCheckoutSearchMode='class'; renderInventoryCheckout(document.getElementById('inventoryBody'));">🏫 Browse by Class</button>
-              </div>
-              ${invCheckoutSearchMode==='name' ? `
-                <div class="search-wrap">
-                  <input class="input" id="invCheckoutStudentSearch" placeholder="Search by name or admission no..." autocomplete="off" oninput="onInvCheckoutStudentInput()" onblur="setTimeout(hideInvCheckoutSuggestions,150)" onfocus="onInvCheckoutStudentInput()">
-                  <div class="search-suggestions" id="invCheckoutStudentSuggestions"></div>
-                </div>
-              ` : `
-                <div style="display:flex; gap:8px; margin-bottom:8px;">
-                  <select id="invCheckoutBrowseClass" style="flex:1;" onchange="invCheckoutBrowseClass=this.value; invCheckoutBrowseSection=''; renderInventoryCheckout(document.getElementById('inventoryBody'));">
-                    <option value="">Select class</option>
-                    ${CLASS_LEVELS.map(c => `<option ${c===invCheckoutBrowseClass?'selected':''}>${c}</option>`).join('')}
-                  </select>
-                  <select id="invCheckoutBrowseSection" style="flex:1;" onchange="invCheckoutBrowseSection=this.value; renderInventoryCheckout(document.getElementById('inventoryBody'));">
-                    <option value="">Select section</option>
-                    ${SECTIONS.map(s => `<option ${s===invCheckoutBrowseSection?'selected':''}>${s}</option>`).join('')}
-                  </select>
-                </div>
-                ${invCheckoutBrowseClass && invCheckoutBrowseSection ? `
-                  <div style="max-height:180px; overflow-y:auto; border:1px solid var(--border); border-radius:8px;">
-                    ${students.filter(s => s.className===invCheckoutBrowseClass && s.section===invCheckoutBrowseSection && isActive(s)).sort((a,b)=>a.firstName.localeCompare(b.firstName)).map(s => `<div onclick="selectInvCheckoutStudent('${s.id}')" style="padding:8px 10px; cursor:pointer; border-bottom:1px solid var(--border); font-size:0.82rem; display:flex; justify-content:space-between;" onmouseover="this.style.background='#F2EDE1'" onmouseout="this.style.background=''">
-                      <span>${s.firstName} ${s.lastName}</span><span style="color:var(--ink-soft);">${s.admissionNo}</span>
-                    </div>`).join('') || `<div style="padding:12px; text-align:center; color:var(--ink-soft); font-size:0.8rem;">No students in this class &amp; section</div>`}
-                  </div>
-                ` : `<div style="font-size:0.78rem; color:var(--ink-soft); padding:6px 0;">Pick a class and section to browse students.</div>`}
-              `}
-              ${student ? `<div class="pill" style="margin-top:8px;">${student.firstName} ${student.lastName} — ${student.className} ${student.section} <button onclick="invCheckoutStudentId=''; renderInventoryCheckout(document.getElementById('inventoryBody'));" style="background:none; border:none; color:var(--magenta); font-weight:700; cursor:pointer;">&times;</button></div>` : ''}
-            ` : `<input class="input" id="invCheckoutBuyerName" placeholder="${invCheckoutBuyerType} name (optional)">`}
-          </div>
-          <div style="background:var(--white); border:1px solid var(--border); border-radius:12px; padding:16px;">
-            <div style="font-weight:700; margin-bottom:10px;">Payment</div>
-            <label style="font-size:0.78rem; color:var(--ink-soft);">Sale Date</label>
-            <input class="input" type="date" id="invCheckoutDate" value="${invCheckoutDate}" max="${new Date().toISOString().slice(0,10)}" style="margin:6px 0 12px;" onchange="invCheckoutDate=this.value;">
-            <label style="font-size:0.78rem; color:var(--ink-soft);">Payment Mode</label>
-            <div style="display:flex; gap:6px; flex-wrap:wrap; margin:6px 0 12px;">
-              ${['Cash','UPI','Card','Online','Bank Transfer'].map(m => `<button style="border:1px solid var(--border); border-radius:8px; padding:7px 12px; font-size:0.78rem; cursor:pointer; ${invCheckoutPaymentMode===m?'background:#211A4E; color:#fff; border-color:#211A4E;':'background:none; color:var(--ink);'}" onclick="invCheckoutPaymentMode='${m}'; renderInventoryCheckout(document.getElementById('inventoryBody'));">${m}</button>`).join('')}
-            </div>
-            <label style="font-size:0.78rem; color:var(--ink-soft);">Paid Amount</label>
-            <input class="input" type="number" id="invCheckoutPaidAmount" value="${grandTotal}" style="margin:6px 0 12px;">
-            <label style="font-size:0.78rem; color:var(--ink-soft);">Notes (optional)</label>
-            <textarea class="input" id="invCheckoutNotes" rows="2" placeholder="Any notes for this sale..." style="margin-top:6px;"></textarea>
-          </div>
-          <button class="btn btn-primary" style="width:100%; padding:14px;" onclick="completeInventorySale()">Complete Sale ${fmtMoney(grandTotal)}</button>
-        </div>
-      </div>
-    `;
-  }
   function adjustInvCartQty(i, delta){
     const c = invCart[i];
     const newQty = c.qty + delta;
     if(newQty < 1) return;
     if(newQty > c.stock){ showToast('Not enough stock.'); return; }
     c.qty = newQty;
-    renderInventoryCheckout(document.getElementById('inventoryBody'));
+    renderInventoryBody();
   }
   function setInvCartDiscount(i, val){
     invCart[i].discount = Number(val) || 0;
-    renderInventoryCheckout(document.getElementById('inventoryBody'));
+    renderInventoryBody();
   }
   let invCheckoutSearchDebounce = null;
   function onInvCheckoutStudentInput(){
