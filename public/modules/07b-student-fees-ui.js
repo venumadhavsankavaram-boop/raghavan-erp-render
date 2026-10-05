@@ -26,6 +26,24 @@ function sfBadge(state){
   return `<span class="sf-badge sf-badge--${state}"><span aria-hidden="true">${s.icon}</span>${s.text}</span>`;
 }
 
+// Small line icons (currentColor) so buttons read at a glance.
+const SF_ICON = {
+  pay:     '<path d="M3 7h18v12H3z"/><path d="M3 11h18"/><path d="M7 15h3"/>',
+  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  open:    '<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>',
+  plus:    '<path d="M12 5v14M5 12h14"/>',
+  check:   '<path d="M5 13l4 4L19 7"/>',
+  family:  '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 11a3 3 0 100-6M21 20c0-2.5-1.5-4.6-3.6-5.5"/>',
+  down:    '<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>',
+};
+function sfIcon(name){
+  return `<svg class="sf-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SF_ICON[name] || ''}</svg>`;
+}
+// kind: primary | soft | link | danger.  onclick is passed as a ready-made attribute value.
+function sfBtn(kind, icon, label, onclick, extra){
+  return `<button type="button" class="sf-btn sf-btn--${kind}${extra ? ' ' + extra : ''}" onclick="${onclick}">${icon ? sfIcon(icon) : ''}${label}</button>`;
+}
+
 function sfPct(paid, outstanding){
   const total = (Number(paid) || 0) + (Number(outstanding) || 0);
   return total > 0 ? Math.round((paid / total) * 100) : 100;
@@ -222,9 +240,9 @@ function paintSfSectionRows(){
       <td>${sum.state === 'paid' ? '—' : (sum.nextDue ? fmtISODate(sum.nextDue) : '—')}${sum.dueNow > 0 ? `<small class="sf-disc is-due">${fmtMoney(sum.dueNow)} payable now</small>` : ''}</td>
       <td>${sfBadge(sum.state)}</td>
       <td class="sf-actions">
-        ${sum.state !== 'paid' && canPay ? `<button class="btn btn-primary btn-sm" onclick="openFamilyFeeModal('${s.id}')">Pay</button>` : ''}
-        ${canPrint ? `<button class="btn btn-ghost btn-sm" onclick="openStudentReceipts('${s.id}')">Receipts</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="openStudentLedger('${s.id}')">Details</button>
+        ${sum.state !== 'paid' && canPay ? sfBtn('primary', 'pay', 'Pay', `openFamilyFeeModal('${s.id}')`) : ''}
+        ${canPrint ? sfBtn('soft', 'receipt', 'Receipts', `openStudentReceipts('${s.id}')`) : ''}
+        ${sfBtn('soft', 'open', 'Details', `openStudentLedger('${s.id}')`)}
       </td>
     </tr>`;
   }).join('');
@@ -255,7 +273,7 @@ function sfInstallmentsHTML(r, canPay){
       <td>${i.paid > 0 ? fmtMoney(i.paid) : '—'}</td>
       <td class="${i.outstanding > 0 ? 'is-due' : ''}">${fmtMoney(i.outstanding)}</td>
       <td>${sfBadge(i.status)}${i.partial ? '<small>part-paid</small>' : ''}</td>
-      <td>${canPay && i.outstanding > 0 ? `<button type="button" class="btn-edit-text" onclick="sfPayUpTo('${r.key}', ${payUpTo})">Pay up to here</button>` : ''}</td>
+      <td>${canPay && i.outstanding > 0 ? `${sfBtn('link', 'down', 'Pay up to here', `sfPayUpTo('${r.key}', ${payUpTo})`)}` : ''}</td>
     </tr>`;
   }).join('');
   return `<div class="table-wrap" style="overflow-x:auto;"><table class="sf-inst">
@@ -341,7 +359,7 @@ function renderStudentLedger(body){
       <button type="button" class="${ledgerFamilyView === 'family' ? 'active' : ''}" onclick="setLedgerFamilyView('family')">Family</button>
     </div>
     <div class="dash-section-title"><div><h3>👪 Family Summary</h3><span class="eyebrow-sm">${familyIds.length} member${familyIds.length === 1 ? '' : 's'}</span></div>
-      ${canPay ? `<button class="btn btn-primary btn-sm" onclick="openFamilyFeeModal('${s.id}')">💰 Collect Family Fees</button>` : ''}
+      ${canPay ? sfBtn('primary', 'family', 'Collect Family Fees', `openFamilyFeeModal('${s.id}')`) : ''}
     </div>
     <section class="sf-kpis">
       ${sfKpi('Total amount', fmtMoney(familyTotals.expected), 'plain')}
@@ -385,7 +403,7 @@ function renderStudentLedger(body){
       <label class="sf-field"><span>Date</span>
         <input type="date" id="ledgerPayDate" value="${today}" max="${today}"></label>
       <div class="sf-paybar-total"><span>Total to pay</span><b id="ledgerTotalToPay">₹0</b><small>of ${fmtMoney(totalPendingOutstanding)}${lateTotal > 0 ? ` · late fees ${fmtMoney(lateTotal)}` : ''}</small></div>
-      ${canPay ? `<button class="btn btn-primary" onclick="submitLedgerPayments('${s.id}')">💰 Record Payment(s)</button>` : ''}
+      ${canPay ? sfBtn('primary', 'check', 'Record Payment(s)', `submitLedgerPayments('${s.id}')`, 'sf-btn--lg') : ''}
     </div>`
     : `<div class="empty-state" style="margin-bottom:24px;"><b>No pending fees</b>Everything's fully paid for this student.</div>`;
 
@@ -408,16 +426,16 @@ function renderStudentLedger(body){
           ? `<span class="balance-tag due" title="${(p.voidReason || '').replace(/"/g, '&quot;')}">${p.voidType === 'refund' ? 'REFUNDED' : 'VOIDED'}</span>`
           : `<span class="pill">Recorded</span>`;
         const actions = [];
-        if(!p.voided && canSub('managefee_collection', 'managefee', 'print')) actions.push(`<button class="btn-edit-text" onclick="printReceipt('${p.id}')">Print Receipt</button>`);
-        if(!p.voided && canSub('managefee_collection', 'managefee', 'delete')) actions.push(`<button class="btn-danger-text" onclick="voidPayment('${p.id}')">Void</button>`);
-        if(!p.voided && canSub('managefee_collection', 'managefee', 'delete')) actions.push(`<button class="btn-danger-text" onclick="openRefundPaymentModal('${p.id}')">Refund</button>`);
-        return `<tr${p.voided ? ' style="opacity:.6;"' : ''}><td>${p.date || '—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${escapeHtml(p.instalment || '—')}</td><td>${p.mode || '—'}</td><td>${p.voided ? `<s>${fmtMoney(p.amount)}</s>` : fmtMoney(p.amount)}</td><td>${fmtMoney(p.discount)}</td><td>${statusHtml}</td><td>${actions.join('&nbsp;·&nbsp;')}</td></tr>`;
+        if(!p.voided && canSub('managefee_collection', 'managefee', 'print')) actions.push(sfBtn('link', 'receipt', 'Print Receipt', `printReceipt('${p.id}')`));
+        if(!p.voided && canSub('managefee_collection', 'managefee', 'delete')) actions.push(sfBtn('danger', '', 'Void', `voidPayment('${p.id}')`));
+        if(!p.voided && canSub('managefee_collection', 'managefee', 'delete')) actions.push(sfBtn('danger', '', 'Refund', `openRefundPaymentModal('${p.id}')`));
+        return `<tr${p.voided ? ' style="opacity:.6;"' : ''}><td>${p.date || '—'}</td><td><span class="pill">${feeLabelFor(p)}</span></td><td>${escapeHtml(p.instalment || '—')}</td><td>${p.mode || '—'}</td><td>${p.voided ? `<s>${fmtMoney(p.amount)}</s>` : fmtMoney(p.amount)}</td><td>${fmtMoney(p.discount)}</td><td>${statusHtml}</td><td class="sf-actions">${actions.join('')}</td></tr>`;
       }).join('') : `<tr><td colspan="8"><div class="empty-state"><b>No payments yet</b></div></td></tr>`}
     </tbody></table></div>`;
 
   const heroActions = canPay ? `
-    <button class="btn btn-ghost" onclick="addAdmissionFeeForStudent('${s.id}')">➕ Add Admission Fee</button>
-    <button class="btn btn-ghost" onclick="openExtraFeeAssignModal('${s.id}')">➕ Assign Extra Fee</button>` : '';
+    ${sfBtn('soft', 'plus', 'Add Admission Fee', `addAdmissionFeeForStudent('${s.id}')`)}
+    ${sfBtn('soft', 'plus', 'Assign Extra Fee', `openExtraFeeAssignModal('${s.id}')`)}` : '';
 
   body.innerHTML = `
     ${crumbs}
