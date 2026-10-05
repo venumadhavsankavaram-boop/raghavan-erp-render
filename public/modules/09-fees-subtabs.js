@@ -428,58 +428,6 @@ const ATTENDANCE_KEY = "attendance-records";
   }
   function backToAttGrid(){ window.scrollTo({top:0,left:0,behavior:'instant'}); attView = 'grid'; renderAttendanceBody(); }
 
-  function renderAttRoster(body){
-    const list = students.filter(s => s.className===attCurrentClass && s.section===attCurrentSection && isActive(s))
-      .sort(compareByRoll);
-    list.forEach(s => {
-      if(pendingMarks[s.id] === undefined){
-        const rec = attendanceRecords.find(r => r.studentId===s.id && r.date===attMarkDate && r.session===attMarkSession);
-        // Falls back to a pre-two-session (sessionless) record for this date
-        // so re-opening an old date shows its original status as a starting
-        // point, rather than defaulting everyone back to Present.
-        const legacyRec = !rec ? attendanceRecords.find(r => r.studentId===s.id && r.date===attMarkDate && !r.session) : null;
-        pendingMarks[s.id] = rec ? rec.status : (legacyRec ? legacyRec.status : 'Present');
-      }
-    });
-    const isHoliday = !!holidayFor(attMarkDate);
-    body.innerHTML = `
-      <div class="breadcrumb"><a onclick="backToAttGrid()">All Classes</a> &nbsp;/&nbsp; ${attCurrentClass} — Section ${attCurrentSection}</div>
-      <div class="ms-toolbar">
-        <div class="ms-toolbar-left">
-          <input type="date" class="input" id="attDateInput" value="${attMarkDate}" onchange="changeAttDate(this.value)" style="max-width:200px;">
-          <div class="att-status-row" style="display:inline-flex; ${attApplyBothSessions ? 'opacity:0.45; pointer-events:none;' : ''}">
-            ${ATT_SESSIONS.map(sess => `<button type="button" class="att-status-btn ${attMarkSession===sess?'active':''}" onclick="changeAttSession('${sess}')">${sess==='Morning'?'🌅':'🌇'} ${sess}</button>`).join('')}
-          </div>
-          <button class="btn btn-ghost btn-sm" onclick="markAllStatus('Present')">Mark All Present</button>
-          <button class="btn btn-ghost btn-sm" onclick="markAllStatus('Absent')">Mark All Absent</button>
-          ${canUseBothSessionsShortcut() ? `
-            <label style="font-size:0.78rem; color:var(--ink-soft); display:flex; align-items:center; gap:6px; margin-left:8px;" title="Saves the same status to both Morning and Afternoon in one go — handy for backfilling past dates.">
-              <input type="checkbox" ${attApplyBothSessions?'checked':''} onchange="toggleAttBothSessions(this.checked); renderAttendanceBody();"> Apply to both sessions
-            </label>
-          ` : ''}
-        </div>
-      </div>
-      ${isHoliday ? (() => { const h = holidayFor(attMarkDate); return `<div class="empty-state" style="margin-bottom:16px;"><b>${h.name || 'Holiday'} — school is closed on ${attMarkDate}</b>Attendance isn't taken on a holiday. Pick a working day above, or ${h.auto ? 'adjust it under Attendance → Settings → Working Days' : 'remove the holiday first'} if this date shouldn't be one.</div>`; })() : ``}
-      <div class="table-wrap" style="${isHoliday ? 'opacity:0.5; pointer-events:none;' : ''}">
-        <table><thead><tr><th>Roll No</th><th>Student</th><th>Admission No</th><th>Status</th></tr></thead>
-        <tbody>
-        ${list.map(s => `
-          <tr>
-            <td class="id-cell">${s.rollNo||'—'}</td>
-            <td class="name-cell">${s.firstName} ${s.lastName}</td>
-            <td class="id-cell">${s.admissionNo}</td>
-            <td>
-              <div class="att-status-row">
-                ${['Present','Absent','Late','Leave'].map(st => `<button type="button" class="att-status-btn ${pendingMarks[s.id]===st?'active':''}" data-status="${st}" onclick="setAttStatus('${s.id}','${st}')">${st}</button>`).join('')}
-              </div>
-            </td>
-          </tr>`).join('')}
-        </tbody></table>
-        ${list.length===0 ? `<div class="empty-state"><b>No students here</b></div>` : ``}
-      </div>
-      <div style="margin-top:16px;"><button class="btn btn-primary" ${isHoliday?'disabled':''} onclick="saveAttendance()">Save Attendance${attApplyBothSessions ? ' (Morning &amp; Afternoon)' : ' (' + attMarkSession + ')'}</button></div>
-    `;
-  }
 
   function changeAttDate(val){
     attMarkDate = val;
@@ -489,16 +437,6 @@ const ATTENDANCE_KEY = "attendance-records";
   function changeAttSession(val){
     attMarkSession = val;
     pendingMarks = {};
-    renderAttendanceBody();
-  }
-  function setAttStatus(studentId, status){
-    pendingMarks[studentId] = status;
-    renderAttendanceBody();
-  }
-  function markAllStatus(status){
-    students.filter(s => s.className===attCurrentClass && s.section===attCurrentSection && isActive(s)).forEach(s => {
-      pendingMarks[s.id] = status;
-    });
     renderAttendanceBody();
   }
   async function saveAttendance(){
