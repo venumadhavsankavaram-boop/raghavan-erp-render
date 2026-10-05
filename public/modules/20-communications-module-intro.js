@@ -150,6 +150,18 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     await storageSet(NOTICE_TYPES_KEY, noticeTypes);
     renderNoticeBoard(document.getElementById('noticeBoardBody'));
   }
+  // Optional "Read more" link shown on the public website. Only http(s) links
+  // are kept; anything else is rejected so a notice can never carry a script URL.
+  function cleanNoticeLink(raw){
+    const v = String(raw || '').trim();
+    if(!v) return { ok:true, value:'' };
+    const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(v) ? v : 'https://' + v;
+    try{
+      const u = new URL(withScheme);
+      if(u.protocol !== 'https:' && u.protocol !== 'http:') return { ok:false };
+      return { ok:true, value:u.href.slice(0, 500) };
+    }catch(e){ return { ok:false }; }
+  }
   async function postQuickNotice(){
     const type = await resolveCommsType('nbType', 'nbNewTypeName');
     if(!type){ showToast('Enter a name for the new heading.'); return; }
@@ -167,9 +179,12 @@ const COMMS_MESSAGES_KEY = "comms-messages";
       if(!nbAudienceClass || !nbAudienceSection){ showToast('Select a class and section.'); return; }
       targets = students.filter(s => isActive(s) && s.className===nbAudienceClass && s.section===nbAudienceSection);
     }
+    const linkEl = document.getElementById('nbLink');
+    const link = cleanNoticeLink(linkEl ? linkEl.value : '');
+    if(!link.ok){ showToast('That link doesn\'t look right — use a web address like https://example.com/page'); return; }
     const audienceLabels = { allstudents:'All Students', allstaff:'All Staff', class:`${nbAudienceClass} (Whole Class)`, section:`${nbAudienceClass} — Section ${nbAudienceSection}` };
     commsMessages.push({
-      id:'msg_'+Date.now(), type, title, body:bodyText, audienceLabel:audienceLabels[nbAudienceScope],
+      id:'msg_'+Date.now(), type, title, body:bodyText, link:link.value, audienceLabel:audienceLabels[nbAudienceScope],
       channels:['In-App'], recipientCount:targets.length, sentBy:currentUser.name, sentDate:new Date().toISOString().slice(0,10),
     });
     await storageSet(COMMS_MESSAGES_KEY, commsMessages);
@@ -422,86 +437,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   /* --- Notice Board: In-App notices --- */
   let editingNoticeId = '';
   let nbAudienceScope = 'allstudents', nbAudienceClass = '', nbAudienceSection = '';
-  function renderNoticeBoard(body){
-    const notices = commsMessages.filter(m => m.channels.includes('In-App') && !m.boardRemoved).slice().sort((a,b) => b.id.localeCompare(a.id));
-    const canCreate = canSub('noticeboard_post','noticeboard','create');
-    const canEditNb = canSub('noticeboard_post','noticeboard','edit');
-    const canDeleteNb = canSub('noticeboard_post','noticeboard','delete');
-    const canCreateHeading = canSub('noticeboard_headings','noticeboard','create');
-    const canDeleteHeading = canSub('noticeboard_headings','noticeboard','delete');
-    body.innerHTML = `
-      ${canCreate ? `<div class="profile-card" style="margin-bottom:20px;">
-        <h4>✍️ Post a New Notice</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Posts straight to this board and the public website — no need to go through Communications for a quick notice.</p>
-        <div class="form-grid" style="margin-bottom:10px;">
-          <div class="f-field"><label>Type / Heading</label><select id="nbType" onchange="onNbTypeChange()">${noticeTypes.map(t => `<option value="${t.name}">${t.icon} ${t.name}</option>`).join('')}<option value="__new__">+ New Heading...</option></select></div>
-          <div class="f-field full" id="nbNewTypeField" style="display:none;"><label>New Heading Name</label><input type="text" id="nbNewTypeName" placeholder="e.g. Sports Day Update"></div>
-          <div class="f-field full"><label>Title <span class="required-star">*</span></label><input type="text" id="nbTitle" placeholder="e.g. Diwali Holidays Announcement"></div>
-          <div class="f-field full"><label>Message <span class="required-star">*</span></label><textarea id="nbBody" rows="4" placeholder="Type the notice..."></textarea></div>
-          <div class="f-field">
-            <label>Audience</label>
-            <select id="nbScope" onchange="nbAudienceScope=this.value; renderNbAudienceFields();">
-              <option value="allstudents" ${nbAudienceScope==='allstudents'?'selected':''}>All Students (Parents)</option>
-              <option value="allstaff" ${nbAudienceScope==='allstaff'?'selected':''}>All Staff</option>
-              <option value="class" ${nbAudienceScope==='class'?'selected':''}>Specific Class</option>
-              <option value="section" ${nbAudienceScope==='section'?'selected':''}>Specific Class &amp; Section</option>
-            </select>
-          </div>
-        </div>
-        <div id="nbAudienceFields" style="margin-bottom:10px;"></div>
-        <button class="btn btn-primary" onclick="postQuickNotice()">Post to Notice Board</button>
-      </div>` : ''}
-      <div class="profile-card" style="margin-bottom:20px; max-width:480px;">
-        <h4>🏷️ Manage Notice Headings</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 12px;">These are the headings available when posting a notice, here or from Communications.</p>
-        ${canCreateHeading ? `<div style="display:flex; gap:8px; margin-bottom:12px;">
-          <input class="input" id="newNoticeTypeName" placeholder="e.g. Sports Day Update" style="flex:1;">
-          <button class="btn btn-primary btn-sm" onclick="addNoticeTypeDirect()">Add</button>
-        </div>` : ''}
-        <div class="table-wrap">
-          <table><tbody>
-          ${noticeTypes.map((t,i) => `<tr><td>${t.icon} ${t.name}</td><td style="text-align:right;">${canDeleteHeading ? `<button class="btn-danger-text" onclick="removeNoticeType(${i})">Remove</button>` : ''}</td></tr>`).join('')}
-          </tbody></table>
-        </div>
-      </div>
-      <div class="profile-card" style="margin-bottom:20px; background:rgba(24,143,134,0.08); border-left:4px solid var(--teal);">
-        <h4>🔌 Website Connection</h4>
-        <p style="font-size:0.82rem; color:var(--ink-soft); margin:8px 0 0;">
-          Notices posted here (with "In-App Notice Board" enabled) are sent straight to this ERP's database, so the
-          public website picks them up on its own — no extra step, and it works regardless of which device or
-          browser a visitor is using.
-        </p>
-      </div>
-      ${notices.length ? notices.map(n => {
-        if(n.id === editingNoticeId){
-          return `
-          <div class="profile-card" style="margin-bottom:14px;">
-            <div class="f-field full" style="margin-bottom:10px;"><label>Title</label><input type="text" id="editNoticeTitle" value="${n.title}"></div>
-            <div class="f-field full" style="margin-bottom:10px;"><label>Message</label><textarea id="editNoticeBody" rows="5">${n.body}</textarea></div>
-            <div style="display:flex; gap:10px;">
-              <button class="btn btn-ghost" onclick="cancelNoticeEdit()">Cancel</button>
-              <button class="btn btn-primary" onclick="saveNoticeEdit('${n.id}')">Save Changes</button>
-            </div>
-          </div>`;
-        }
-        return `
-        <div class="profile-card" style="margin-bottom:14px;">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
-            <div>
-              <span class="pill" style="font-size:0.68rem;">${noticeTypeByName(n.type)?noticeTypeByName(n.type).icon:'📣'} ${n.type}</span>
-              <h4 style="margin:8px 0 4px;">${n.title}</h4>
-              <p style="font-size:0.85rem; color:var(--ink); white-space:pre-wrap; margin:6px 0;">${n.body}</p>
-              <p style="font-size:0.74rem; color:var(--ink-soft); margin-top:8px;">To: ${n.audienceLabel} (${n.recipientCount}) · By ${n.sentBy} on ${n.sentDate}</p>
-            </div>
-            <div style="white-space:nowrap; flex-shrink:0;">
-              ${canEditNb ? `<button class="btn-edit-text" onclick="editNotice('${n.id}')">Edit</button>` : ''}
-              ${(canEditNb && canDeleteNb) ? '&nbsp;·&nbsp;' : ''}${canDeleteNb ? `<button class="btn-danger-text" onclick="deleteNotice('${n.id}')">Take Down</button>` : ''}
-            </div>
-          </div>
-        </div>`;
-      }).join('') : `<div class="empty-state"><b>No notices posted yet</b>Post a message from Communications → Compose with "In-App Notice Board" checked to have it appear here.</div>`}
-    `;
-  }
   function editNotice(id){
     editingNoticeId = id;
     renderNoticeBoard(document.getElementById('noticeBoardBody'));
@@ -516,8 +451,12 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     const title = document.getElementById('editNoticeTitle').value.trim();
     const bodyText = document.getElementById('editNoticeBody').value.trim();
     if(!title || !bodyText){ showToast('Title and message can\'t be empty.'); return; }
+    const linkEl = document.getElementById('editNoticeLink');
+    const link = cleanNoticeLink(linkEl ? linkEl.value : n.link);
+    if(!link.ok){ showToast('That link doesn\'t look right — use a web address like https://example.com/page'); return; }
     n.title = title;
     n.body = bodyText;
+    n.link = link.value;
     await storageSet(COMMS_MESSAGES_KEY, commsMessages);
     editingNoticeId = '';
     renderNoticeBoard(document.getElementById('noticeBoardBody'));
@@ -534,50 +473,7 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   }
 
   /* --- Message Log: everything sent, all channels --- */
-  function renderCommsLog(body){
-    const all = commsMessages.slice().sort((a,b) => b.id.localeCompare(a.id));
-    body.innerHTML = `
-      <div class="table-wrap">
-        <table><thead><tr><th>Date</th><th>Type</th><th>Title</th><th>Audience</th><th>Recipients</th><th>Channels</th><th>Sent By</th></tr></thead>
-        <tbody>
-        ${all.length ? all.map(m => `<tr><td>${m.sentDate}</td><td>${m.type}</td><td class="name-cell">${m.title}</td><td>${m.audienceLabel}</td><td>${m.recipientCount}</td><td>${m.channels.join(' + ')}</td><td>${m.sentBy}</td></tr>`).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No messages sent yet</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-    `;
-  }
-
   /* --- Website Inquiries: admission forms submitted by visitors on the public site --- */
-  function renderAdmissionInquiries(body){
-    const all = admissionInquiries.slice().sort((a,b) => (b.submittedDate||'').localeCompare(a.submittedDate||''));
-    const canEditInq = canDo('websiteinquiries','edit');
-    body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">
-        Admission inquiries submitted through the school website's "Admissions Inquiry Form" appear here automatically —
-        the website sends each submission straight to this ERP's database, so it shows up here regardless of which
-        browser or device the visitor used, or which device you're viewing this on.
-      </p>
-      <div class="table-wrap">
-        <table><thead><tr><th>Date</th><th>Student</th><th>Grade</th><th>Parent</th><th>Phone</th><th>Email</th><th>Notes</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-        ${all.length ? all.map(q => `<tr>
-          <td>${escapeHtml(q.submittedDate)||'—'}</td>
-          <td class="name-cell">${escapeHtml(q.studentName)||'—'}</td>
-          <td>${escapeHtml(q.applyingGrade)||'—'}</td>
-          <td>${escapeHtml(q.parentName)||'—'}</td>
-          <td>${escapeHtml(q.parentPhone)||'—'}</td>
-          <td>${escapeHtml(q.parentEmail)||'—'}</td>
-          <td style="max-width:200px;">${escapeHtml(q.notes)||'—'}</td>
-          <td>
-            ${canEditInq ? `<select onchange="setInquiryStatus('${q.id}', this.value)" style="font-size:0.78rem; padding:4px 6px;">
-              ${['New','Contacted','Converted','Declined'].map(s => `<option ${q.status===s?'selected':''}>${s}</option>`).join('')}
-            </select>` : (q.status||'New')}
-          </td>
-          <td>${canEditInq ? `<button class="btn-edit-text" onclick="convertInquiryToStudent('${q.id}')">Add as Student</button>` : ''}</td>
-        </tr>`).join('') : `<tr><td colspan="9"><div class="empty-state"><b>No inquiries yet</b>Submissions from the website's Admissions Inquiry Form will show up here.</div></td></tr>`}
-        </tbody></table>
-      </div>
-    `;
-  }
   async function setInquiryStatus(id, status){
     const q = admissionInquiries.find(x => x.id === id);
     if(!q) return;
@@ -603,41 +499,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   /* --- Website Gallery: photos shown on the public site's Gallery section --- */
   const GALLERY_CATEGORIES = { campus:'Campus', event:'Events & Celebrations', trip:'Educational Trips', achieve:'Achievements & Results' };
   let galleryUploadData = '';
-  function renderWebsiteGallery(body){
-    const canCreate = canDo('websitegallery','create');
-    const canDelete = canDo('websitegallery','delete');
-    body.innerHTML = `
-      ${canCreate ? `<div class="profile-card" style="max-width:520px; margin-bottom:24px;">
-        <h4>🖼️ Add Photo to Website Gallery</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Uploaded photos appear on the public website's Gallery section immediately, grouped by category.</p>
-        <div style="display:flex; align-items:center; gap:16px; margin-bottom:14px;">
-          <div style="width:100px; height:75px; border-radius:8px; background:var(--brand-navy); display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
-            ${galleryUploadData ? `<img src="${galleryUploadData}" style="width:100%; height:100%; object-fit:cover;">` : `<span style="color:#fff; font-size:0.68rem;">No image</span>`}
-          </div>
-          <label class="btn btn-ghost btn-sm" style="cursor:pointer;">Choose Photo<input type="file" accept="image/*" style="display:none;" onchange="onGalleryPhotoSelected(event)"></label>
-        </div>
-        <div class="form-grid" style="margin-bottom:14px;">
-          <div class="f-field"><label>Category</label><select id="galleryCatSelect">${Object.entries(GALLERY_CATEGORIES).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
-          <div class="f-field full"><label>Caption</label><input type="text" id="galleryCaption" placeholder="e.g. Annual Sports Day 2026"></div>
-        </div>
-        <button class="btn btn-primary" onclick="saveGalleryPhoto()">Add to Gallery</button>
-      </div>` : ''}
-
-      <h4 style="margin-bottom:10px;">Gallery Photos (${websiteGallery.length})</h4>
-      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:14px;">
-        ${websiteGallery.length ? websiteGallery.slice().reverse().map(g => `
-          <div style="background:#fff; border:1px solid var(--border); border-radius:10px; overflow:hidden;">
-            <img src="${g.dataUrl}" style="width:100%; height:110px; object-fit:cover; display:block;">
-            <div style="padding:8px;">
-              <span class="pill" style="font-size:0.6rem;">${GALLERY_CATEGORIES[g.category]||g.category}</span>
-              <div style="font-size:0.78rem; margin:6px 0;">${g.caption||''}</div>
-              ${canDelete ? `<button class="btn-danger-text" onclick="deleteGalleryPhoto('${g.id}')">Delete</button>` : ''}
-            </div>
-          </div>
-        `).join('') : `<div class="empty-state" style="grid-column:1/-1;"><b>No photos uploaded yet</b>Add one above to have it appear on the website.</div>`}
-      </div>
-    `;
-  }
   function onGalleryPhotoSelected(e){
     // Resized/compressed (not the raw upload) — see readAndCompressImage's
     // comment for why: this photo goes straight onto the public website.

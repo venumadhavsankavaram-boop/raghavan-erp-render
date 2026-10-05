@@ -1698,7 +1698,8 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
         <h4>Contact Details</h4>
         <div class="form-grid" style="margin-top:12px;">
           <div class="f-field"><label>Email</label><input type="email" id="siEmail" value="${schoolInfo.email||''}"></div>
-          <div class="f-field"><label>Phone</label><input type="text" id="siPhone" value="${schoolInfo.phone||''}" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
+          <div class="f-field"><label>Phone / Landline</label><input type="text" id="siPhone" value="${schoolInfo.phone||''}" inputmode="numeric" maxlength="11" oninput="this.value=this.value.replace(/\D/g,'').slice(0,11)" placeholder="10-digit mobile or 11-digit landline with STD code"></div>
+          <div class="f-field"><label>WhatsApp Number <small>(shown on the public website)</small></label><input type="text" id="siWhatsapp" value="${schoolInfo.whatsapp||''}" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)" placeholder="10-digit mobile number"></div>
           <div class="f-field full"><label>Website</label><input type="text" id="siWebsite" value="${schoolInfo.website||''}"></div>
         </div>
       </div>
@@ -1805,9 +1806,15 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
   }
   async function saveSchoolProfile(){
     const siPhoneVal = document.getElementById('siPhone').value.trim();
-    if(siPhoneVal && !isValidMobile(siPhoneVal)){
-      showToast('Phone must be exactly 10 digits.');
+    if(siPhoneVal && !(isValidMobile(siPhoneVal) || (/^0\d{10}$/.test(siPhoneVal)))){
+      showToast('Phone must be a 10-digit mobile or an 11-digit landline starting with 0 (STD code).');
       document.getElementById('siPhone').focus();
+      return;
+    }
+    const siWhatsappVal = document.getElementById('siWhatsapp').value.trim();
+    if(siWhatsappVal && !isValidMobile(siWhatsappVal)){
+      showToast('WhatsApp number must be exactly 10 digits.');
+      document.getElementById('siWhatsapp').focus();
       return;
     }
     const siUdiseVal = document.getElementById('siUdise').value.trim();
@@ -1830,6 +1837,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       regNumber: document.getElementById('siRegNumber').value.trim(),
       email: document.getElementById('siEmail').value.trim(),
       phone: document.getElementById('siPhone').value.trim(),
+      whatsapp: siWhatsappVal,
       website: document.getElementById('siWebsite').value.trim(),
       state: document.getElementById('siState').value.trim(),
       district: document.getElementById('siDistrict').value.trim(),

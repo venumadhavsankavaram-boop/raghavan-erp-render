@@ -73,10 +73,24 @@ const WEBSITE_CORS_RULES = {
   '/api/website-gallery': 'GET, OPTIONS',
   '/api/school-info': 'GET, OPTIONS',
 };
+// WEBSITE_ORIGIN may list several origins separated by commas, and the bare
+// and "www." forms of each are always treated as the same site, so a visitor
+// who types www.<school>.com gets the same live notices as one on <school>.com.
+const WEBSITE_ORIGINS = (() => {
+  const set = new Set();
+  String(WEBSITE_ORIGIN).split(',').map(x => x.trim().replace(/\/+$/, '')).filter(Boolean).forEach(o => {
+    set.add(o);
+    const m = o.match(/^(https?:\/\/)(www\.)?(.+)$/i);
+    if (m) { set.add(m[1] + m[3]); set.add(m[1] + 'www.' + m[3]); }
+  });
+  return set;
+})();
 app.use((req, res, next) => {
   const allowedMethods = WEBSITE_CORS_RULES[req.path];
-  if (allowedMethods && WEBSITE_ORIGIN) {
-    res.header('Access-Control-Allow-Origin', WEBSITE_ORIGIN);
+  const origin = req.headers.origin;
+  if (allowedMethods && origin && WEBSITE_ORIGINS.has(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Vary', 'Origin');
     res.header('Access-Control-Allow-Methods', allowedMethods);
     res.header('Access-Control-Allow-Headers', 'Content-Type');
   }
