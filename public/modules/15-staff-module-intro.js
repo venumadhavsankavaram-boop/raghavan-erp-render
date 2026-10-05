@@ -514,55 +514,6 @@ const STAFF_KEY = "staff-records";
     else { staffSortField = field; staffSortDir = 'asc'; }
     renderStaffTable(document.getElementById('staffBody'));
   }
-  function renderStaffTable(body){
-    const deptF = document.getElementById('staffDeptFilter').value;
-    const statusF = document.getElementById('staffStatusFilter').value;
-    let list = staffList.slice();
-    if(deptF) list = list.filter(st => st.department === deptF);
-    if(statusF !== 'all') list = list.filter(st => statusF==='Active' ? staffIsActive(st) : !staffIsActive(st));
-    list.sort((a,b) => {
-      const va = (a[staffSortField]||'').toString().toLowerCase();
-      const vb = (b[staffSortField]||'').toString().toLowerCase();
-      const cmp = va < vb ? -1 : va > vb ? 1 : 0;
-      return staffSortDir === 'asc' ? cmp : -cmp;
-    });
-    document.getElementById('staffTotalCount').textContent = `Total: ${staffList.length} staff member${staffList.length===1?'':'s'}`;
-    const arrow = f => staffSortField===f ? (staffSortDir==='asc'?' ▲':' ▼') : '';
-    body.innerHTML = `
-      <div class="table-wrap">
-        <table><thead><tr>
-          <th style="cursor:pointer;" onclick="sortStaffBy('firstName')">Name${arrow('firstName')}</th>
-          <th>Designation</th>
-          <th>Department</th>
-          <th style="cursor:pointer;" onclick="sortStaffBy('status')">Status${arrow('status')}</th>
-          <th>Email</th>
-          <th>Phone</th>
-          <th style="cursor:pointer;" onclick="sortStaffBy('doj')">Date Joined${arrow('doj')}</th>
-          <th>Actions</th>
-        </tr></thead>
-        <tbody>
-        ${list.map(st => `<tr>
-          <td class="name-cell" style="cursor:pointer;" onclick="openStaffProfile('${st.id}')">${st.firstName} ${st.lastName}</td>
-          <td><span class="pill">${st.designation||'—'}</span></td>
-          <td>${st.department||'—'}</td>
-          <td><span class="pill" style="${staffIsActive(st)?'':'background:rgba(209,16,115,0.13); color:var(--magenta);'}">${st.status||'Active'}</span></td>
-          <td>${st.email||'—'}</td>
-          <td>${st.phone||'—'}</td>
-          <td>${st.doj||'—'}</td>
-          <td>
-            <div style="display:flex; gap:10px;">
-              ${currentUser.role === 'Admin' ? `<button title="Grant login access" onclick="openLoginForStaff('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">🔑</button>` : ''}
-              <button title="View profile" onclick="openStaffProfile('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">👁</button>
-              ${canDo('staff','edit') ? `<button title="Edit" onclick="openStaffWizard('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--teal); font-size:1rem;">✎</button>` : ''}
-              ${canDo('staff','delete') ? `<button title="Delete" onclick="deleteStaff('${st.id}')" style="background:none; border:none; cursor:pointer; color:var(--magenta); font-size:1rem;">🗑</button>` : ''}
-            </div>
-          </td>
-        </tr>`).join('')}
-        </tbody></table>
-        ${list.length===0 ? `<div class="empty-state"><b>No staff match this filter</b></div>` : ``}
-      </div>
-    `;
-  }
   function backToStaffGrid(){ staffView = 'table'; renderStaffBody(); }
   // Set right before the "Add Staff User" modal opens, and consumed by
   // saveUser() once that new login is actually saved — this is what makes
@@ -596,17 +547,7 @@ const STAFF_KEY = "staff-records";
     if(!st){ staffView = 'grid'; return renderStaffBody(); }
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToStaffGrid()">Staff Directory</a> &nbsp;/&nbsp; ${st.firstName} ${st.lastName}</div>
-      <div class="profile-head">
-        ${st.photo ? `<img class="profile-photo" src="${st.photo}">` : `<div class="profile-photo">${staffInitials(st)}</div>`}
-        <div>
-          <h2>${st.firstName} ${st.lastName}</h2>
-          <div class="p-meta">${st.staffId} · ${st.designation||'—'} · ${st.department} · <span class="pill">${st.status||'Active'}</span>${st.classTeacherClass ? ` · <span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">Class Teacher: ${st.classTeacherClass} — ${st.classTeacherSection}</span>` : ''}</div>
-        </div>
-        <div class="profile-actions">
-          ${canDo('staff','edit') ? `<button class="btn btn-ghost" onclick="openStaffWizard('${st.id}')">Edit</button>` : ''}
-          ${canDo('staff','delete') ? `<button class="btn btn-danger-text" style="border:1.5px solid var(--border); border-radius:10px; padding:11px 20px;" onclick="deleteStaff('${st.id}')">Delete</button>` : ''}
-        </div>
-      </div>
+      ${staffHeroHtml(st)}
       <div class="profile-grid">
         <div class="profile-card">
           <h4>Personal Details</h4>
