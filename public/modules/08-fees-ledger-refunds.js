@@ -334,24 +334,6 @@ let refundPaymentId = null;
   }
 
   /* --- Fee Types --- */
-  function renderFeeTypesTab(body){
-    const canCreate = canSub('managefee_types','managefee','create');
-    const canDelete = canSub('managefee_types','managefee','delete');
-    body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:600px;">
-        These names are available when creating Extra Fees. The four core recurring categories (Fee, Bus Fee, Stock, Hostel) are structural and managed under Fee Structure — this list is for additional labels you use elsewhere.
-      </p>
-      ${canCreate ? `<div class="inline-add-form">
-        <input class="input" id="newFeeTypeName" placeholder="e.g. Exam Fee" style="max-width:260px;">
-        <button class="btn btn-primary" onclick="addFeeType()">🏷️ Add Fee Type</button>
-      </div>` : ''}
-      ${feeTypes.map((t,i) => `
-        <div class="list-manage-row">
-          <div class="lm-name">${t}</div>
-          ${canDelete ? `<button class="btn-danger-text" onclick="removeFeeType(${i})">Remove</button>` : ''}
-        </div>`).join('') || `<div class="empty-state"><b>No fee types yet</b></div>`}
-    `;
-  }
   async function addFeeType(){
     const val = document.getElementById('newFeeTypeName').value.trim();
     if(!val) return;
@@ -410,83 +392,6 @@ let refundPaymentId = null;
     renderDiscListView(body);
   }
 
-  function renderDiscListView(body){
-    const rows = groupedDiscountRows();
-    const pendingCount = rows.filter(r => r.status==='Pending').length;
-    let filtered = rows;
-    if(discListFilter === 'pending') filtered = filtered.filter(r => r.status === 'Pending');
-    if(discSearchQuery){
-      const q = discSearchQuery.toLowerCase();
-      filtered = filtered.filter(r => {
-        const s = students.find(x => x.id === r.studentId);
-        return s && (s.firstName+' '+s.lastName).toLowerCase().includes(q);
-      });
-    }
-
-    body.innerHTML = `
-      <div class="ms-toolbar" style="margin-bottom:16px;">
-        <div class="ms-toolbar-left">
-          <input class="input" id="discListSearch" placeholder="Search student discounts..." value="${discSearchQuery}" oninput="onDiscListSearch(this.value)">
-        </div>
-        <div style="display:flex; gap:10px;">
-          <button class="btn btn-ghost" onclick="toggleDiscApprovalsFilter()">${discListFilter==='pending' ? '✓ Showing Approvals' : 'Approvals'}${pendingCount ? ' ('+pendingCount+')' : ''}</button>
-          ${canSub('managefee_discounts','managefee','create') ? `<button class="btn btn-primary" onclick="openDiscCreateForm()">+ Create Student Discount</button>` : ''}
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table><thead><tr>
-          <th>Student</th><th>Class &amp; Section</th><th>Concession Type</th>
-          ${Object.keys(CATS).map(c => `<th>${CATS[c]}</th>`).join('')}
-          <th>Total Concession</th><th>Remark</th><th>Created By</th><th>Status</th><th></th>
-        </tr></thead>
-        <tbody>
-        ${filtered.length ? filtered.map(r => {
-          const s = students.find(x => x.id === r.studentId);
-          const catAmounts = {};
-          Object.keys(CATS).forEach(c => { const rec = r.records.find(x => x.appliesTo===c); catAmounts[c] = rec ? rec.value : null; });
-          const total = r.records.reduce((sum,x) => sum + (Number(x.value)||0), 0);
-          return `<tr>
-            <td><div class="lm-name">${s ? s.firstName+' '+s.lastName : 'Unknown student'}</div><div class="lm-meta">S/o: ${s && s.fatherName ? s.fatherName : '—'}</div></td>
-            <td>${s ? `<span class="pill">${s.className} - ${s.section}</span>` : '—'}</td>
-            <td>${r.type}</td>
-            ${Object.keys(CATS).map(c => `<td>${catAmounts[c]!==null ? fmtMoney(catAmounts[c]) : '—'}</td>`).join('')}
-            <td><b>${fmtMoney(total)}</b></td>
-            <td>${r.note || '—'}</td>
-            <td>${r.requestedBy||'—'}${r.approvedBy ? `<div style="font-size:0.72rem; color:var(--ink-soft);">Approved by: ${r.approvedBy}</div>` : ''}</td>
-            <td>${statusPill(r.status)}</td>
-            <td>
-              ${currentUser.role==='Admin' && r.status==='Pending' ? `<button class="btn-edit-text" onclick="approveDiscountGroup('${r.batchId}','${r.studentId}')">Approve</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="rejectDiscountGroup('${r.batchId}','${r.studentId}')">Reject</button>&nbsp;·&nbsp;` : ``}
-              ${canSub('managefee_discounts','managefee','delete') ? `<button class="btn-danger-text" onclick="deleteDiscountGroup('${r.batchId}','${r.studentId}')">Delete</button>` : ''}
-            </td>
-          </tr>`;
-        }).join('') : `<tr><td colspan="${5+Object.keys(CATS).length}"><div class="empty-state"><b>No discounts found</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-
-      <div class="profile-card" style="margin-top:24px; max-width:640px;">
-        <h4>Discount Catalog (quick reference)</h4>
-        <p style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:12px;">A separate, informal list staff can glance at when recording a one-off payment discount manually — not tied to approval.</p>
-        ${canSub('managefee_discounts','managefee','create') ? `<div class="inline-add-form">
-          <input class="input" id="newDiscName" placeholder="e.g. Merit Scholarship" style="max-width:220px;">
-          <input class="input" id="newDiscAmount" type="number" min="0" placeholder="Amount (₹)" style="max-width:160px;">
-          <button class="btn btn-ghost btn-sm" onclick="addDiscountType()">+ Add</button>
-        </div>` : ''}
-        ${discountTypes.map((d,i) => `
-          <div class="list-manage-row">
-            <div><div class="lm-name">${d.name}</div><div class="lm-meta">${fmtMoney(d.amount)}</div></div>
-            ${canSub('managefee_discounts','managefee','delete') ? `<button class="btn-danger-text" onclick="removeDiscountType(${i})">Remove</button>` : ''}
-          </div>`).join('') || `<div style="font-size:0.8rem; color:var(--ink-soft);">No entries yet</div>`}
-      </div>
-    `;
-  }
-  function onDiscListSearch(val){
-    discSearchQuery = val;
-    renderDiscListView(document.getElementById('feeBody'));
-  }
-  function toggleDiscApprovalsFilter(){
-    discListFilter = discListFilter === 'pending' ? 'all' : 'pending';
-    renderDiscListView(document.getElementById('feeBody'));
-  }
 
   function openDiscCreateForm(){
     discView = 'create';
@@ -806,24 +711,6 @@ let refundPaymentId = null;
   }
 
   /* --- Extra Fees (catalog + per-student assignment) --- */
-  function renderExtraFeesTab(body){
-    body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:600px;">
-        Define one-off extra fees here (e.g. Annual Day, Field Trip). Assign them to individual students from that student's fee page in <b>Student Fees</b>.
-      </p>
-      ${canSub('managefee_extra','managefee','create') ? `<div class="inline-add-form">
-        <input class="input" id="newExtraName" list="feeTypesDatalist" placeholder="e.g. Annual Day Fee" style="max-width:220px;">
-        <datalist id="feeTypesDatalist">${feeTypes.map(t => `<option value="${t}">`).join('')}</datalist>
-        <input class="input" id="newExtraAmount" type="number" min="0" placeholder="Amount (₹)" style="max-width:160px;">
-        <button class="btn btn-primary" onclick="addExtraFeeDef()">+ Add Extra Fee</button>
-      </div>` : ''}
-      ${extraFeeDefs.map((e,i) => `
-        <div class="list-manage-row">
-          <div><div class="lm-name">${e.name}</div><div class="lm-meta">${fmtMoney(e.amount)}</div></div>
-          ${canSub('managefee_extra','managefee','delete') ? `<button class="btn-danger-text" onclick="removeExtraFeeDef(${i})">Remove</button>` : ''}
-        </div>`).join('') || `<div class="empty-state"><b>No extra fees defined yet</b></div>`}
-    `;
-  }
   async function addExtraFeeDef(){
     const name = document.getElementById('newExtraName').value.trim();
     const amount = Number(document.getElementById('newExtraAmount').value) || 0;
@@ -938,24 +825,6 @@ let refundPaymentId = null;
   }
 
   /* --- Late Fees --- */
-  function renderLateFeesTab(body){
-    body.innerHTML = `
-      <div class="profile-card" style="max-width:420px; margin-bottom:20px;">
-        <h4>Late Fee Rule</h4>
-        <p style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:16px;">Applies uniformly across the school for now — a per-class or per-student rule would be a future refinement.</p>
-        <div class="f-field" style="margin-bottom:12px;"><label>Fee Due Date</label><input type="date" class="input" id="lfDueDate" value="${lateFeeSettings.dueDate||''}" style="width:100%;"></div>
-        <div class="f-field" style="margin-bottom:12px;"><label>Grace Period (days)</label><input type="number" min="0" class="input" id="lfGrace" value="${lateFeeSettings.graceDays||0}" style="width:100%;"></div>
-        <div class="f-field" style="margin-bottom:16px;"><label>Late Fee Amount (₹)</label><input type="number" min="0" class="input" id="lfAmount" value="${lateFeeSettings.amount||0}" style="width:100%;"></div>
-        ${canSub('managefee_late','managefee','edit') ? `<button class="btn btn-primary" onclick="saveLateFeeSettings()">⏰ Save Late Fee Rule</button>` : ''}
-      </div>
-      <div class="profile-card" style="max-width:420px;">
-        <h4>Receipt Numbering</h4>
-        <p style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:16px;">Set this if you're switching over from a previous system and want receipt numbers to continue from where you left off (e.g. if your last printed receipt was 001666, set this to 1667).</p>
-        <div class="f-field" style="margin-bottom:16px;"><label>Next Receipt Starts At</label><input type="number" min="1" class="input" id="rsStart" value="${receiptSettings.startNumber||1}" style="width:100%;"></div>
-        ${canSub('managefee_late','managefee','edit') ? `<button class="btn btn-primary" onclick="saveReceiptSettings()">Save Receipt Numbering</button>` : ''}
-      </div>
-    `;
-  }
   async function saveLateFeeSettings(){
     lateFeeSettings = {
       dueDate: document.getElementById('lfDueDate').value,
@@ -1002,25 +871,6 @@ let refundPaymentId = null;
     return list;
   }
 
-  function onDefaulterFilterChange(){
-    defaulterFilters = {
-      className: document.getElementById('dfClass').value,
-      section: document.getElementById('dfSection').value,
-      name: document.getElementById('dfName').value,
-      phone: document.getElementById('dfPhone').value,
-    };
-    defaulterPage = 1;
-    renderDefaultersTab(document.getElementById('feeBody'));
-  }
-  function changeDefaulterPageSize(val){
-    defaulterPageSize = Number(val);
-    defaulterPage = 1;
-    renderDefaultersTab(document.getElementById('feeBody'));
-  }
-  function changeDefaulterPage(dir){
-    defaulterPage += dir;
-    renderDefaultersTab(document.getElementById('feeBody'));
-  }
   function defaultersReportRows(){
     let list = computeDefaulters();
     if(defaulterFilters.className) list = list.filter(d => d.student.className===defaulterFilters.className);
@@ -1036,72 +886,6 @@ let refundPaymentId = null;
   function downloadDefaultersExcel(){ exportRowsToExcel('fee_defaulters.xlsx', 'Fee Defaulters', defaultersReportRows()); }
   function downloadDefaultersPDF(){ exportRowsToPDF('Fee Defaulters', '', defaultersReportRows()); }
 
-  function renderDefaultersTab(body){
-    const canNotify = canSub('managefee_defaulters','managefee','create');
-    const canPrintDefaulters = canSub('managefee_defaulters','managefee','print');
-    let list = computeDefaulters();
-    if(defaulterFilters.className) list = list.filter(d => d.student.className===defaulterFilters.className);
-    if(defaulterFilters.section) list = list.filter(d => d.student.section===defaulterFilters.section);
-    if(defaulterFilters.name) list = list.filter(d => (d.student.firstName+' '+d.student.lastName).toLowerCase().includes(defaulterFilters.name.toLowerCase()));
-    if(defaulterFilters.phone) list = list.filter(d => (d.parentPhone||'').includes(defaulterFilters.phone));
-
-    const totalOutstanding = list.reduce((s,d) => s+d.total, 0);
-    const totalPages = Math.max(1, Math.ceil(list.length / defaulterPageSize));
-    if(defaulterPage > totalPages) defaulterPage = totalPages;
-    const pageItems = list.slice((defaulterPage-1)*defaulterPageSize, defaulterPage*defaulterPageSize);
-
-    body.innerHTML = `
-      <div class="fee-summary-row">
-        <div class="fee-sum-card"><b>${list.length}</b><span>Total Defaulters</span></div>
-        <div class="fee-sum-card"><b>${fmtMoney(totalOutstanding)}</b><span>Total Outstanding</span></div>
-      </div>
-      <div class="ms-toolbar">
-        <div class="ms-toolbar-left">
-          <select id="dfClass" onchange="onDefaulterFilterChange()"><option value="">All Classes</option>${CLASS_LEVELS.map(c=>`<option ${defaulterFilters.className===c?'selected':''}>${c}</option>`).join('')}</select>
-          <select id="dfSection" onchange="onDefaulterFilterChange()"><option value="">All Sections</option>${SECTIONS.map(s => `<option value="${s}" ${defaulterFilters.section===s?'selected':''}>Section ${s}</option>`).join('')}</select>
-          <input class="input" id="dfName" placeholder="Search name..." value="${defaulterFilters.name}" oninput="onDefaulterFilterChange()">
-          <input class="input" id="dfPhone" placeholder="Parent phone..." value="${defaulterFilters.phone}" oninput="onDefaulterFilterChange()">
-        </div>
-      </div>
-      <div class="notify-scope-bar">
-        ${canNotify ? `<button class="btn btn-ghost btn-sm" onclick="openNotifyModal('all')">Notify All Defaulters</button>` : ''}
-        ${(canNotify && defaulterFilters.className) ? `<button class="btn btn-ghost btn-sm" onclick="openNotifyModal('filtered')">Notify ${defaulterFilters.className}${defaulterFilters.section?' - '+defaulterFilters.section:''}</button>` : ``}
-        ${canPrintDefaulters ? `<button class="btn btn-ghost btn-sm" onclick="downloadDefaultersExcel()">📥 Excel</button>` : ''}
-        ${canPrintDefaulters ? `<button class="btn btn-ghost btn-sm" onclick="downloadDefaultersPDF()">📄 PDF</button>` : ''}
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Student</th><th>Class</th><th>Parent Phone</th><th>Next Due</th><th>Due Till Today</th><th>Total Outstanding</th><th></th></tr></thead>
-          <tbody>
-          ${pageItems.map(d => `
-            <tr>
-              <td class="name-cell">${d.student.firstName} ${d.student.lastName}</td>
-              <td><span class="pill">${d.student.className} - ${d.student.section}</span></td>
-              <td>${d.parentPhone || '—'}</td>
-              <td>${d.nextDue || lateFeeSettings.dueDate || '—'}</td>
-              <td>${d.dueTillToday > 0 ? fmtMoney(d.dueTillToday) : '—'}</td>
-              <td class="balance-tag due" title="Tuition: ${fmtMoney(d.tuitionBal)} · Bus: ${fmtMoney(d.busBal)} · Stock: ${fmtMoney(d.stockBal)} · Hostel: ${fmtMoney(d.hostelBal)}">${fmtMoney(d.total)}</td>
-              <td>${canNotify ? `<button class="btn-edit-text" onclick="openNotifyModal('single','${d.student.id}')">Notify</button>` : ''}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-        ${pageItems.length===0 ? `<div class="empty-state"><b>No defaulters match</b></div>` : ``}
-      </div>
-      <div class="pagination-row">
-        <div style="font-size:0.8rem; color:var(--ink-soft);">
-          Showing ${pageItems.length ? ((defaulterPage-1)*defaulterPageSize+1) : 0}–${Math.min(defaulterPage*defaulterPageSize,list.length)} of ${list.length}
-          <select onchange="changeDefaulterPageSize(this.value)" style="margin-left:8px; padding:4px 8px; border-radius:6px; border:1.5px solid var(--border);">
-            ${[10,25,50,100].map(n=>`<option value="${n}" ${defaulterPageSize===n?'selected':''}>${n} / page</option>`).join('')}
-          </select>
-        </div>
-        <div class="pagination-btns">
-          <button class="page-btn" onclick="changeDefaulterPage(-1)" ${defaulterPage<=1?'disabled':''}>Prev</button>
-          <span style="font-size:0.82rem;">Page ${defaulterPage} of ${totalPages}</span>
-          <button class="page-btn" onclick="changeDefaulterPage(1)" ${defaulterPage>=totalPages?'disabled':''}>Next</button>
-        </div>
-      </div>
-    `;
-  }
 
   /* --- Notify Parents (WhatsApp click-to-chat, real & functional, no backend needed) --- */
   function openNotifyModal(scope, singleId){

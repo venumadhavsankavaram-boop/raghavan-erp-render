@@ -1822,6 +1822,48 @@
   .cm-photo figcaption{padding:10px 12px 12px; display:flex; flex-direction:column; gap:6px; align-items:flex-start;} .cm-photo figcaption b{font-size:0.82rem;}
   .cm-del{border:0; background:var(--danger-bg); color:var(--danger-ink); font:inherit; font-size:0.72rem; font-weight:700; padding:5px 10px; border-radius:999px; cursor:pointer;}
   @media (max-width:720px){ .cm-feed{grid-template-columns:1fr;} .cm-actions{margin-left:0;} }
+
+  /* ---- Manage Fee tabs: Fee Types, Discounts, Extra Fees, Late Fees, Defaulters (module 08b) ---- */
+  .ft-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:18px; align-items:start;}
+  .ft-card{padding:20px 22px;}
+  .ft-head h4{margin:0 0 4px; font-family:'Baloo 2',cursive; font-size:1.05rem; color:var(--navy);}
+  .ft-head p{margin:0 0 16px; font-size:0.82rem; line-height:1.5; color:var(--ink-soft); max-width:56ch;}
+  .ft-add{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px;}
+  .ft-add .input{flex:1 1 170px; max-width:260px;}
+  .ft-chips{display:flex; flex-wrap:wrap; gap:8px;}
+  .ft-chip{display:inline-flex; align-items:center; gap:8px; background:var(--cream); border:1.5px solid var(--border); border-radius:999px; padding:6px 8px 6px 14px; font-size:0.84rem; color:var(--navy);}
+  .ft-chip em{font-style:normal; font-size:0.74rem; color:var(--ink-soft);}
+  .ft-chip--locked{padding:6px 14px; background:transparent; border-style:dashed; color:var(--ink-soft);}
+  .ft-chip-x{border:0; width:22px; height:22px; border-radius:50%; background:var(--danger-bg); color:var(--danger-ink); font-size:1rem; line-height:1; cursor:pointer;}
+  .ft-chip-x:hover{background:var(--magenta); color:#fff;}
+  .ft-empty{padding:26px 16px; text-align:center; font-size:0.84rem; color:var(--ink-soft);}
+  .ft-empty b{display:block; margin-bottom:4px; color:var(--navy); font-size:0.95rem;}
+  .ft-cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:14px; margin-top:18px;}
+  .ft-fee{padding:16px 18px; display:flex; flex-direction:column; gap:6px;}
+  .ft-fee-name{font-size:0.85rem; color:var(--ink-soft);}
+  .ft-fee-amt{font-size:1.5rem; color:var(--navy); font-family:'Baloo 2',cursive;}
+  .ft-form{display:grid; gap:14px; margin-bottom:16px;}
+  .ft-field{display:flex; flex-direction:column; gap:6px; font-size:0.78rem; font-weight:600; color:var(--ink-soft);}
+  .ft-field .input{width:100%; font-weight:400;}
+  .ft-preview{margin:-4px 0 16px; padding:10px 12px; border-radius:10px; background:var(--info-bg); color:var(--info-ink); font-size:0.8rem; line-height:1.45;}
+  .ft-who{display:flex; align-items:center; gap:10px; min-width:150px;}
+  .ft-who b{display:block; color:var(--navy);}
+  .ft-table td small{display:block; margin-top:2px;}
+  .ft-table td{white-space:nowrap;} .ft-table td .pill{white-space:nowrap;}
+  .ft-table td small{white-space:normal; max-width:230px;}
+  .ft-table td.sf-actions{white-space:normal; min-width:104px;}
+  .ft-part{white-space:nowrap;}
+  .ft-table th,.ft-table td{padding-left:10px; padding-right:10px;}
+  .sf-card .table-wrap{overflow-x:auto;}
+  .ft-parts{display:flex; flex-wrap:wrap; gap:4px 10px; font-size:0.78rem; color:var(--ink-soft);}
+  .ft-parts b{color:var(--navy);}
+  .ft-owe{color:var(--danger-ink);}
+  .ft-pager{display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; margin-top:14px;}
+  .ft-pager select.input{width:auto; padding:5px 10px; margin-left:8px;}
+  .ft-pager-btns{display:inline-flex; align-items:center; gap:10px;}
+  .ft-pager .sf-btn:disabled{opacity:.45; cursor:not-allowed; transform:none;}
+  .iv-toolbar select.input{width:auto; min-width:140px;}
+  @media (max-width:720px){ .ft-card{padding:16px;} .ft-add .input{max-width:none;} .ft-pager{justify-content:center;} }
 </style>
 <script>
   /* ===== AUTOMATIC WEBSITE THEME SYNC =====
@@ -3669,6 +3711,7 @@
 <script src="modules/07-manage-fee-module.js"></script>
 <script src="modules/07b-student-fees-ui.js"></script>
 <script src="modules/08-fees-ledger-refunds.js"></script>
+<script src="modules/08b-fee-tabs-ui.js"></script>
 <script src="modules/09-fees-subtabs.js"></script>
 <script src="modules/09b-attendance-ui.js"></script>
 <script src="modules/10-attendance-exams.js"></script>
