@@ -567,7 +567,9 @@ const CUSTOM_ROLES_KEY = "custom-roles";
       currentUser = u;
       moduleAccess = u.moduleAccess || { restricted: false, enabledKeys: [] };
       sessionStorage.setItem('rgv_current_user', u.id);
-      await loadAllAppData();
+      loginLoaderStart('Restoring your session…', 0);
+      loginLoaderStage('Loading students, fees and records…', 0, true);
+      try{ await loadAllAppData(); } finally { loginLoaderStop(); }
       hideLoginScreen();
       applyRolePermissions();
       initSbSectionsCollapseState();
@@ -624,8 +626,13 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     e.preventDefault();
     const uname = document.getElementById('loginUsername').value.trim();
     const pw = document.getElementById('loginPassword').value;
+    const submitBtn = e.submitter || document.querySelector('#loginForm button[type="submit"]');
+    if(submitBtn) submitBtn.disabled = true; // a second tap must not send a second login
+    loginLoaderStart('Verifying your credentials…', 12);
     const u = await verifyLogin(uname, pw, loginAudience);
     if(!u){
+      loginLoaderStop();
+      if(submitBtn) submitBtn.disabled = false;
       const errEl = document.getElementById('loginError');
       // A suspended-access or wrong-audience message is real, specific
       // guidance the person needs to see verbatim — only the plain "wrong
@@ -652,7 +659,15 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     // whatever was cached locally instead of the real server data. Now that
     // /api/login has set a real session cookie, load everything again —
     // this time every request is authenticated and gets the actual data.
-    await loadAllAppData();
+    loginLoaderStage('Loading students, fees and records…', 0, true);
+    try{
+      await loadAllAppData();
+      loginLoaderStage('Almost ready…', 96);
+      await loginLoaderDone();
+    }finally{
+      loginLoaderStop();
+      if(submitBtn) submitBtn.disabled = false;
+    }
     hideLoginScreen();
     applyRolePermissions();
     initSbSectionsCollapseState();
@@ -837,16 +852,26 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     setBtn('btnAddStaff', canDo('staff','create'));
     setBtn('btnImportStaff', canDo('staff','create'));
   }
+  // The picture to show for the signed-in person: the photo they uploaded
+  // themselves on My Account, otherwise the photo on their Staff record
+  // (linked through staff.linkedUserId), otherwise initials.
+  function myAvatarPhoto(){
+    if(!currentUser) return '';
+    if(currentUser.photo) return currentUser.photo;
+    const st = (typeof staffList !== 'undefined' ? staffList : []).find(x => x.linkedUserId === currentUser.id);
+    return (st && st.photo) || '';
+  }
+  function myInitials(){
+    return ((currentUser && currentUser.name) || '?').trim().split(/\s+/).map(w => w[0]).slice(0,2).join('').toUpperCase() || '?';
+  }
   function updateSidebarAvatar(){
     const el = document.getElementById('sbUserAvatar');
     if(!el) return;
-    const u = users.find(x => x.username === currentUser.username);
-    const photo = u ? u.photo : '';
+    const photo = myAvatarPhoto();
     if(photo){
-      el.innerHTML = `<img src="${photo}" style="width:100%; height:100%; object-fit:cover;">`;
+      el.innerHTML = `<img src="${photo}" alt="" style="width:100%; height:100%; object-fit:cover;">`;
     }else{
-      const initialsText = (currentUser.name||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
-      el.textContent = initialsText || '?';
+      el.textContent = myInitials();
     }
   }
 

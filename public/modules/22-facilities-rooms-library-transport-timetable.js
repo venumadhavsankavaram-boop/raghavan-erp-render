@@ -287,45 +287,51 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
   function closeHomeworkRoster(){ document.getElementById('hwRosterModalOverlay').classList.remove('open'); }
 
   function initMyAccountView(){
-    const u = users.find(x => x.username === currentUser.username);
-    myAccountPhotoData = u ? (u.photo || '') : '';
+    myAccountPhotoData = currentUser ? (currentUser.photo || '') : '';
     renderMyAccountBody();
   }
   function renderMyAccountBody(){
     const body = document.getElementById('myAccountBody');
     if(!body) return;
-    const u = users.find(x => x.username === currentUser.username);
-    if(!u){ body.innerHTML = `<div class="empty-state"><b>Account not found</b></div>`; return; }
-    const initialsText = (u.name||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    if(!currentUser){ body.innerHTML = `<div class="empty-state"><b>Account not found</b></div>`; return; }
+    const u = currentUser;
+    // Falls back to the Staff-record photo until the person uploads their own.
+    const shown = myAccountPhotoData || myAvatarPhoto();
+    const fromStaff = !myAccountPhotoData && !!shown;
     body.innerHTML = `
-      <div class="profile-card" style="max-width:480px; margin-bottom:20px;">
-        <h4>Profile</h4>
-        <div style="display:flex; align-items:center; gap:16px; margin:14px 0;">
-          <div style="width:72px; height:72px; border-radius:50%; background:var(--brand-navy); display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
-            ${myAccountPhotoData ? `<img src="${myAccountPhotoData}" style="width:100%; height:100%; object-fit:cover;">` : `<span style="color:#fff; font-weight:700; font-size:1.4rem;">${initialsText||'?'}</span>`}
-          </div>
-          <div>
-            <label class="btn btn-ghost btn-sm" style="cursor:pointer;">Change Photo<input type="file" accept="image/*" style="display:none;" onchange="previewMyAccountPhoto(event)"></label>
-            ${myAccountPhotoData ? `<button class="btn-danger-text" style="margin-left:10px;" onclick="removeMyAccountPhoto()">Remove</button>` : ''}
-          </div>
+      <section class="acct-hero">
+        <div class="acct-avatar">
+          ${shown ? `<img src="${shown}" alt="Your photo">` : `<span>${myInitials()}</span>`}
+          <label class="acct-cam" title="Change photo" aria-label="Change photo">📷
+            <input type="file" accept="image/*" hidden onchange="previewMyAccountPhoto(event)"></label>
         </div>
-        <div class="form-grid">
-          <div class="f-field full"><label>Full Name</label><input type="text" id="myAccountName" value="${u.name||''}"></div>
-          <div class="f-field"><label>Username</label><input type="text" value="${u.username}" disabled style="opacity:0.6;"></div>
-          <div class="f-field"><label>Role</label><input type="text" value="${u.role}" disabled style="opacity:0.6;"></div>
+        <div class="acct-id">
+          <h2>${escapeHtml(u.name || '')}</h2>
+          <div><span class="pill">${escapeHtml(u.role)}</span> <span class="acct-user">@${escapeHtml(u.username)}</span></div>
+          <small>${fromStaff ? 'Showing the photo from your staff record. Upload one here to use your own.' : 'Tap the camera to change your photo. Save to keep it.'}</small>
         </div>
-        <button class="btn btn-primary" style="margin-top:14px;" onclick="saveMyAccountProfile()">Save Profile</button>
-      </div>
-
-      <div class="profile-card" style="max-width:420px;">
-        <h4>🔑 Change Password</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Update your own login password.</p>
-        <div class="f-field" style="margin-bottom:10px;"><label>Current Password</label><input type="password" id="myCpCurrent"></div>
-        <div class="f-field" style="margin-bottom:10px;"><label>New Password</label><input type="password" id="myCpNew"></div>
-        <div class="f-field" style="margin-bottom:14px;"><label>Confirm New Password</label><input type="password" id="myCpConfirm"></div>
-        <button class="btn btn-primary btn-sm" onclick="changePasswordFromMyAccount()">Update Password</button>
-      </div>
-    `;
+        ${myAccountPhotoData ? `<button type="button" class="sf-btn sf-btn--danger" onclick="removeMyAccountPhoto()">Remove photo</button>` : ''}
+      </section>
+      <div class="acct-grid">
+        <section class="acct-card">
+          <h3>Profile</h3>
+          <div class="f-field"><label for="myAccountName">Full name</label><input type="text" class="input" id="myAccountName" value="${escapeHtml(u.name || '')}"></div>
+          <div class="acct-row2">
+            <div class="f-field"><label>Username</label><input type="text" class="input" value="${escapeHtml(u.username)}" disabled></div>
+            <div class="f-field"><label>Role</label><input type="text" class="input" value="${escapeHtml(u.role)}" disabled></div>
+          </div>
+          <button type="button" class="sf-btn sf-btn--primary sf-btn--lg" onclick="saveMyAccountProfile()">Save profile</button>
+        </section>
+        <section class="acct-card">
+          <h3>🔑 Change password</h3>
+          <p class="acct-hint">Choose something only you know. At least 4 characters.</p>
+          <div class="f-field"><label for="myCpCurrent">Current password</label><input type="password" class="input" id="myCpCurrent" autocomplete="current-password"></div>
+          <div class="f-field"><label for="myCpNew">New password</label><input type="password" class="input" id="myCpNew" autocomplete="new-password"></div>
+          <div class="f-field"><label for="myCpConfirm">Confirm new password</label><input type="password" class="input" id="myCpConfirm" autocomplete="new-password"></div>
+          <label class="acct-show"><input type="checkbox" onchange="['myCpCurrent','myCpNew','myCpConfirm'].forEach(i=>document.getElementById(i).type=this.checked?'text':'password')"> Show passwords</label>
+          <button type="button" class="sf-btn sf-btn--soft sf-btn--lg" onclick="changePasswordFromMyAccount()">Update password</button>
+        </section>
+      </div>`;
   }
   function previewMyAccountPhoto(e){
     readImageFileWithSizeLimit(e, dataUrl => {
@@ -337,32 +343,38 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     myAccountPhotoData = '';
     renderMyAccountBody();
   }
+  // Own-account changes go through /api/account/*, which every signed-in role
+  // may use for their OWN record (the generic users API is Admin-only).
   async function saveMyAccountProfile(){
-    const u = users.find(x => x.username === currentUser.username);
-    if(!u) return;
     const name = document.getElementById('myAccountName').value.trim();
     if(!name){ showToast('Enter your name.'); return; }
-    u.name = name;
-    u.photo = myAccountPhotoData;
-    await storageSet(USERS_KEY, users);
+    try{
+      const res = await fetch('/api/account/profile', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, photo: myAccountPhotoData }) });
+      const data = await res.json().catch(() => ({}));
+      if(!res.ok){ showToast(data.error || 'Could not save your profile.'); return; }
+    }catch(e){ showToast('Could not reach the server. Try again.'); return; }
     currentUser.name = name;
+    currentUser.photo = myAccountPhotoData;
+    const rec = users.find(x => x.id === currentUser.id);
+    if(rec){ rec.name = name; rec.photo = myAccountPhotoData; }
     document.getElementById('sbUserName').textContent = name;
     updateSidebarAvatar();
+    renderMyAccountBody();
     showToast('Profile updated.', 'burst');
   }
   async function changePasswordFromMyAccount(){
     const current = document.getElementById('myCpCurrent').value;
     const next = document.getElementById('myCpNew').value;
     const confirm2 = document.getElementById('myCpConfirm').value;
-    const u = users.find(x => x.username === currentUser.username);
-    if(!u || !(await verifyLogin(u.username, current))){ showToast('Current password is incorrect.'); return; }
+    if(!current){ showToast('Enter your current password.'); return; }
     if(!next || next.length < 4){ showToast('New password must be at least 4 characters.'); return; }
     if(next !== confirm2){ showToast('New password and confirmation do not match.'); return; }
-    u.password = next;
-    await storageSet(USERS_KEY, users);
-    document.getElementById('myCpCurrent').value = '';
-    document.getElementById('myCpNew').value = '';
-    document.getElementById('myCpConfirm').value = '';
+    try{
+      const res = await fetch('/api/account/password', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ current, next }) });
+      const data = await res.json().catch(() => ({}));
+      if(!res.ok){ showToast(data.error || 'Could not update the password.'); return; }
+    }catch(e){ showToast('Could not reach the server. Try again.'); return; }
+    ['myCpCurrent','myCpNew','myCpConfirm'].forEach(id => { document.getElementById(id).value = ''; });
     showToast('Password updated.', 'burst');
   }
 

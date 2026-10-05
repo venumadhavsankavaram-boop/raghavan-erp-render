@@ -3440,6 +3440,50 @@ app.post('/api/logout', async (req, res) => {
   }
 });
 
+// ---------- Self-service account (any signed-in user, own record only) ----------
+// 'users' is Admin-only for writes (see the resource === 'users' gate in the
+// generic handler), which is right for managing OTHER people's logins but
+// meant a Teacher/Accountant/etc. could never save their own photo, name or
+// password — the request was refused and the change silently stayed local.
+// These two endpoints let a signed-in user change only their OWN name, photo
+// and password: the target row always comes from the session, never from the
+// request body, so nobody can use them to touch another account or role.
+app.put('/api/account/profile', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.id === 'vendor-support') return res.status(403).json({ error: 'Not available for this session.' });
+    const name = String((req.body && req.body.name) || '').trim();
+    const photo = String((req.body && req.body.photo) || '');
+    if (!name) return res.status(400).json({ error: 'Enter your name.' });
+    if (name.length > 120) return res.status(400).json({ error: 'Name is too long.' });
+    if (photo && !/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(photo)) return res.status(400).json({ error: 'Photo must be an image.' });
+    if (photo.length > 3 * 1024 * 1024) return res.status(400).json({ error: 'Photo is too large. Please choose a smaller image.' });
+    await sql`UPDATE users SET name = ${name}, photo = ${photo || null} WHERE id = ${req.authUser.id} AND deleted_at IS NULL`;
+    return res.status(200).json({ ok: true, name, photo });
+  } catch (err) {
+    console.error('account profile error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.post('/api/account/password', async (req, res) => {
+  try {
+    if (!req.authUser || req.authUser.id === 'vendor-support') return res.status(403).json({ error: 'Not available for this session.' });
+    const current = String((req.body && req.body.current) || '');
+    const next = String((req.body && req.body.next) || '');
+    if (next.length < 4) return res.status(400).json({ error: 'New password must be at least 4 characters.' });
+    const rows = await sql`SELECT password FROM users WHERE id = ${req.authUser.id} AND deleted_at IS NULL`;
+    if (!rows.length) return res.status(401).json({ error: 'Account no longer exists.' });
+    const ok = await bcrypt.compare(current, rows[0].password || '');
+    if (!ok) return res.status(400).json({ error: 'Current password is incorrect.' });
+    const hash = await bcrypt.hash(next, 10);
+    await sql`UPDATE users SET password = ${hash} WHERE id = ${req.authUser.id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('account password error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
 // Accepts a short-lived, signed troubleshooting link from the Vendor
 // Dashboard (Schools tab → Support Login) — see vendor-support-login.js's
 // own header comment and README.md's "Support Login" section. The token

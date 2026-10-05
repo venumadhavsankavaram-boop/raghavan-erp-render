@@ -439,6 +439,40 @@
   .login-logo-wrap .login-logo{
     width:56px; height:56px; margin:0; box-shadow:0 6px 16px -6px rgba(var(--login-accent-rgb),0.5);
   }
+
+  /* Sign-in loader (module 01b): replaces the form while connecting. */
+  .login-loader{display:flex; flex-direction:column; align-items:center; gap:14px; padding:6px 0 4px;}
+  .login-loader[hidden]{display:none;}
+  .login-card.is-loading .login-audience-toggle,
+  .login-card.is-loading #loginForm,
+  .login-card.is-loading .login-sub,
+  .login-card.is-loading .settings-link,
+  .login-card.is-loading #forgotForm{display:none !important;}
+  .ll-art{width:190px; height:auto; overflow:visible;}
+  .ll-d{stroke-dasharray:var(--len,260); stroke-dashoffset:var(--len,260); animation:llDraw 2.4s ease-in-out infinite;}
+  .ll-school .ll-d:nth-child(2){animation-delay:.15s} .ll-school .ll-d:nth-child(3){animation-delay:.3s}
+  .ll-school .ll-d:nth-child(4){animation-delay:.5s}  .ll-school .ll-d:nth-child(5),.ll-school .ll-d:nth-child(6){animation-delay:.7s}
+  .ll-book .ll-d{animation-delay:.9s}
+  @keyframes llDraw{0%{stroke-dashoffset:var(--len,260)} 45%,80%{stroke-dashoffset:0} 100%{stroke-dashoffset:calc(var(--len,260) * -1)}}
+  .ll-spark{animation:llTwinkle 1.8s ease-in-out infinite; transform-box:fill-box; transform-origin:center;}
+  .ll-s2{animation-delay:.5s} .ll-s3{animation-delay:1s}
+  @keyframes llTwinkle{0%,100%{opacity:.15; transform:scale(.6)} 50%{opacity:1; transform:scale(1.1)}}
+  .ll-text{font-size:0.86rem; font-weight:600; color:var(--ink); text-align:center; min-height:1.3em;}
+  .ll-bar{width:78%; height:6px; border-radius:999px; background:var(--border); overflow:hidden;}
+  .ll-bar span{display:block; height:100%; width:0; border-radius:inherit; background:linear-gradient(90deg,var(--teal),var(--login-accent-soft)); transition:width .5s ease;}
+  .ll-bar span.is-creep{transition:width 9s cubic-bezier(.1,.6,.3,1);}
+  .ll-check{opacity:0;} .ll-ring,.ll-tick{stroke-dasharray:300; stroke-dashoffset:300;}
+  .login-loader.is-done .ll-school,.login-loader.is-done .ll-book,.login-loader.is-done .ll-sparks{opacity:.12; animation:none;}
+  .login-loader.is-done .ll-d{animation:none; stroke-dashoffset:0;}
+  .login-loader.is-done .ll-check{opacity:1;}
+  .login-loader.is-done .ll-ring,.login-loader.is-done .ll-tick{animation:llTick .5s ease-out forwards;}
+  .login-loader.is-done .ll-tick{animation-delay:.2s;}
+  @keyframes llTick{to{stroke-dashoffset:0}}
+  @media (prefers-reduced-motion:reduce){
+    .ll-d{animation:none; stroke-dashoffset:0;} .ll-spark{animation:none; opacity:.8;}
+    .ll-art{animation:llPulse 1.6s ease-in-out infinite;}
+    @keyframes llPulse{50%{opacity:.55}}
+  }
   .login-card-footer{
     margin-top:22px; padding-top:16px; border-top:1px dashed var(--border);
     font-size:0.7rem; color:var(--ink-soft); display:flex; align-items:center; justify-content:center; gap:6px;
@@ -472,6 +506,32 @@
   .sb-logout-btn:hover{background:rgba(255,255,255,0.18); border-color:rgba(255,255,255,0.3); transform:translateY(-1px);}
   .sb-logout-btn:active{transform:translateY(0);}
   .sb-logout-btn:focus-visible{outline:2px solid var(--gold-soft); outline-offset:2px;}
+
+  /* Sidebar profile chip: only photo + name show; the rest opens on click. */
+  .sb-user-footer{position:relative;}
+  .sb-chip{display:flex; align-items:center; gap:10px; width:100%; padding:8px 10px; border-radius:14px; cursor:pointer; text-align:left;
+    background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.14); color:#fff; font:inherit; transition:background .15s, border-color .15s;}
+  .sb-chip:hover,.sb-chip[aria-expanded="true"]{background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.28);}
+  .sb-chip:focus-visible{outline:2px solid var(--gold-soft); outline-offset:2px;}
+  .sb-chip #sbUserAvatar{width:40px !important; height:40px !important;}
+  .sb-chip-text{display:flex; flex-direction:column; align-items:flex-start; min-width:0; flex:1;}
+  .sb-chip-text .sb-user-name{max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .sb-chip-text .sb-user-role{margin-top:2px;}
+  .sb-chip-caret{font-size:1rem; opacity:.7; transition:transform .2s;}
+  .sb-chip[aria-expanded="true"] .sb-chip-caret{transform:rotate(180deg);}
+  .sb-chip-dot{position:absolute; top:4px; right:4px; width:11px; height:11px; border-radius:50%; background:var(--magenta); box-shadow:0 0 0 3px rgba(209,16,115,.3);}
+  .sb-menu{position:absolute; left:0; right:0; bottom:calc(100% - 4px); z-index:30; padding:8px; border-radius:16px;
+    background:var(--brand-navy-deep); border:1px solid rgba(255,255,255,0.18); box-shadow:0 18px 40px -12px rgba(0,0,0,.6);
+    transform-origin:bottom center; animation:sbMenuIn .16s ease-out;}
+  .sb-menu[hidden]{display:none;}
+  .sb-menu .approvals-bell-btn{justify-content:flex-start; margin-bottom:4px; background:transparent; border-color:transparent;}
+  .sb-menu .approvals-bell-btn:hover{background:rgba(255,255,255,0.12);}
+  .sb-menu .approvals-bell-btn:last-child{margin-bottom:0;}
+  .sb-menu .approvals-bell-btn{gap:10px;} .sb-menu .approvals-bell-icon{margin-right:0;}
+  .sb-menu .sb-signout{color:#ffb4d6; margin-top:4px; border-top:1px solid rgba(255,255,255,0.12); border-radius:0 0 9px 9px; padding-top:11px;}
+  .sb-menu .approvals-bell-badge{margin-left:auto;}
+  @keyframes sbMenuIn{from{opacity:0; transform:translateY(6px) scale(.98);} to{opacity:1; transform:none;}}
+  @media (prefers-reduced-motion:reduce){ .sb-menu{animation:none;} }
 
   /* ===== USERS TABLE ===== */
   .role-pill{
@@ -1602,6 +1662,65 @@
     .iv-toolbar-actions{margin-left:0; width:100%;}
     .iv-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));}
   }
+
+  /* ===== My Account (module 22) ===== */
+  .acct-hero{display:flex; align-items:center; gap:20px; flex-wrap:wrap; padding:22px 24px; margin-bottom:20px; border-radius:20px;
+    background:linear-gradient(135deg,var(--white),var(--cream)); border:1px solid var(--border); box-shadow:var(--shadow);}
+  .acct-avatar{position:relative; width:96px; height:96px; border-radius:50%; background:var(--brand-navy); color:#fff; flex:none;
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1.9rem; box-shadow:0 0 0 4px var(--white), 0 0 0 6px var(--teal);}
+  .acct-avatar img{width:100%; height:100%; border-radius:50%; object-fit:cover;}
+  .acct-cam{position:absolute; right:-4px; bottom:-2px; width:34px; height:34px; border-radius:50%; background:var(--magenta); color:#fff; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; font-size:0.95rem; border:3px solid var(--white); box-shadow:var(--shadow);}
+  .acct-cam:focus-within{outline:2px solid var(--teal); outline-offset:2px;}
+  .acct-id{flex:1; min-width:200px;} .acct-id h2{font-size:1.4rem; margin-bottom:6px;}
+  .acct-user{font-size:0.82rem; color:var(--ink-soft); margin-left:6px;}
+  .acct-id small{display:block; margin-top:8px; color:var(--ink-soft); font-size:0.76rem;}
+  .acct-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:20px; align-items:start;}
+  .acct-card{background:var(--white); border:1px solid var(--border); border-radius:20px; box-shadow:var(--shadow); padding:22px 24px; display:flex; flex-direction:column; gap:14px;}
+  .acct-card h3{font-size:1rem;} .acct-hint{font-size:0.8rem; color:var(--ink-soft); margin-top:-6px;}
+  .acct-card .f-field{display:flex; flex-direction:column; gap:6px;}
+  .acct-card .f-field label{font-size:0.74rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft);}
+  .acct-card .input,.acct-card input:not([type=checkbox]){max-width:none; min-width:0; width:100%; box-sizing:border-box;}
+  .acct-row2 > *{min-width:0;}
+  .acct-card .input:disabled{opacity:.6;}
+  .acct-row2{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+  .acct-show{display:flex; align-items:center; gap:8px; font-size:0.8rem; color:var(--ink-soft); cursor:pointer;}
+  .acct-card .sf-btn{align-self:flex-start;}
+
+  /* ===== Modern polish (phase 1): shared look for every page ===== */
+  .main{background:
+    radial-gradient(900px 420px at 100% -10%, rgba(203,154,46,0.10), transparent 60%),
+    radial-gradient(700px 380px at -10% 0%, rgba(24,143,134,0.07), transparent 60%), var(--cream);}
+  .main > div:not([style*="display:none"]):not([style*="display: none"]){animation:pageIn .28s ease-out;}
+  @keyframes pageIn{from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:none;}}
+  .topbar h1{letter-spacing:-.01em;}
+  .topbar h1::after{content:''; display:block; width:44px; height:4px; border-radius:4px; margin-top:8px; background:linear-gradient(90deg,var(--magenta),var(--gold));}
+  .stat-card{border:1px solid var(--border); border-left-width:4px; border-radius:18px; background:linear-gradient(160deg,var(--white),var(--cream));}
+  .table-wrap{border:1px solid var(--border); border-radius:18px;}
+  tbody tr{transition:background .12s;}
+  tbody tr:hover{background:rgba(24,143,134,0.06);}
+  td,th{padding-top:13px; padding-bottom:13px;}
+  .pill{border-radius:999px; padding:3px 11px;}
+  .input,select,textarea.input{border-radius:12px; background:var(--white);}
+  .input:hover:not(:focus),select:hover:not(:focus){border-color:rgba(24,143,134,0.45);}
+  .input:focus,select:focus{box-shadow:0 0 0 4px rgba(24,143,134,0.16);}
+  .input::placeholder{color:var(--ink-soft); opacity:.7;}
+  .btn{border-radius:12px;}
+  .btn-ghost{background:var(--cream); border:1.5px solid var(--border);}
+  .btn-ghost:hover{background:var(--white);}
+  .btn-sm{border-radius:10px;}
+  .profile-card{border:1px solid var(--border); border-radius:18px;}
+  .modal{border-radius:24px; border:1px solid var(--border); box-shadow:0 30px 80px -30px rgba(22,16,51,.55);}
+  .modal-overlay{backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);}
+  .empty-state{border:1.5px dashed var(--border); border-radius:18px; margin:12px 0; background:linear-gradient(160deg,transparent,rgba(24,143,134,0.04));}
+  .empty-state b{font-size:1.15rem;}
+  .mf-tab{transition:color .15s, background .15s;}
+  .mf-tab:hover:not(.active){color:var(--navy); background:rgba(24,143,134,0.07);}
+  ::-webkit-scrollbar{width:10px; height:10px;}
+  ::-webkit-scrollbar-thumb{background:var(--border); border-radius:10px; border:2px solid transparent; background-clip:content-box;}
+  ::-webkit-scrollbar-thumb:hover{background:var(--ink-soft); background-clip:content-box; border:2px solid transparent;}
+  @media (prefers-reduced-motion:reduce){ .main > div{animation:none !important;} }
+  @media (max-width:820px){ .acct-row2{grid-template-columns:1fr;} .acct-hero{padding:18px;} }
 </style>
 <script>
   /* ===== AUTOMATIC WEBSITE THEME SYNC =====
@@ -1726,6 +1845,30 @@
       <button type="button" class="login-audience-btn" id="loginAudienceParentBtn" role="tab" aria-selected="false" onclick="setLoginAudience('parent')">Parent &amp; Student</button>
     </div>
 
+    <div class="login-loader" id="loginLoader" role="status" aria-live="polite" hidden>
+      <svg class="ll-art" viewBox="0 0 200 150" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <g class="ll-sparks" stroke="var(--login-accent-soft)">
+          <path class="ll-spark ll-s1" d="M30 30 v10 M25 35 h10"/><path class="ll-spark ll-s2" d="M172 44 v8 M168 48 h8"/><path class="ll-spark ll-s3" d="M158 18 v6 M155 21 h6"/>
+        </g>
+        <g class="ll-school" stroke="var(--login-accent)" stroke-width="3">
+          <path class="ll-d" d="M100 14 v-12 l16 5 -16 5"/>
+          <path class="ll-d" d="M54 52 L100 24 L146 52"/>
+          <path class="ll-d" d="M62 52 V100 H138 V52"/>
+          <path class="ll-d" d="M90 100 V76 a10 10 0 0 1 20 0 V100"/>
+          <rect class="ll-d" x="70" y="62" width="12" height="12" rx="2"/><rect class="ll-d" x="118" y="62" width="12" height="12" rx="2"/>
+          <path class="ll-d" d="M48 100 H152"/>
+        </g>
+        <g class="ll-book" stroke="var(--login-accent-soft)" stroke-width="3.5">
+          <path class="ll-d" d="M100 122 C88 114 66 114 50 120 V140 C66 134 88 134 100 142 C112 134 134 134 150 140 V120 C134 114 112 114 100 122 Z"/>
+          <path class="ll-d" d="M100 122 V142"/>
+        </g>
+        <g class="ll-check" stroke="var(--teal)" stroke-width="7">
+          <circle cx="100" cy="76" r="44" class="ll-ring"/><path d="M80 78 L94 92 L122 62" class="ll-tick"/>
+        </g>
+      </svg>
+      <div class="ll-text" id="loginLoaderText">Signing you in…</div>
+      <div class="ll-bar"><span id="loginLoaderBar"></span></div>
+    </div>
     <form id="loginForm" onsubmit="return submitLogin(event)">
       <div class="f-field" style="margin-bottom:14px; text-align:left;">
         <label>Username</label>
@@ -1858,22 +2001,29 @@
     </div>
     </div>
     <div class="sb-user-footer">
-      <button type="button" class="approvals-bell-btn" id="approvalsBellBtn" onclick="openApprovalsCenter()" style="display:none;">
-        <span class="approvals-bell-icon">🔔</span><span class="sb-btn-label">Approvals</span>
-        <span class="approvals-bell-badge" id="approvalsBellBadge">0</span>
-      </button>
-      <button type="button" class="approvals-bell-btn" id="applyLeaveBtn" onclick="openStaffLeaveModal()" style="display:none;">
-        <span class="approvals-bell-icon">🌴</span><span class="sb-btn-label">Apply Leave</span>
-      </button>
-      <div onclick="switchView('myaccount')" style="cursor:pointer; display:flex; align-items:center; gap:10px; margin-bottom:10px; border-radius:8px; padding:6px; margin:-6px -6px 6px;" onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='none'">
-        <div id="sbUserAvatar" style="width:42px; height:42px; border-radius:50%; background:rgba(255,255,255,0.14); display:flex; align-items:center; justify-content:center; font-weight:700; color:#fff; overflow:hidden; flex-shrink:0; font-size:0.95rem;">—<span class="sb-user-online-dot" title="Signed in"></span></div>
-        <div style="overflow:hidden; min-width:0;">
-          <div class="sb-user-name" id="sbUserName" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">—</div>
-          <div class="sb-user-role" id="sbUserRole" style="margin-bottom:0;">—</div>
-        </div>
+      <div class="sb-menu" id="sbUserMenu" role="menu" aria-label="Account menu" hidden>
+        <button type="button" role="menuitem" class="approvals-bell-btn" id="approvalsBellBtn" onclick="closeSbUserMenu(); openApprovalsCenter()" style="display:none;">
+          <span class="approvals-bell-icon">🔔</span><span class="sb-btn-label">Approvals</span>
+          <span class="approvals-bell-badge" id="approvalsBellBadge">0</span>
+        </button>
+        <button type="button" role="menuitem" class="approvals-bell-btn" id="applyLeaveBtn" onclick="closeSbUserMenu(); openStaffLeaveModal()" style="display:none;">
+          <span class="approvals-bell-icon">🌴</span><span class="sb-btn-label">Apply Leave</span>
+        </button>
+        <button type="button" role="menuitem" class="approvals-bell-btn" onclick="closeSbUserMenu(); switchView('myaccount')">
+          <span class="approvals-bell-icon">👤</span><span class="sb-btn-label">My Account</span>
+        </button>
+        <button type="button" role="menuitem" class="approvals-bell-btn" id="themeToggleBtn" onclick="toggleTheme()">🌙 <span class="sb-btn-label">Dark Mode</span></button>
+        <button type="button" role="menuitem" class="approvals-bell-btn sb-signout" onclick="closeSbUserMenu(); logout()"><span class="approvals-bell-icon">🚪</span><span class="sb-btn-label">Sign Out</span></button>
       </div>
-      <button class="sb-logout-btn" id="themeToggleBtn" onclick="toggleTheme()" style="margin-bottom:8px;">🌙 <span class="sb-btn-label">Dark Mode</span></button>
-      <button class="sb-logout-btn" onclick="logout()">🚪<span class="sb-btn-label"> Sign Out</span></button>
+      <button type="button" class="sb-chip" id="sbChip" aria-haspopup="menu" aria-expanded="false" aria-controls="sbUserMenu" onclick="toggleSbUserMenu(event)">
+        <div id="sbUserAvatar" style="width:42px; height:42px; border-radius:50%; background:rgba(255,255,255,0.14); display:flex; align-items:center; justify-content:center; font-weight:700; color:#fff; overflow:hidden; flex-shrink:0; font-size:0.95rem;">—<span class="sb-user-online-dot" title="Signed in"></span></div>
+        <span class="sb-chip-text">
+          <span class="sb-user-name" id="sbUserName">—</span>
+          <span class="sb-user-role" id="sbUserRole">—</span>
+        </span>
+        <span class="sb-chip-dot" id="sbChipDot" hidden aria-label="Pending approvals"></span>
+        <span class="sb-chip-caret" aria-hidden="true">⌃</span>
+      </button>
     </div>
   </aside>
 
@@ -3406,7 +3556,9 @@
 
 <script src="modules/00-core-ui-shell.js"></script>
 <script src="modules/01-sidebar-search-validation-auth.js"></script>
+<script src="modules/01b-login-loader.js"></script>
 <script src="modules/02-roles-permissions.js"></script>
+<script src="modules/02b-sidebar-user-menu.js"></script>
 <script src="modules/03-view-switching.js"></script>
 <script src="modules/04-finance-data-layer.js"></script>
 <script src="modules/04a-fee-schedule.js"></script>
