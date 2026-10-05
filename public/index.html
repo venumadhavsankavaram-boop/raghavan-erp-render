@@ -1525,12 +1525,16 @@
   .iv-find{display:flex; align-items:center; gap:12px; margin-bottom:12px;}
   .iv-find .iv-search{max-width:none;}
   .iv-count{font-size:0.78rem; color:var(--ink-soft); white-space:nowrap;}
-  .iv-chips{display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; margin-bottom:8px;}
-  .iv-chips button{flex:none; display:inline-flex; align-items:center; gap:7px; border:1px solid var(--border); background:var(--white); color:var(--ink-soft); font:inherit; font-size:0.78rem; font-weight:600; padding:6px 13px; border-radius:999px; cursor:pointer;}
-  .iv-chips button em{font-style:normal; font-size:0.68rem; background:var(--cream); border-radius:999px; padding:1px 7px;}
-  .iv-chips button.active{background:var(--brand-navy); color:var(--white); border-color:transparent;}
+  .iv-chips{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;}
+  .iv-chips button{display:inline-flex; align-items:center; gap:7px; border:1.5px solid var(--border); background:var(--white); color:var(--ink); font:inherit; font-size:0.8rem; font-weight:700; padding:8px 15px; border-radius:999px; cursor:pointer; box-shadow:0 2px 6px -3px rgba(22,16,51,.25); transition:transform .1s, border-color .1s, box-shadow .1s;}
+  .iv-chips button:hover{transform:translateY(-1px); border-color:var(--teal); box-shadow:0 6px 12px -6px rgba(24,143,134,.5);}
+  .iv-chips button:focus-visible{outline:2px solid var(--teal); outline-offset:2px;}
+  .iv-chips button em{font-style:normal; font-size:0.7rem; font-weight:800; background:var(--gold); color:#1A1530; border-radius:999px; padding:1px 8px;}
+  .iv-chips button.active{background:linear-gradient(135deg,var(--magenta),var(--magenta-deep)); color:#fff; border-color:transparent; box-shadow:0 8px 16px -8px rgba(209,16,115,.7);}
   .iv-chips button.active em{background:rgba(255,255,255,.2);}
-  .iv-chips--sub button{font-size:0.72rem; padding:4px 11px;}
+  .iv-chips--sub{padding:8px 10px; background:var(--cream); border-radius:14px; border:1px dashed var(--border);}
+  .iv-chips--sub button{font-size:0.76rem; padding:6px 13px; box-shadow:none;}
+  .iv-chips--sub button.active{background:linear-gradient(135deg,var(--teal),#0f6a63);}
   .iv-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:12px; margin-top:6px;}
   .iv-prod{position:relative; display:flex; flex-direction:column; align-items:flex-start; gap:6px; text-align:left; padding:14px; border-radius:16px; border:1px solid var(--border); background:var(--white); font:inherit; color:var(--ink); cursor:pointer; box-shadow:var(--shadow); transition:transform .12s, border-color .12s;}
   .iv-prod:hover:not(:disabled){transform:translateY(-2px); border-color:var(--teal);}
@@ -1542,8 +1546,9 @@
   .iv-prod-foot{display:flex; flex-direction:column; gap:2px; font-size:0.95rem;}
   .iv-stock{font-size:0.7rem; font-weight:600;}
   .iv-stock--ok{color:var(--success-ink);} .iv-stock--low{color:var(--warning-ink);} .iv-stock--out{color:var(--danger-ink);}
-  .iv-add,.iv-incart{margin-top:2px; font-size:0.74rem; font-weight:700; padding:4px 11px; border-radius:999px;}
-  .iv-add{background:var(--cream); color:var(--navy); border:1px solid var(--border);}
+  .iv-add,.iv-incart{margin-top:4px; font-size:0.8rem; font-weight:700; padding:7px 0; border-radius:10px; width:100%; text-align:center;}
+  .iv-add{background:linear-gradient(135deg,var(--teal),#0f6a63); color:#fff; box-shadow:0 6px 12px -6px rgba(24,143,134,.7);}
+  .iv-prod:hover .iv-add{filter:brightness(1.1);}
   .iv-incart{background:var(--teal); color:#fff;}
   .iv-cart,.iv-card{background:var(--white); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:18px;}
   .iv-cart{position:sticky; top:16px;}
@@ -1574,8 +1579,8 @@
   .iv-disc{width:78px; padding:6px 8px; border:1px solid var(--border); border-radius:10px; background:var(--white); color:var(--ink); font:inherit;}
   .iv-fill{display:flex; width:100%;} .iv-fill button{flex:1;}
   .iv-modes,.iv-quick{display:flex; flex-wrap:wrap; gap:6px;}
-  .iv-modes button,.iv-quick button{border:1px solid var(--border); background:var(--cream); color:var(--ink-soft); font:inherit; font-size:0.78rem; font-weight:600; padding:6px 12px; border-radius:999px; cursor:pointer;}
-  .iv-modes button.active{background:var(--brand-navy); color:var(--white); border-color:transparent;}
+  .iv-modes button,.iv-quick button{border:1.5px solid var(--border); background:var(--white); color:var(--ink); font:inherit; font-size:0.8rem; font-weight:700; padding:8px 14px; border-radius:999px; cursor:pointer;}
+  .iv-modes button.active{background:linear-gradient(135deg,var(--magenta),var(--magenta-deep)); color:#fff; border-color:transparent;}
   .iv-quick{margin-top:8px;}
   .iv-quick button:hover{border-color:var(--teal); color:var(--teal);}
   .iv-balance{margin-top:10px; font-size:0.78rem; font-weight:600; color:var(--success-ink);}
