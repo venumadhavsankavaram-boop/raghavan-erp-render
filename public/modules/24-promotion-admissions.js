@@ -86,15 +86,6 @@ let admissionsView = 'grid'; // grid | section | profile | search
 
   let expandedClass = '';
 
-  function renderClassGrid(body){
-    body.innerHTML = buildModernClassGrid(
-      CLASS_LEVELS,
-      (cls, sec) => students.filter(s => s.className===cls && s.section===sec && statusMatches(s)).length,
-      cls => `toggleClassExpand('${cls}')`,
-      (cls, sec) => `openSection('${cls}','${sec}')`,
-      cls => expandedClass === cls
-    );
-  }
 
   function toggleClassExpand(cls){
     expandedClass = (expandedClass === cls) ? '' : cls;
@@ -114,39 +105,6 @@ let admissionsView = 'grid'; // grid | section | profile | search
     renderAdmissionsBody();
   }
 
-  function renderSectionList(body){
-    const rows = students
-      .filter(s => s.className===currentClass && s.section===currentSection && statusMatches(s))
-      .sort(compareByRoll);
-
-    const tableRows = rows.map((s,idx) => `
-      <tr onclick="rowClickToProfile(event,'${s.id}')" style="cursor:pointer;">
-        <td>${idx+1}</td>
-        <td class="name-cell">${s.firstName||''}</td>
-        <td>${s.lastName||''}</td>
-        <td>${s.email || '—'}</td>
-        <td>${s.fatherAddress || s.motherAddress || '—'}</td>
-        <td>${s.admDate || '—'}</td>
-        <td>
-          ${canDo('admissions','edit') ? `<button class="btn-edit-text" onclick="event.stopPropagation(); editStudent('${s.id}')">Edit</button>` : ''}
-          ${canDo('admissions','edit') ? `&nbsp;·&nbsp;<button class="btn-edit-text" onclick="event.stopPropagation(); toggleStudentActive('${s.id}')">${isActive(s) ? 'Mark Inactive' : 'Mark Active'}</button>` : ''}
-          ${(canDo('admissions','edit') && canDo('admissions','delete')) ? '&nbsp;·&nbsp;' : ''}
-          ${canDo('admissions','delete') ? `<button class="btn-danger-text" onclick="event.stopPropagation(); requestDeleteStudent('${s.id}')">Request Deletion</button>` : ''}
-        </td>
-      </tr>
-    `).join('');
-
-    body.innerHTML = `
-      <div class="breadcrumb"><a onclick="backToGrid()">All Classes</a> &nbsp;/&nbsp; ${currentClass} — Section ${currentSection}</div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Roll No</th><th>First Name</th><th>Last Name</th><th>Email</th><th>Address</th><th>Date of Joining</th><th></th></tr></thead>
-          <tbody>${tableRows}</tbody>
-        </table>
-        ${rows.length===0 ? `<div class="empty-state"><b>No students here yet</b>Click "+ Add Student" to admit the first student into ${currentClass} — ${currentSection}.</div>` : ''}
-      </div>
-    `;
-  }
 
   function rowClickToProfile(e, id){
     openProfile(id);
@@ -238,27 +196,6 @@ let admissionsView = 'grid'; // grid | section | profile | search
     `;
   }
 
-  function renderProfile(body){
-    const s = students.find(x => x.id === currentStudentId);
-    if(!s){ admissionsView = 'grid'; return renderAdmissionsBody(); }
-
-    body.innerHTML = `
-      <div class="breadcrumb"><a onclick="backToGrid()">All Classes</a> &nbsp;/&nbsp; <a onclick="openSection('${s.className}','${s.section}')">${s.className} — ${s.section}</a> &nbsp;/&nbsp; ${s.firstName} ${s.lastName}</div>
-      <div class="profile-head">
-        ${s.photo ? `<img class="profile-photo" src="${s.photo}">` : `<div class="profile-photo">${initials(s)}</div>`}
-        <div>
-          <h2>${s.firstName} ${s.lastName}</h2>
-          <div class="p-meta">${s.admissionNo} · ${s.className} — Section ${s.section} · <span class="pill">${s.status||'Active'}</span></div>
-        </div>
-        <div class="profile-actions">
-          ${canDo('admissions','edit') ? `<button class="btn btn-ghost" onclick="editStudent('${s.id}')">Edit</button>` : ''}
-          ${canDo('admissions','edit') ? `<button class="btn btn-ghost" onclick="toggleStudentActive('${s.id}')">${isActive(s) ? 'Mark Inactive' : 'Mark Active'}</button>` : ''}
-          ${canDo('admissions','delete') ? `<button class="btn btn-danger-text" style="border:1.5px solid var(--border); border-radius:10px; padding:11px 20px;" onclick="requestDeleteStudent('${s.id}')">Request Deletion</button>` : ''}
-        </div>
-      </div>
-      ${buildProfileCardsHTML(s)}
-    `;
-  }
 
   /* ===== Student/Parent self-service portal: My Profile / Fees / Marks / Notices =====
      One login (Student or Parent role) is linked to exactly one student record

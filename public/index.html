@@ -1721,6 +1721,31 @@
   ::-webkit-scrollbar-thumb:hover{background:var(--ink-soft); background-clip:content-box; border:2px solid transparent;}
   @media (prefers-reduced-motion:reduce){ .main > div{animation:none !important;} }
   @media (max-width:820px){ .acct-row2{grid-template-columns:1fr;} .acct-hero{padding:18px;} }
+
+  /* ===== Manage Student (module 24b) + shared class cards ===== */
+  .modern-class-grid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:18px;}
+  .modern-class-card{border-radius:20px;}
+  .modern-class-chevron{display:none;}
+  .modern-class-header{cursor:default; padding:20px 18px 12px;}
+  .modern-class-icon{width:46px; height:46px; border-radius:14px; font-size:1.3rem;}
+  .modern-class-name{font-size:1.08rem;}
+  .modern-class-chips{max-height:none !important; overflow:visible; padding:0 18px 18px !important;}
+  .modern-sec-chip{cursor:pointer; font-weight:700; border-radius:12px; padding:8px 13px;}
+  .modern-sec-chip:hover{border-color:var(--teal); transform:translateY(-1px);}
+  .std-who{display:flex; align-items:center; gap:12px;} .std-who small,.std-table td small{display:block; font-size:0.7rem; color:var(--ink-soft);}
+  .std-roll{font-weight:800; color:var(--ink-soft); width:52px;}
+  .std-row{cursor:pointer;}
+  .std-who b{white-space:nowrap;} .std-table td{white-space:nowrap;} .std-table td.sf-actions{white-space:normal; min-width:150px;} .std-table td.sf-actions .sf-btn{margin:2px 4px 2px 0;}
+  .std-hero{display:flex; align-items:center; gap:20px; flex-wrap:wrap; padding:24px; margin-bottom:22px; border-radius:22px; border:1px solid var(--border);
+    background:linear-gradient(135deg,var(--white),var(--cream)); box-shadow:var(--shadow);}
+  .std-hero .profile-photo{width:96px; height:96px; box-shadow:0 0 0 4px var(--white), 0 0 0 6px var(--gold);}
+  .std-hero-main{flex:1; min-width:220px;} .std-hero-main h2{font-size:1.5rem; margin-bottom:6px;}
+  .std-chips{display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;}
+  .std-chip{display:inline-flex; gap:6px; align-items:center; padding:5px 12px; border-radius:999px; background:var(--cream); border:1px solid var(--border); font-size:0.78rem; font-weight:600;}
+  .std-chip em{font-style:normal; font-weight:700; font-size:0.66rem; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft);}
+  .profile-grid .profile-card h4{font-size:0.8rem; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft); padding-bottom:10px; margin-bottom:6px; border-bottom:1px solid var(--border);}
+  .profile-row{padding:8px 0;}
+  @media (max-width:720px){ .sf-kpis{grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;} .std-hero{padding:18px;} }
 </style>
 <script>
   /* ===== AUTOMATIC WEBSITE THEME SYNC =====
@@ -3585,6 +3610,7 @@
 <script src="modules/22b-inventory-ui.js"></script>
 <script src="modules/23-inventory-sales-admin-tools.js"></script>
 <script src="modules/24-promotion-admissions.js"></script>
+<script src="modules/24b-student-ui.js"></script>
 <script src="modules/25-student-parent-portal-intro.js"></script>
 <script src="modules/26-student-parent-portal-tabs.js"></script>
 <script src="modules/27-more-actions-certificates.js"></script>
