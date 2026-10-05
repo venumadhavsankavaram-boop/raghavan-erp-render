@@ -3,7 +3,9 @@ const SETTINGS_KEY = "finance-settings";
   const FEE_STRUCTURE_KEY = "class-fee-structure";
   const ACADEMIC_YEARS_KEY = "academic-years";
   const CURRENT_AY_KEY = "current-academic-year";
-  const CATS = { fee: "Fee", bus: "Bus Fee", stock: "Stock", hostel: "Hostel" };
+  // Display labels only. The keys ('fee', 'bus', ...) are what payments and the
+  // fee structure store, so renaming a label never touches saved data.
+  const CATS = { fee: "Tuition Fee", bus: "Bus Fee", stock: "Stock", hostel: "Hostel" };
   function feeLabelFor(p){
     if(p.category === 'extra') return p.extraFeeName || 'Extra Fee';
     return CATS[p.category] || p.category;

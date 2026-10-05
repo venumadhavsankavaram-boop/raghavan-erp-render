@@ -754,21 +754,9 @@ let myProfileTab = 'notifications';
      sees) plus a Pay Online button per pending item, and a payment/receipt
      history with Print Receipt for anything already paid. --- */
   function renderMyFeesTab(body, s){
-    const { perCat, extras } = computeStudentFinance(s);
     const studentPayments = payments.filter(p => p.studentId === s.id).sort((a,b) => (b.date||'').localeCompare(a.date||''));
-    const catRows = Object.keys(CATS).filter(c => perCat[c].expected > 0).map(c => ({
-      type:'category', key:c, label:CATS[c],
-      total: perCat[c].expected, paid: perCat[c].collected, discount: perCat[c].discount,
-      outstanding: perCat[c].receivable, lateFee: computeLateFeeFor(perCat[c].receivable),
-    }));
-    const extraRows = extras.map(e => {
-      const paidAmt = Number(e.paidAmount) || 0;
-      const outstanding = Math.max((Number(e.amount)||0) - paidAmt, 0);
-      return { type:'extra', key: e.id, label: e.name, total: Number(e.amount)||0, paid: paidAmt, discount:0, outstanding, lateFee:0 };
-    });
-    const allRows = [...catRows, ...extraRows];
-    const pendingRows = allRows.filter(r => r.outstanding > 0);
-    const paidRows = allRows.filter(r => r.outstanding <= 0);
+    // Same rows (and instalment schedule) the office sees.
+    const { allRows, pendingRows, paidRows } = computePendingFeeRows(s);
     const totalOutstanding = pendingRows.reduce((sum,r) => sum + r.outstanding + r.lateFee, 0);
 
     body.innerHTML = `

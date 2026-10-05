@@ -1357,6 +1357,8 @@ const KV_KEY_TO_MODULE = {
   'discount-types': ['managefee'],
   'extra-fee-defs': ['managefee'],
   'late-fee-settings': ['managefee'],
+  // Per-fee-head remittance schedule (Yearly / Terms / Monthly) per academic year.
+  'fee-schedule': ['managefee'],
   'receipt-settings': ['managefee'],
   'grading-scale': ['exams', 'result'],
   'exam-types': ['exams', 'result'],
@@ -3364,7 +3366,9 @@ const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjec
 // that GET 403s for any role whose defaults don't include 'syllabus' (see
 // SERVER_ROLE_VIEWS — Student/Parent's is just ['myprofile']), silently
 // leaving the tab empty instead of erroring loudly.
-const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics'];
+// 'fee-schedule' added so a parent's Fees tab shows the same term due dates the
+// office sees (it holds only dates and percentages, nothing per-student).
+const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule'];
 
 app.post('/api/login', async (req, res) => {
   try {

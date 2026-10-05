@@ -1359,6 +1359,61 @@
   @keyframes moPulseRing{ 0%{transform:scale(.5); opacity:.8;} 100%{transform:scale(1.9); opacity:0;} }
   .mo-sync-badge.mode-error{background:#7a2e2e;}
 
+  /* ===== Fee Structure: Remittance Schedule panel (04b-fee-schedule-panel.js) ===== */
+  .fsch{background:var(--white); border-radius:20px; padding:24px; box-shadow:var(--shadow);}
+  .fsch-head{display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:18px;}
+  .fsch-head h3{font-size:1.1rem; color:var(--navy); margin-bottom:4px;}
+  .fsch-head p{font-size:0.84rem; color:var(--ink-soft); max-width:620px;}
+  .fsch-banner{background:rgba(203,154,46,0.12); border:1px solid rgba(203,154,46,0.35); border-radius:12px; padding:10px 14px; font-size:0.84rem; color:var(--ink); margin-bottom:16px;}
+  .fsch-grid{display:grid; gap:14px;}
+  .fsch-card{border:1.5px solid var(--border); border-radius:16px; padding:16px 18px;}
+  .fsch-card-head{display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;}
+  .fsch-card-head h4{display:flex; align-items:center; gap:8px; font-size:0.95rem; color:var(--navy); margin:0;}
+  .fsch-seg{display:inline-flex; background:var(--cream); border:1.5px solid var(--border); border-radius:999px; padding:3px;}
+  .fsch-seg button{border:none; background:none; color:var(--ink-soft); font:inherit; font-size:0.8rem; font-weight:600; padding:6px 14px; border-radius:999px; cursor:pointer;}
+  .fsch-seg button.on{background:var(--navy); color:var(--white);}
+  .fsch-seg button.on::before{content:'\2713\00a0';}
+  .fsch-seg button:disabled{cursor:default; opacity:0.75;}
+  .fsch-in{width:100%; min-width:0; max-width:none; padding:8px 10px; border:1.5px solid var(--border); border-radius:9px; font:inherit; font-size:0.84rem; background:var(--white); color:var(--ink);}
+  .fsch-in:focus{outline:none; border-color:var(--teal); box-shadow:0 0 0 3px rgba(24,143,134,0.15);}
+  .fsch-in:disabled{opacity:0.7;}
+  .fsch-term{display:grid; grid-template-columns:1.4fr 1fr 1fr 1fr 0.7fr auto; gap:10px; align-items:end; margin-bottom:10px;}
+  .fsch-term label{display:block; min-width:0;}
+  .fsch-term label::before{display:none;}
+  .fsch-term-head{align-items:center; margin-bottom:6px; font-size:0.72rem; font-weight:600; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.04em;}
+  .fsch-remove[disabled]{opacity:0.35; cursor:default;}
+  .fsch-term-actions{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:4px;}
+  .fsch-sharetotal{font-size:0.8rem; font-weight:700;}
+  .fsch-sharetotal.ok{color:var(--teal);}
+  .fsch-sharetotal.bad{color:var(--magenta);}
+  .fsch-monthly{display:grid; grid-template-columns:repeat(3, minmax(0, 220px)); gap:12px; align-items:end;}
+  .fsch-monthly label::before{display:none;}
+  .fsch-hint{font-size:0.78rem; color:var(--ink-soft); margin-top:8px;}
+  .fsch-errors{list-style:none; margin:10px 0 0; padding:0;}
+  .fsch-errors:empty{display:none;}
+  .fsch-errors li{position:relative; padding-left:20px; font-size:0.8rem; color:var(--magenta); margin-bottom:3px;}
+  .fsch-errors li::before{content:'\26A0'; position:absolute; left:0;}
+  .fsch-preview-head{display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin:28px 0 12px;}
+  .fsch-preview-head h4{font-size:0.95rem; color:var(--navy); margin:0;}
+  .fsch-preview-head label{display:flex; align-items:center; gap:8px; font-size:0.8rem; color:var(--ink-soft);}
+  .fsch-preview-head .fsch-in{width:auto;}
+  .fsch-prev-block{margin-bottom:16px;}
+  .fsch-prev-block h5{display:flex; align-items:center; gap:8px; font-size:0.84rem; color:var(--navy); margin:0 0 8px;}
+  .fsch-num{text-align:right;}
+  .fsch-actions{margin-top:22px; display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+  .fsch-actions .btn:disabled{opacity:0.5; cursor:not-allowed; box-shadow:none;}
+  .fsch-note{font-size:0.82rem; font-weight:600;}
+  .fsch-note.ok{color:var(--teal);}
+  .fsch-note.warn{color:var(--gold);}
+  .fsch-note.bad{color:var(--magenta);}
+  @media (max-width:720px){
+    .fsch{padding:18px 16px;}
+    .fsch-term{grid-template-columns:1fr 1fr; padding-bottom:12px; border-bottom:1px dashed var(--border);}
+    .fsch-term-head{display:none;}
+    .fsch-term label::before, .fsch-monthly label::before{display:block; content:attr(data-l); font-size:0.72rem; font-weight:600; color:var(--ink-soft); margin-bottom:4px;}
+    .fsch-monthly{grid-template-columns:1fr 1fr;}
+  }
+
 </style>
 <script>
   /* ===== AUTOMATIC WEBSITE THEME SYNC =====
@@ -3166,6 +3221,8 @@
 <script src="modules/02-roles-permissions.js"></script>
 <script src="modules/03-view-switching.js"></script>
 <script src="modules/04-finance-data-layer.js"></script>
+<script src="modules/04a-fee-schedule.js"></script>
+<script src="modules/04b-fee-schedule-panel.js"></script>
 <script src="modules/05-dashboard.js"></script>
 <script src="modules/06-payment-modal.js"></script>
 <script src="modules/07-manage-fee-module.js"></script>

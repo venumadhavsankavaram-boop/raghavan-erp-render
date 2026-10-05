@@ -2460,11 +2460,11 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     }).join('');
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:640px;">
-        Set the per-student amount for Admission Fee, Fee, Bus Fee, and Stock for each class. The Dashboard's Expected totals are computed automatically: Admission Fee applies only to students marked "New Admission"; Fee &amp; Stock apply to every active student in a class; Bus Fee applies only to students marked as needing transport.
+        Set the per-student yearly amount for Admission Fee, Tuition Fee, Bus Fee, and Stock for each class. The Dashboard's Expected totals are computed automatically: Admission Fee applies only to students marked "New Admission"; Tuition Fee &amp; Stock apply to every active student in a class; Bus Fee applies only to students marked as needing transport.
       </p>
       <div class="table-wrap" style="margin-bottom:20px;">
         <table>
-          <thead><tr><th>Class</th><th>Admission Fee (₹)</th><th>Fee (₹)</th><th>Bus Fee (₹)</th><th>Stock (₹)</th></tr></thead>
+          <thead><tr><th>Class</th><th>Admission Fee (₹)</th><th>Tuition Fee (₹)</th><th>Bus Fee (₹)</th><th>Stock (₹)</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -2474,7 +2474,9 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
         <input type="number" min="0" class="input" id="fsHostel" value="${financeSettings.hostel||0}" style="width:100%;" ${dis}>
       </div>
       ${canEditStruct ? `<button class="btn btn-primary" onclick="saveFeeStructure()">🏗️ Save Fee Structure</button>` : ''}
+      <div id="feeSchedulePanel" style="margin-top:36px;"></div>
     `;
+    renderFeeSchedulePanel();
   }
 
   async function saveFeeStructure(){

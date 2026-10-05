@@ -227,12 +227,25 @@ const FEE_TYPES_KEY = "fee-types";
   // Fees modal, so all three always agree on what's actually owed.
   function computePendingFeeRows(s){
     const { perCat, extras } = computeStudentFinance(s);
-    const catRows = Object.keys(CATS).filter(c => perCat[c].expected > 0).map(c => ({
-      type: 'category', key: c, label: CATS[c],
-      total: perCat[c].expected, paid: perCat[c].collected, discount: perCat[c].discount,
-      outstanding: perCat[c].receivable, lateFee: computeLateFeeFor(perCat[c].receivable),
-      dueDate: lateFeeSettings.dueDate || '—', frequency: 'Annually',
-    }));
+    const today = localISODate();
+    const FREQ = { yearly: 'Annually', terms: 'Terms', monthly: 'Monthly' };
+    const catRows = Object.keys(CATS).filter(c => perCat[c].expected > 0).map(c => {
+      // Installments are derived from the remittance schedule (Fee Structure);
+      // with no schedule saved they collapse to one full-year installment, so
+      // totals, outstanding and late fee match the pre-schedule behaviour.
+      const sch = studentCategorySchedule(c, perCat[c], today);
+      const next = sch.summary.firstUnpaid;
+      return {
+        type: 'category', key: c, label: CATS[c],
+        total: perCat[c].expected, paid: perCat[c].collected, discount: perCat[c].discount,
+        outstanding: perCat[c].receivable,
+        lateFee: scheduleLateFee(sch.installments, lateFeeSettings, new Date()),
+        dueDate: (next && next.due) || lateFeeSettings.dueDate || '—',
+        frequency: FREQ[sch.mode] || 'Annually',
+        mode: sch.mode, installments: sch.installments,
+        dueTillToday: sch.summary.dueTillToday, overdueAmount: sch.summary.overdueAmount,
+      };
+    });
     const extraRows = extras.map(e => {
       const paidAmt = Number(e.paidAmount) || 0;
       const outstanding = Math.max((Number(e.amount)||0) - paidAmt, 0);
@@ -523,6 +536,7 @@ const FEE_TYPES_KEY = "fee-types";
     const payDate = (dateInput && dateInput.value) ? dateInput.value : today;
     if(payDate > today){ showToast('Payment date can\'t be in the future.'); return; }
     let lastId = null;
+    const payCat = computeStudentFinance(student).perCat;
     entries.forEach(e => {
       if(e.type === 'extra'){
         const fee = studentExtraFees.find(x => x.id === e.key);
@@ -546,7 +560,7 @@ const FEE_TYPES_KEY = "fee-types";
         id: 'pay_' + Date.now() + '_' + e.key,
         receiptNo: nextReceiptNo(),
         studentId, studentName: student.name,
-        category: e.key, mode, amount: e.amt, discount: 0, instalment: '', date: payDate, note: '',
+        category: e.key, mode, amount: e.amt, discount: 0, instalment: instalmentLabelFor(e.key, payCat[e.key], e.amt), date: payDate, note: '',
         classAtPayment: student.className,
       };
       payments.push(record);

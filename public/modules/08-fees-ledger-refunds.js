@@ -107,6 +107,7 @@ let refundPaymentId = null;
     if(!student || !Array.isArray(heads) || !heads.length) return null;
     const receiptNo = nextReceiptNo();
     const created = [];
+    const payCat = computeStudentFinance(student).perCat;
     heads.forEach(h => {
       const take = Number(h.amount) || 0;
       if(take <= 0) return;
@@ -129,7 +130,7 @@ let refundPaymentId = null;
         const record = {
           id: 'pay_' + Date.now() + '_' + studentId + '_' + h.key,
           receiptNo, studentId, studentName: student.name,
-          category: h.key, mode, amount: take, discount: 0, instalment: '', date, note: note || '',
+          category: h.key, mode, amount: take, discount: 0, instalment: instalmentLabelFor(h.key, payCat[h.key], take), date, note: note || '',
           classAtPayment: student.className,
         };
         payments.push(record);
@@ -983,8 +984,17 @@ let refundPaymentId = null;
       const hostelBal = perCat.hostel.receivable;
       const total = tuitionBal + busBal + stockBal + hostelBal;
       if(total > 0){
+        // Remittance schedule: earliest unpaid due date, and what is payable by today.
+        let nextDue = '', dueTillToday = 0;
+        Object.keys(CATS).forEach(c => {
+          if(!(perCat[c].expected > 0) || !(perCat[c].receivable > 0)) return;
+          const sm = studentCategorySchedule(c, perCat[c]).summary;
+          dueTillToday += sm.dueTillToday;
+          const d = sm.firstUnpaid && sm.firstUnpaid.due;
+          if(d && (!nextDue || d < nextDue)) nextDue = d;
+        });
         list.push({
-          student: s, tuitionBal, busBal, stockBal, hostelBal, total,
+          student: s, tuitionBal, busBal, stockBal, hostelBal, total, nextDue, dueTillToday,
           parentPhone: s.fatherPhone || s.motherPhone || s.guardianPhone || '',
         });
       }
@@ -1019,7 +1029,7 @@ let refundPaymentId = null;
     if(defaulterFilters.phone) list = list.filter(d => (d.parentPhone||'').includes(defaulterFilters.phone));
     return list.map(d => ({
       'Student': d.student.firstName+' '+d.student.lastName, 'Class': d.student.className+' - '+d.student.section,
-      'Parent Phone': d.parentPhone || '', 'Due Date': lateFeeSettings.dueDate || '',
+      'Parent Phone': d.parentPhone || '', 'Due Date': d.nextDue || lateFeeSettings.dueDate || '', 'Due Till Today': d.dueTillToday,
       'Tuition Due': d.tuitionBal, 'Bus Due': d.busBal, 'Stock Due': d.stockBal, 'Hostel Due': d.hostelBal, 'Amount Due': d.total,
     }));
   }
@@ -1061,14 +1071,15 @@ let refundPaymentId = null;
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Student</th><th>Class</th><th>Parent Phone</th><th>Due Date</th><th>Amount</th><th></th></tr></thead>
+          <thead><tr><th>Student</th><th>Class</th><th>Parent Phone</th><th>Next Due</th><th>Due Till Today</th><th>Total Outstanding</th><th></th></tr></thead>
           <tbody>
           ${pageItems.map(d => `
             <tr>
               <td class="name-cell">${d.student.firstName} ${d.student.lastName}</td>
               <td><span class="pill">${d.student.className} - ${d.student.section}</span></td>
               <td>${d.parentPhone || '—'}</td>
-              <td>${lateFeeSettings.dueDate || '—'}</td>
+              <td>${d.nextDue || lateFeeSettings.dueDate || '—'}</td>
+              <td>${d.dueTillToday > 0 ? fmtMoney(d.dueTillToday) : '—'}</td>
               <td class="balance-tag due" title="Tuition: ${fmtMoney(d.tuitionBal)} · Bus: ${fmtMoney(d.busBal)} · Stock: ${fmtMoney(d.stockBal)} · Hostel: ${fmtMoney(d.hostelBal)}">${fmtMoney(d.total)}</td>
               <td>${canNotify ? `<button class="btn-edit-text" onclick="openNotifyModal('single','${d.student.id}')">Notify</button>` : ''}</td>
             </tr>`).join('')}

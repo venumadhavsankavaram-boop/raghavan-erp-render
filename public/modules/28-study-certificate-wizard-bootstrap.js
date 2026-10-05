@@ -518,7 +518,7 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
     // sum of all 29.
     return Promise.all([
       loadClassLevels(), loadSectionLevels(), loadClassSectionOverrides(),
-      loadSchoolInfo(), loadFinance(), loadFeeExtras(), loadAttendance(),
+      loadSchoolInfo(), loadFinance(), loadFeeExtras(), loadFeeSchedule(), loadAttendance(),
       loadExams(), loadRooms(), loadExamHallTickets(),
       loadExamRoomConfigs(), loadExamHolidays(), loadReportTemplates(),
       loadAdmitCardTemplates(), loadExamCoScholastic(),
