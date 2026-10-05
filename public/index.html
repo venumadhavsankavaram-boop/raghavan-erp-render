@@ -1748,13 +1748,13 @@
   @media (max-width:720px){ .sf-kpis{grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;} .std-hero{padding:18px;} }
 
   /* ===== Attendance roster (module 09b) ===== */
-  .at-summary{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px;}
+  .at-summary{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin-bottom:18px;}
   .at-kpi{display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:16px; background:var(--white); border:1px solid var(--border); box-shadow:var(--shadow);}
   .at-kpi > span{width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:1.05rem; color:#fff; flex:none;}
   .at-kpi b{display:block; font-size:1.5rem; line-height:1;} .at-kpi small{font-size:0.72rem; color:var(--ink-soft); font-weight:600;}
   .at-kpi--present > span{background:var(--teal);} .at-kpi--absent > span{background:var(--magenta);}
   .at-kpi--late > span{background:var(--gold); color:#1A1530;} .at-kpi--leave > span{background:var(--info);}
-  .at-rate{padding:14px 16px; border-radius:16px; background:var(--white); border:1px solid var(--border); box-shadow:var(--shadow);}
+  .at-rate{grid-column:1/-1; padding:14px 16px; border-radius:16px; background:var(--white); border:1px solid var(--border); box-shadow:var(--shadow);}
   .at-rate small{font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft);}
   .at-rate b{display:block; font-size:1.5rem; margin:2px 0 8px;}
   .at-rate-bar{height:7px; border-radius:99px; background:var(--border); overflow:hidden;}
