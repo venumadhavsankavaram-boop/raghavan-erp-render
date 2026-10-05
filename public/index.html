@@ -1864,6 +1864,21 @@
   .ft-pager .sf-btn:disabled{opacity:.45; cursor:not-allowed; transform:none;}
   .iv-toolbar select.input{width:auto; min-width:140px;}
   @media (max-width:720px){ .ft-card{padding:16px;} .ft-add .input{max-width:none;} .ft-pager{justify-content:center;} }
+
+  /* ---- Inventory Products: tile cards (module 22b) ---- */
+  .ivp-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:14px;}
+  .ivp{background:var(--white); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:16px 16px 14px; display:flex; flex-direction:column; gap:10px; transition:transform .15s, border-color .15s;}
+  .ivp:hover{transform:translateY(-2px); border-color:var(--teal);}
+  .ivp.is-disabled{opacity:.55;}
+  .ivp--low{border-top:3px solid var(--gold);} .ivp--out{border-top:3px solid var(--magenta);} .ivp--ok{border-top:3px solid var(--teal);}
+  .ivp-top{display:flex; align-items:center; gap:12px; min-width:0;}
+  .ivp-title{min-width:0; display:block;} .ivp-title b{color:var(--navy); font-size:0.95rem; overflow-wrap:anywhere;}
+  .ivp-title small{display:block; font-size:0.72rem; color:var(--ink-soft); margin-top:2px;}
+  .ivp-price{font-family:'Baloo 2',cursive; font-size:1.45rem; color:var(--navy); line-height:1;}
+  .ivp-stats{display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; font-size:0.78rem; color:var(--ink-soft);}
+  .ivp-stats b{color:var(--navy); font-size:0.9rem;} .ivp-stats b.iv-qty--low{color:var(--warning-ink);} .ivp-stats b.iv-qty--out{color:var(--danger-ink);}
+  .ivp .sf-actions{margin-top:auto; padding-top:10px; border-top:1px dashed var(--border);}
+  @media (max-width:720px){ .ivp-grid{grid-template-columns:1fr;} }
 </style>
 <script>
   /* ===== AUTOMATIC WEBSITE THEME SYNC =====

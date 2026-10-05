@@ -51,6 +51,14 @@ function ivSteps(active){
 
 /* ---------- 1. product list ---------- */
 
+// Products screen shows tile cards by default; the table stays one click away.
+let invListLayout = 'cards';
+function setInvListLayout(v){
+  invListLayout = v;
+  document.querySelectorAll('#ivViewSeg button').forEach(b => b.classList.toggle('active', b.dataset.v === v));
+  paintInvItemsRows();
+}
+
 function renderInventoryItemsList(body){
   const isAdmin = currentUser.role === 'Admin';
   const typeItems = inventoryItems.filter(it => (it.type || 'Sellable') === invFilterType);
@@ -79,6 +87,10 @@ function renderInventoryItemsList(body){
         <button type="button" class="${invFilterType === 'Non-Sellable' ? 'active' : ''}" onclick="setInvFilterType('Non-Sellable')">📋 Non-Sellable</button>
       </div>
       <input class="input iv-search" type="search" placeholder="Search products…" value="${escapeHtml(invSearchQuery)}" oninput="onInvItemsSearch(this.value)">
+      <div class="sf-segments" id="ivViewSeg" role="group" aria-label="Layout">
+        <button type="button" data-v="cards" class="${invListLayout === 'cards' ? 'active' : ''}" onclick="setInvListLayout('cards')">Cards</button>
+        <button type="button" data-v="table" class="${invListLayout === 'table' ? 'active' : ''}" onclick="setInvListLayout('table')">Table</button>
+      </div>
       <div class="iv-toolbar-actions">
         ${menu ? `<div class="iv-menu-wrap">
           <button type="button" class="sf-btn sf-btn--soft" onclick="toggleInvQuickMenu(event)">☰ Quick actions ▾</button>
@@ -88,15 +100,16 @@ function renderInventoryItemsList(body){
         ${canAdd ? sfBtn('soft', 'plus', 'Add Product', 'openInventoryItemEditor()') : ''}
       </div>
     </div>
-    <div class="sf-card">
+    <div class="ivp-grid" id="ivItemsGrid"></div>
+    <div class="sf-card" id="ivItemsTableCard">
       <div class="table-wrap" style="overflow-x:auto;">
         <table class="iv-table">
           <thead><tr><th>Product</th><th>Category</th><th>Stock</th><th>Sold</th><th>Price</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="ivItemsRows"></tbody>
         </table>
-        <div id="ivItemsEmpty"></div>
       </div>
     </div>
+    <div id="ivItemsEmpty"></div>
     <div id="vendorReturnModalWrap"></div>`;
   paintInvItemsRows();
 }
@@ -106,24 +119,52 @@ function onInvItemsSearch(value){
   paintInvItemsRows();
 }
 
-// Repaints only the rows, so typing in the search box never loses focus.
+// Repaints only the product area, so typing in the search box never loses focus.
+function ivItemActions(it){
+  const isAdmin = currentUser.role === 'Admin';
+  const disabled = it.active === false;
+  return [
+    canSub('inventory_sell', 'inventory', 'create') && !disabled && it.quantity > 0 ? sfBtn('primary', 'pay', 'Sell', `quickSellItem('${it.id}')`) : '',
+    canSub('inventory_items', 'inventory', 'edit') ? sfBtn('soft', '', 'Edit', `openInventoryItemEditor('${it.id}')`) : '',
+    canSub('inventory_items', 'inventory', 'edit') && it.quantity > 0 ? sfBtn('link', '', 'Return to vendor', `openVendorReturnModal('${it.id}')`) : '',
+    isAdmin ? sfBtn('link', '', disabled ? 'Enable' : 'Disable', `toggleInventoryItemActive('${it.id}')`) : '',
+    isAdmin ? sfBtn('danger', '', 'Delete', `deleteInventoryItem('${it.id}')`) : '',
+  ].join('');
+}
+
+function ivItemCard(it){
+  const sold = inventorySales.filter(s => s.itemId === it.id).reduce((sum, s) => sum + s.qty, 0);
+  const state = ivStockState(it);
+  const meta = [it.category || 'General', it.subCategory].filter(Boolean).map(escapeHtml).join(' · ');
+  return `<article class="ivp ivp--${state}${it.active === false ? ' is-disabled' : ''}">
+    <div class="ivp-top">
+      <span class="iv-mono" style="--tint:${ivTint(it.category || 'General')}">${ivMono(it.name)}</span>
+      <span class="ivp-title"><b>${escapeHtml(it.name)}</b>${it.size ? ` <span class="pill">${escapeHtml(it.size)}</span>` : ''}<small>${meta}</small></span>
+    </div>
+    <div class="ivp-price">${fmtMoney(it.sellingPrice)}</div>
+    <div class="ivp-stats">
+      <span>Stock <b class="iv-qty--${state}">${it.quantity}</b>${state !== 'ok' ? `<small> min ${it.threshold}</small>` : ''}</span>
+      <span>Sold <b>${sold}</b></span>
+      ${it.active === false ? '<span class="pill">Disabled</span>' : ivStockBadge(it)}
+    </div>
+    <div class="sf-actions">${ivItemActions(it)}</div>
+  </article>`;
+}
+
 function paintInvItemsRows(){
   const tbody = document.getElementById('ivItemsRows');
-  if(!tbody) return;
-  const isAdmin = currentUser.role === 'Admin';
+  const grid = document.getElementById('ivItemsGrid');
+  if(!tbody || !grid) return;
   const q = invSearchQuery.toLowerCase();
   const rows = inventoryItems.filter(it => (it.type || 'Sellable') === invFilterType && (!q || it.name.toLowerCase().includes(q)));
-  tbody.innerHTML = rows.map(it => {
+  const cards = invListLayout === 'cards';
+  grid.style.display = cards ? '' : 'none';
+  document.getElementById('ivItemsTableCard').style.display = cards ? 'none' : '';
+  grid.innerHTML = cards ? rows.map(ivItemCard).join('') : '';
+  tbody.innerHTML = cards ? '' : rows.map(it => {
     const sold = inventorySales.filter(s => s.itemId === it.id).reduce((sum, s) => sum + s.qty, 0);
     const state = ivStockState(it);
     const disabled = it.active === false;
-    const actions = [
-      canSub('inventory_sell', 'inventory', 'create') && !disabled && it.quantity > 0 ? sfBtn('primary', 'pay', 'Sell', `quickSellItem('${it.id}')`) : '',
-      canSub('inventory_items', 'inventory', 'edit') ? sfBtn('soft', '', 'Edit', `openInventoryItemEditor('${it.id}')`) : '',
-      canSub('inventory_items', 'inventory', 'edit') && it.quantity > 0 ? sfBtn('link', '', 'Return to vendor', `openVendorReturnModal('${it.id}')`) : '',
-      isAdmin ? sfBtn('link', '', disabled ? 'Enable' : 'Disable', `toggleInventoryItemActive('${it.id}')`) : '',
-      isAdmin ? sfBtn('danger', '', 'Delete', `deleteInventoryItem('${it.id}')`) : '',
-    ].join('');
     return `<tr class="${disabled ? 'is-disabled' : ''}">
       <td><div class="iv-name">
         <span class="iv-mono" style="--tint:${ivTint(it.category || 'General')}">${ivMono(it.name)}</span>
@@ -135,7 +176,7 @@ function paintInvItemsRows(){
       <td>${sold}</td>
       <td>${fmtMoney(it.sellingPrice)}</td>
       <td>${ivStockBadge(it)}</td>
-      <td class="sf-actions">${actions}</td>
+      <td class="sf-actions">${ivItemActions(it)}</td>
     </tr>`;
   }).join('');
   document.getElementById('ivItemsEmpty').innerHTML = rows.length ? '' :
