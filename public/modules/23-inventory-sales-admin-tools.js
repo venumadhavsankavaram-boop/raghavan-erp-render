@@ -374,31 +374,6 @@ const PENDING_APPROVALS_KEY = "pending-approvals";
     notifyRequesterOfDecision(a.requestedByUserId, `${typeLabel} request rejected`, `${currentUser.name} rejected your ${typeLabel.toLowerCase()} request.`, 'approval-decision');
   }
 
-  function renderPromotionsTab(body){
-    const rows = CLASS_LEVELS.map((c,idx) => {
-      const count = students.filter(s => s.className===c && isActive(s)).length;
-      const next = CLASS_LEVELS[idx+1];
-      const label = next ? `Promote to ${next}` : `Mark as Graduated`;
-      return `
-        <tr>
-          <td class="name-cell">${c}</td>
-          <td>${count} active student${count===1?'':'s'}</td>
-          <td><button class="btn btn-ghost btn-sm" ${count===0?'disabled':''} onclick="promoteClass('${c}')">${label}</button></td>
-        </tr>
-      `;
-    }).join('');
-    body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:640px;">
-        At year-end, promote every active student in a class to the next class (both sections move together, Section stays the same). 10th Class students are marked <b>Graduated</b> (status set to Inactive) instead of being moved further.
-      </p>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Class</th><th>Students</th><th></th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    `;
-  }
 
   async function promoteClass(cls){
     const idx = CLASS_LEVELS.indexOf(cls);

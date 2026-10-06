@@ -1369,44 +1369,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
   let permView = 'list';
   let permEditingRoleName = '';
 
-  function renderPermissionsTab(body){
-    if(permView === 'edit') return renderPermissionEditor(body);
-    // Student and Parent are deliberately left out here — they don't use the
-    // module-permission system at all. Their login always shows only "My
-    // Portal", scoped to their own linked child; there's no "view" checkbox
-    // that could safely mean "see every student's fees/marks" for them, so
-    // Roles & Permissions doesn't offer to edit them.
-    const builtIns = ROLES.filter(name => name !== 'Student' && name !== 'Parent').map(name => ({ name, builtIn: true, override: findRoleOverride(name) }));
-    const customOnly = customRoles.filter(r => !ROLES.includes(r.name)).map(r => ({ name: r.name, builtIn: false, override: r }));
-    const allRoles = [...builtIns, ...customOnly];
-    body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">
-        Every role — built-in or custom — can have its permissions adjusted here, module by module. Built-in roles start with their normal defaults; editing and saving overrides that default for everyone with that role. Modules marked <span class="pill" style="font-size:0.62rem;">Coming Soon</span> aren't built yet — set their permissions now and they'll be ready the moment those modules launch.
-      </p>
-      <p style="font-size:0.8rem; color:var(--ink-soft); margin:-8px 0 16px; max-width:680px;">
-        <b>Student</b> and <b>Parent</b> logins aren't listed here — they always see only "My Portal" (their own child's fees, marks, receipts and notices), which isn't part of this module system.
-      </p>
-      <div class="inline-add-form" style="margin-bottom:16px;">
-        <input class="input" id="newRoleName" placeholder="e.g. Librarian, Transport Coordinator" style="max-width:260px;">
-        <button class="btn btn-primary btn-sm" onclick="addCustomRole()">+ Create New Role</button>
-      </div>
-      ${allRoles.map(r => {
-        const modCount = r.override
-          ? PERMISSION_MODULES.filter(m => !m.hidden && r.override.permissions[m.key] && r.override.permissions[m.key].view).length
-          : (ROLE_VIEWS[r.name] || []).length;
-        return `<div class="list-manage-row">
-          <div><div class="lm-name">${r.name} ${r.builtIn ? '<span class="pill" style="font-size:0.68rem;">Built-in</span>' : ''}${r.override ? '<span class="pill" style="font-size:0.68rem; background:rgba(24,143,134,0.15); color:#0f6a63;">Customized</span>' : ''}</div><div class="lm-meta">${modCount} module${modCount===1?'':'s'} accessible${modCount===0?' · <span style="color:#b8621b; font-weight:600;">⚠ No assign permission</span>':''}</div></div>
-          <div style="display:flex; gap:10px;">
-            ${modCount===0 ? `<button class="btn-edit-text" onclick="approveRoleQuick('${r.name.replace(/'/g,"\\'")}')">Approve</button>` : ''}
-            <button class="btn-edit-text" onclick="editRolePermissions('${r.name.replace(/'/g,"\\'")}')">Edit Permissions</button>
-            ${r.builtIn
-              ? (r.override ? `<button class="btn-danger-text" onclick="resetRoleToDefault('${r.name.replace(/'/g,"\\'")}')">Reset to Default</button>` : '')
-              : `<button class="btn-danger-text" onclick="deleteCustomRole('${r.name.replace(/'/g,"\\'")}')">Delete</button>`}
-          </div>
-        </div>`;
-      }).join('')}
-    `;
-  }
   async function approveRoleQuick(roleName){
     if(!await showConfirmDialog(`Approve "${roleName}" for use? This grants it full access to every module — you can fine-tune exact permissions afterward with "Edit Permissions".`)) return;
     const newPermissions = {};
@@ -1466,72 +1428,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     entry: { view:true,  create:true,  edit:false, delete:false, print:true,  approve:false },
     full:  { view:true,  create:true,  edit:true,  delete:true,  print:true,  approve:true  },
   };
-  function renderPermissionEditor(body){
-    const roleName = permEditingRoleName;
-    const existing = findRoleOverride(roleName);
-    const permissions = existing ? existing.permissions : seedPermissionsFromDefault(roleName);
-    const visibleModules = PERMISSION_MODULES.filter(m => !m.hidden);
-    const categories = [...new Set(visibleModules.map(m => m.category))];
-    body.innerHTML = `
-      <div class="breadcrumb"><a onclick="backToPermissionsList()">Roles &amp; Permissions</a> &nbsp;/&nbsp; ${roleName}</div>
-      <div class="perm-legend">
-        <div class="perm-legend-item">👁 <b>View</b> — open this page/tab</div>
-        <div class="perm-legend-item">➕ <b>Create</b> — add new records</div>
-        <div class="perm-legend-item">✏️ <b>Edit</b> — modify existing records</div>
-        <div class="perm-legend-item">🗑️ <b>Delete</b> — remove records</div>
-        <div class="perm-legend-item">🖨️ <b>Print</b> — print / export</div>
-        <div class="perm-legend-item">✅ <b>Approve</b> — approve a workflow (payroll, admissions, etc.)</div>
-      </div>
-      <p style="font-size:0.78rem; color:var(--ink-soft); margin:-6px 0 14px; max-width:760px;">
-        A parent row (like "Manage Fee" or "Manage Exams") shows up in the sidebar the moment <b>any</b> item nested under it has any permission at all — you no longer need to separately tick "View" on the parent row too. The same is true for every row on its own: ticking just <b>Create</b>, <b>Print</b>, or <b>Approve</b> (say) is enough by itself to make that module appear in the sidebar, even with "View" left unticked — only the specific buttons/screens for what's actually ticked will show once inside. Use the <b>None / View / Entry / Full</b> buttons under each row's name for the most common combinations, or tick individual boxes for anything more specific.
-      </p>
-      <div class="perm-toolbar">
-        <input type="text" class="perm-search" id="permSearchBox" placeholder="🔍 Search modules (e.g. fee, attendance, inventory)…" oninput="filterPermRows(this.value)">
-        <button type="button" class="perm-toolbar-btn" onclick="applyPermPresetToAll('none')">🚫 Clear All</button>
-      </div>
-      ${categories.map(cat => `
-        <div class="perm-category" data-category="${cat}">
-          <div class="perm-category-head" style="background:${PERMISSION_CATEGORY_COLORS[cat]||'#555'};" onclick="togglePermCategory(this)">
-            <span class="perm-chevron">▾</span> ${cat} <span class="perm-cat-count">(${visibleModules.filter(m=>m.category===cat).length} features)</span>
-          </div>
-          <div class="perm-category-body">
-            <table class="perm-table">
-              <thead><tr><th>Module</th><th>Full Access</th>${PERMISSION_ACTIONS.map(a => `<th>${a[0].toUpperCase()+a.slice(1)}</th>`).join('')}</tr></thead>
-              <tbody>
-              ${visibleModules.filter(m => m.category===cat).map(m => {
-                const p = permissions[m.key] || Object.fromEntries(PERMISSION_ACTIONS.map(a => [a, false]));
-                const full = PERMISSION_ACTIONS.every(a => p[a]);
-                const hasChildren = (CHILDREN_OF_PARENT[m.key]||[]).length > 0;
-                return `<tr class="${m.parent ? 'perm-row-sub' : ''}" data-search="${(m.label+' '+cat).toLowerCase().replace(/"/g,'')}">
-                  <td>
-                    <div>${m.icon} ${m.label}${m.comingSoon ? ' <span class="pill" style="font-size:0.62rem; vertical-align:middle;">Coming Soon</span>' : ''}${m.isNew ? ' <span class="perm-new-pill">New</span>' : ''}${hasChildren ? ' <span class="perm-auto-hint">Auto-visible from items below</span>' : ''}</div>
-                    <div class="perm-preset-row">
-                      <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${m.key}','none')">None</button>
-                      <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${m.key}','view')">View</button>
-                      <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${m.key}','entry')">Entry</button>
-                      <button type="button" class="perm-preset-btn" onclick="applyPermPreset('${m.key}','full')">Full</button>
-                    </div>
-                  </td>
-                  <td><input type="checkbox" class="perm-full" data-module="${m.key}" ${full?'checked':''} onchange="onPermFullToggle(this)"></td>
-                  ${PERMISSION_ACTIONS.map(a => `<td><input type="checkbox" class="perm-action" data-module="${m.key}" data-action="${a}" ${p[a]?'checked':''} onchange="onPermActionToggle(this)"></td>`).join('')}
-                </tr>`;
-              }).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      `).join('')}
-      <div class="perm-locked-section">
-        <h4>🔒 System Administration — always Admin-only</h4>
-        <p>These pages manage who can log in and what every role is allowed to do, so they're never delegable through this matrix — no role, however customized, can grant itself or anyone else more access than it already has. Only the built-in Admin role can see them.</p>
-        ${LOCKED_ADMIN_ONLY_PAGES.map(pg => `<div class="perm-locked-row"><span>${pg.icon}</span> ${pg.label} <span class="perm-locked-always">Admin only</span></div>`).join('')}
-      </div>
-      <div style="margin-top:20px; display:flex; gap:10px;">
-        <button class="btn btn-ghost" onclick="backToPermissionsList()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveRolePermissions()">Save Permissions</button>
-      </div>
-    `;
-  }
   // Sets one module row's 6 checkboxes to a named preset shape, then keeps
   // the "Full Access" master checkbox and search filter both in sync.
   function applyPermPreset(moduleKey, presetName){
@@ -1668,110 +1564,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     return schoolLogoData || schoolInfo.logo || document.getElementById('sbLogoImg').src;
   }
 
-  function renderSchoolProfileTab(body){
-    schoolLeadershipDraft = JSON.parse(JSON.stringify(schoolInfo.leadership || []));
-    body.innerHTML = `
-      <div class="profile-card" style="margin-bottom:20px; max-width:340px;">
-        <h4>Branding</h4>
-        <div style="display:flex; flex-direction:column; align-items:center; gap:10px; margin:14px 0;">
-          <img id="schoolLogoPreview" src="${schoolInfo.logo || document.getElementById('sbLogoImg').src}" style="width:80px; height:80px; border-radius:50%; object-fit:cover; border:1.5px solid var(--border);">
-          <label class="btn btn-ghost btn-sm" style="cursor:pointer;">Change Logo<input type="file" accept="image/*" id="schoolLogoInput" style="display:none;" onchange="previewSchoolLogo(event)"></label>
-          <span style="font-size:0.72rem; color:var(--ink-soft);">JPEG, PNG or WebP · Max 2MB</span>
-        </div>
-        <div class="f-field">
-          <label>Tagline / Motto</label>
-          <textarea id="siTagline" rows="2">${schoolInfo.tagline||''}</textarea>
-        </div>
-      </div>
-
-      <div class="profile-card" style="margin-bottom:20px;">
-        <h4>Basic Information</h4>
-        <div class="form-grid" style="margin-top:12px;">
-          <div class="f-field full"><label>School Name <span class="required-star">*</span></label><input type="text" id="siName" value="${schoolInfo.name||''}"></div>
-          <div class="f-field"><label>UDISE Code</label><input type="text" id="siUdise" value="${schoolInfo.udise||''}" inputmode="numeric" maxlength="11" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,11)"></div>
-          <div class="f-field"><label>School Code</label><input type="text" id="siSchoolCode" value="${schoolInfo.schoolCode||''}"></div>
-          <div class="f-field full"><label>Reg. / Affiliation Number</label><input type="text" id="siRegNumber" value="${schoolInfo.regNumber||''}"></div>
-        </div>
-      </div>
-
-      <div class="profile-card" style="margin-bottom:20px;">
-        <h4>Contact Details</h4>
-        <div class="form-grid" style="margin-top:12px;">
-          <div class="f-field"><label>Email</label><input type="email" id="siEmail" value="${schoolInfo.email||''}"></div>
-          <div class="f-field"><label>Phone / Landline</label><input type="text" id="siPhone" value="${schoolInfo.phone||''}" inputmode="numeric" maxlength="11" oninput="this.value=this.value.replace(/\D/g,'').slice(0,11)" placeholder="10-digit mobile or 11-digit landline with STD code"></div>
-          <div class="f-field"><label>WhatsApp Number <small>(shown on the public website)</small></label><input type="text" id="siWhatsapp" value="${schoolInfo.whatsapp||''}" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)" placeholder="10-digit mobile number"></div>
-          <div class="f-field full"><label>Website</label><input type="text" id="siWebsite" value="${schoolInfo.website||''}"></div>
-        </div>
-      </div>
-
-      <div class="profile-card" style="margin-bottom:20px;">
-        <h4>Location</h4>
-        <div class="form-grid" style="margin-top:12px;">
-          <div class="f-field"><label>State</label><input type="text" id="siState" value="${schoolInfo.state||''}"></div>
-          <div class="f-field"><label>District</label><input type="text" id="siDistrict" value="${schoolInfo.district||''}"></div>
-          <div class="f-field"><label>PIN Code</label><input type="text" id="siPin" value="${schoolInfo.pin||''}" inputmode="numeric" maxlength="6" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,6)"></div>
-          <div class="f-field full"><label>Address</label><textarea id="siAddress" rows="2">${schoolInfo.address||''}</textarea></div>
-        </div>
-      </div>
-
-      <div class="profile-card" style="max-width:340px; margin-bottom:20px;">
-        <h4>Academic Year Settings</h4>
-        <div class="f-field" style="margin-top:12px;">
-          <label>Working Days</label>
-          <input type="number" min="1" max="365" id="siWorkingDays" value="${schoolInfo.workingDays||220}">
-          <span style="font-size:0.72rem; color:var(--ink-soft);">Total school working days for the selected academic year.</span>
-        </div>
-      </div>
-
-      <div class="profile-card" style="margin-bottom:20px; max-width:420px;">
-        <h4>Document Signatures</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:4px 0 12px;">This signature is auto-applied to Admit Cards and Progress Reports wherever a Principal / Correspondent signature is required, so documents don't need to be signed individually. Class Teacher signatures are uploaded on each teacher's own Staff Profile.</p>
-        <div class="f-field">
-          <label>Principal / Correspondent Name</label>
-          <input type="text" id="siPrincipalName" value="${schoolInfo.principalName||''}">
-        </div>
-        <div style="display:flex; align-items:center; gap:16px; margin-top:10px;">
-          <div style="width:150px; height:60px; border:1.5px dashed var(--border); border-radius:6px; display:flex; align-items:center; justify-content:center; background:#fafafa; overflow:hidden;" id="schoolSigPreviewWrap">
-            <img id="schoolSigPreview" src="${schoolInfo.principalSignature||''}" style="max-width:100%; max-height:100%; ${schoolInfo.principalSignature?'':'display:none;'}">
-            <span id="schoolSigPlaceholder" style="font-size:0.72rem; color:var(--ink-soft); ${schoolInfo.principalSignature?'display:none;':''}">No signature</span>
-          </div>
-          <label class="btn btn-ghost btn-sm" style="cursor:pointer;">Upload Signature<input type="file" accept="image/*" id="schoolSigInput" style="display:none;" onchange="previewPrincipalSignature(event)"></label>
-        </div>
-        <span style="font-size:0.72rem; color:var(--ink-soft); display:block; margin-top:6px;">Use a scanned signature on a plain/white background, PNG preferred · Max 2MB</span>
-      </div>
-
-      <div class="profile-card" style="margin-bottom:20px;">
-        <h4>Leadership</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:4px 0 12px;">Shown on the public website's Leadership section (Secretary, Correspondent, Principal, Academic Director, etc.). Add, edit or remove anyone here — the website picks up the change automatically, no code edit needed.</p>
-        <div id="leadershipEditorRows">${renderLeadershipEditorRows()}</div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:4px;" onclick="addLeadershipEntry()">+ Add Leader</button>
-      </div>
-
-      <button class="btn btn-primary" onclick="saveSchoolProfile()">Save Changes</button>
-    `;
-  }
-  function renderLeadershipEditorRows(){
-    if(!schoolLeadershipDraft.length){
-      return `<p style="font-size:0.82rem; color:var(--ink-soft); margin-bottom:10px;">No one added yet — use "+ Add Leader" below.</p>`;
-    }
-    return schoolLeadershipDraft.map((l, i) => `
-      <div style="display:flex; gap:14px; align-items:flex-start; padding:14px 0; ${i>0?'border-top:1px solid var(--border);':''}">
-        <div style="display:flex; flex-direction:column; align-items:center; gap:6px; flex-shrink:0;">
-          ${l.photo
-            ? `<img id="leadPhotoPreview${i}" src="${l.photo}" style="width:56px; height:56px; border-radius:50%; object-fit:cover; border:1.5px solid var(--border);">`
-            : `<div id="leadPhotoPreview${i}" style="width:56px; height:56px; border-radius:50%; background:linear-gradient(135deg, var(--gold), var(--magenta)); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:0.9rem;">${leadershipInitials(l.name||'')}</div>`}
-          <label class="btn btn-ghost btn-sm" style="cursor:pointer; font-size:0.68rem; padding:3px 8px;">Photo<input type="file" accept="image/*" style="display:none;" onchange="previewLeadershipPhoto(event, ${i})"></label>
-        </div>
-        <div class="form-grid" style="flex:1;">
-          <div class="f-field"><label>Name</label><input type="text" value="${escapeHtml(l.name||'')}" oninput="schoolLeadershipDraft[${i}].name=this.value"></div>
-          <div class="f-field"><label>Title / Role</label><input type="text" value="${escapeHtml(l.title||'')}" oninput="schoolLeadershipDraft[${i}].title=this.value" placeholder="e.g. Principal, Secretary & Correspondent"></div>
-          <div class="f-field"><label>Qualification</label><input type="text" value="${escapeHtml(l.qualification||'')}" oninput="schoolLeadershipDraft[${i}].qualification=this.value"></div>
-          <div class="f-field"><label>Email</label><input type="email" value="${escapeHtml(l.email||'')}" oninput="schoolLeadershipDraft[${i}].email=this.value"></div>
-        </div>
-        <button class="btn-edit-text" style="color:var(--magenta); font-size:1rem; padding:4px 8px;" onclick="removeLeadershipEntry(${i})" title="Remove">&times;</button>
-      </div>
-    `).join('');
-  }
   function refreshLeadershipEditor(){
     const wrap = document.getElementById('leadershipEditorRows');
     if(wrap) wrap.innerHTML = renderLeadershipEditorRows();
@@ -1873,49 +1665,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
   async function loadSectionLevels(){
     SECTIONS = await storageGet(SECTIONS_KEY, SECTIONS);
   }
-  function renderClassesTab(body){
-    body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:600px;">
-        Add or remove the classes your school teaches. These appear everywhere — Manage Student, Fee Structure, Attendance, Exams, and Subjects — so removing one here removes it from all of those too.
-      </p>
-      <div class="inline-add-form" style="margin-bottom:16px;">
-        <input class="input" id="newClassName" placeholder="e.g. Nursery, 11th Class" style="max-width:220px;">
-        <button class="btn btn-primary btn-sm" onclick="addClassLevel()">+ Add Class</button>
-      </div>
-      <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:28px;">
-        ${CLASS_LEVELS.map((c,i) => `<span class="pill" style="display:flex; align-items:center; gap:8px; font-size:0.85rem; padding:8px 12px;">${c} <button onclick="removeClassLevel(${i})" style="background:none; border:none; color:var(--magenta); font-weight:700; cursor:pointer; font-size:0.9rem;">&times;</button></span>`).join('')}
-      </div>
-
-      <div class="dash-section-title"><div><h3>Sections</h3></div></div>
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:600px;">
-        Every class is split into these sections (e.g. Section A, Section B). Add more if your school runs more than two per class — this also applies everywhere classes do.
-      </p>
-      <div class="inline-add-form" style="margin-bottom:16px;">
-        <input class="input" id="newSectionName" placeholder="e.g. C" style="max-width:120px; text-transform:uppercase;" maxlength="3">
-        <button class="btn btn-primary btn-sm" onclick="addSectionLevel()">+ Add Section</button>
-      </div>
-      <div style="display:flex; flex-wrap:wrap; gap:10px;">
-        ${SECTIONS.map((s,i) => `<span class="pill" style="display:flex; align-items:center; gap:8px; font-size:0.85rem; padding:8px 12px;">Section ${s} <button onclick="removeSectionLevel(${i})" style="background:none; border:none; color:var(--magenta); font-weight:700; cursor:pointer; font-size:0.9rem;">&times;</button></span>`).join('')}
-      </div>
-
-      <div class="dash-section-title"><div><h3>Sections per Class</h3></div></div>
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:640px;">
-        Not every class needs to be split up — a small class can stay as just Section A while a bigger one uses all the sections above. Uncheck a class down to none and it resets to Section A only.
-      </p>
-      <div class="table-wrap">
-        <table><thead><tr><th>Class</th><th>Sections Used</th></tr></thead>
-        <tbody>
-        ${CLASS_LEVELS.map(cls => {
-          const current = sectionsForClass(cls);
-          return `<tr>
-            <td class="name-cell">${cls}</td>
-            <td>${SECTIONS.map(sec => `<label style="margin-right:16px; font-size:0.82rem;"><input type="checkbox" class="cls-sec-check" data-class="${cls}" value="${sec}" ${current.includes(sec)?'checked':''} onchange="onClassSectionToggle('${cls}')"> Section ${sec}</label>`).join('')}</td>
-          </tr>`;
-        }).join('')}
-        </tbody></table>
-      </div>
-    `;
-  }
   async function onClassSectionToggle(cls){
     const checked = Array.from(document.querySelectorAll(`.cls-sec-check[data-class="${cls}"]:checked`)).map(c => c.value);
     if(checked.length === 0){
@@ -1977,43 +1726,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
      Logins) so the two lists don't get mixed together — this page can
      grow to hundreds of student/parent rows otherwise and burying staff
      accounts in the middle of that makes them hard to find. --- */
-  function renderUsersTab(body){
-    if(currentUser.role !== 'Admin'){
-      body.innerHTML = `<div class="empty-state"><b>Admin only</b>Only the Admin role can manage user accounts.</div>`;
-      return;
-    }
-    const staffUsers = users.filter(u => u.role !== 'Student' && u.role !== 'Parent');
-    const studentParentCount = users.length - staffUsers.length;
-    const rows = staffUsers.map(u => {
-      return `
-        <tr>
-          <td class="name-cell">${u.name}</td>
-          <td class="id-cell">${u.username}</td>
-          <td><span class="role-pill">${u.role}</span></td>
-          <td>
-            <button class="btn-edit-text" onclick="editUser('${u.id}')">Edit</button>
-            ${u.id !== 'u_admin' ? `&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteUser('${u.id}')">Delete</button>` : ''}
-          </td>
-        </tr>
-      `;
-    }).join('');
-    body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">
-        Create a login for each staff member. Roles control which sections of the ERP they can see:
-        <b>Admin</b> &amp; <b>Principal</b> see everything; <b>Accountant</b> sees Dashboard + Manage Student;
-        <b>Office Assistant</b>, <b>Teacher</b>, and <b>Staff</b> see Manage Student only.
-        Looking for a student or parent login? Head to <a onclick="switchView('studentparentlogins')" style="cursor:pointer; color:var(--magenta); font-weight:600;">Student/Parent Logins</a>${studentParentCount ? ` — ${studentParentCount} of them there right now` : ''}.
-      </p>
-      <button class="btn btn-primary" style="margin-bottom:16px;" onclick="openUserModal(undefined, undefined, undefined, 'staff')">+ Add User</button>
-      <button class="btn btn-ghost" style="margin-bottom:16px; margin-left:8px;" onclick="openTrashModal('users')">🗑 Recently Deleted</button>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Name</th><th>Username</th><th>Role</th><th></th></tr></thead>
-          <tbody>${rows.length ? rows : `<tr><td colspan="4"><div class="empty-state"><b>No staff logins yet</b></div></td></tr>`}</tbody>
-        </table>
-      </div>
-    `;
-  }
 
   function populateUserRoleSelect(mode){
     let names = allRoleNames();
@@ -2209,28 +1921,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
   }
 
   /* --- Academic Year --- */
-  function renderAcademicYearTab(body){
-    body.innerHTML = `
-      <div class="profile-card" style="max-width:520px;">
-        <h4>Current Academic Year</h4>
-        <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:14px;">This year is shown across the ERP (e.g. the AY badge on Manage Student).</p>
-        <div style="display:flex; gap:10px; margin-bottom:22px;">
-          <select id="ayCurrentSelect" style="flex:1;">
-            ${academicYears.map(y => `<option value="${y}" ${y===currentAcademicYearValue?'selected':''}>${y}</option>`).join('')}
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="setCurrentAcademicYear()">Set as Current</button>
-        </div>
-        <h4>Add New Academic Year</h4>
-        <div style="display:flex; gap:10px;">
-          <input class="input" id="ayNewInput" placeholder="e.g. 2027-28" style="max-width:200px;">
-          <button class="btn btn-ghost btn-sm" onclick="addAcademicYear()">+ Add Year</button>
-        </div>
-        <div style="margin-top:18px; font-size:0.82rem; color:var(--ink-soft);">
-          All years on file: ${academicYears.join(', ')}
-        </div>
-      </div>
-    `;
-  }
 
   async function addAcademicYear(){
     const val = document.getElementById('ayNewInput').value.trim();
@@ -2249,41 +1939,6 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
   }
 
   /* --- Fee Structure --- */
-  function renderFeeStructureTab(body){
-    const canEditStruct = canSub('managefee_structure','managefee','edit');
-    const dis = canEditStruct ? '' : 'disabled';
-    const rows = CLASS_LEVELS.map(c => {
-      const s = classStruct(c);
-      return `
-        <tr>
-          <td class="name-cell">${c}</td>
-          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="admission" value="${s.admission||0}" style="max-width:120px;" ${dis}></td>
-          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="fee" value="${s.fee||0}" style="max-width:120px;" ${dis}></td>
-          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="bus" value="${s.bus||0}" style="max-width:120px;" ${dis}></td>
-          <td><input type="number" min="0" class="input fs-input" data-class="${c}" data-field="stock" value="${s.stock||0}" style="max-width:120px;" ${dis}></td>
-        </tr>
-      `;
-    }).join('');
-    body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:640px;">
-        Set the per-student yearly amount for Admission Fee, Tuition Fee, Bus Fee, and Stock for each class. The Dashboard's Expected totals are computed automatically: Admission Fee applies only to students marked "New Admission"; Tuition Fee &amp; Stock apply to every active student in a class; Bus Fee applies only to students marked as needing transport.
-      </p>
-      <div class="table-wrap" style="margin-bottom:20px;">
-        <table>
-          <thead><tr><th>Class</th><th>Admission Fee (₹)</th><th>Tuition Fee (₹)</th><th>Bus Fee (₹)</th><th>Stock (₹)</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-      <div class="profile-card" style="max-width:320px; margin-bottom:20px;">
-        <h4>Hostel — Annual Expected Total (₹)</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin-bottom:10px;">Hostel isn't tracked per-student yet, so this stays a single flat total until the Hostel module exists.</p>
-        <input type="number" min="0" class="input" id="fsHostel" value="${financeSettings.hostel||0}" style="width:100%;" ${dis}>
-      </div>
-      ${canEditStruct ? `<button class="btn btn-primary" onclick="saveFeeStructure()">🏗️ Save Fee Structure</button>` : ''}
-      <div id="feeSchedulePanel" style="margin-top:36px;"></div>
-    `;
-    renderFeeSchedulePanel();
-  }
 
   async function saveFeeStructure(){
     document.querySelectorAll('.fs-input').forEach(inp => {
