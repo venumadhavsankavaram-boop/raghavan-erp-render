@@ -308,6 +308,9 @@ const FEE_TYPES_KEY = "fee-types";
     const dateInput = document.getElementById('ledgerPayDate');
     const payDate = (dateInput && dateInput.value) ? dateInput.value : today;
     if(payDate > today){ showToast('Payment date can\'t be in the future.'); return; }
+    // Every head paid in this one collection shares ONE receipt number, so the
+    // school fee + bus fee (etc.) print together as a single itemized receipt.
+    const sharedReceiptNo = nextReceiptNo();
     let lastId = null;
     const payCat = computeStudentFinance(student).perCat;
     entries.forEach(e => {
@@ -319,7 +322,7 @@ const FEE_TYPES_KEY = "fee-types";
         }
         const record = {
           id: 'pay_' + Date.now() + '_' + e.key,
-          receiptNo: nextReceiptNo(),
+          receiptNo: sharedReceiptNo,
           studentId, studentName: student.name,
           category: 'extra', extraFeeName: fee ? fee.name : 'Extra Fee', extraFeeId: e.key,
           mode, amount: e.amt, discount: 0, instalment: '', date: payDate, note: '',
@@ -331,7 +334,7 @@ const FEE_TYPES_KEY = "fee-types";
       }
       const record = {
         id: 'pay_' + Date.now() + '_' + e.key,
-        receiptNo: nextReceiptNo(),
+        receiptNo: sharedReceiptNo,
         studentId, studentName: student.name,
         category: e.key, mode, amount: e.amt, discount: 0, instalment: instalmentLabelFor(e.key, payCat[e.key], e.amt), date: payDate, note: '',
         classAtPayment: student.className,
@@ -343,9 +346,9 @@ const FEE_TYPES_KEY = "fee-types";
     await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
     renderDashboard();
     renderFeeBody();
-    showToast(entries.length + ' payment(s) recorded.', 'radial', entries.reduce((s,e)=>s+e.amt,0));
+    showToast(entries.length > 1 ? `Receipt ${sharedReceiptNo} generated for ${entries.length} fee heads.` : 'Payment recorded.', 'radial', entries.reduce((s,e)=>s+e.amt,0));
     if(lastId && await showConfirmDialog('Payment(s) recorded. Print receipt now?')){
-      printReceipt(lastId);
+      printReceiptByNo(sharedReceiptNo);
     }
   }
 
