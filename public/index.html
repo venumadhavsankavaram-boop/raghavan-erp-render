@@ -2979,6 +2979,34 @@
   .ivq-tile-meta{font-size:.68rem;color:var(--ink-soft);min-height:1em}
   .ivq-tile-foot{display:flex;flex-direction:column;gap:1px;margin-top:3px}.ivq-tile-foot b{font-size:.95rem;color:var(--navy)}
   @media (max-width:720px){.ivp-grid{grid-template-columns:1fr}.iv-grid{grid-template-columns:repeat(2,1fr)}}
+  /* ---- Notice targeting (20d) ---- */
+  .nbx-sec{margin:16px 0 4px}.nbx-sec[hidden]{display:none}
+  .nbx-lbl{font-size:.74rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:8px}
+  .nbx-chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+  .nbx-chip{position:relative;display:flex;align-items:center;gap:10px;text-align:left;padding:11px 36px 11px 12px;border:1.5px solid var(--border);border-radius:14px;background:var(--white);font:inherit;color:var(--ink);cursor:pointer;transition:border-color .12s,background .12s,box-shadow .12s}
+  .nbx-chip:hover{border-color:var(--teal)}
+  .nbx-chip.on{border-color:var(--teal);background:var(--success-bg);box-shadow:0 0 0 2px rgba(24,143,134,.15)}
+  .nbx-chip-ic{font-size:1.25rem;line-height:1;flex:none}
+  .nbx-chip b{display:block;font-size:.86rem}.nbx-chip small{display:block;font-size:.72rem;color:var(--ink-soft);margin-top:1px}
+  .nbx-tick{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:20px;height:20px;border-radius:50%;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;font-style:normal;font-size:.72rem;font-weight:800;color:#fff}
+  .nbx-chip.on .nbx-tick{background:var(--teal);border-color:var(--teal)}
+  .nbx-seg{display:flex;flex-wrap:wrap;gap:6px}
+  .nbx-seg button{border:1.5px solid var(--border);background:transparent;border-radius:999px;padding:7px 13px;font:inherit;font-size:.78rem;font-weight:700;color:var(--ink);cursor:pointer}
+  .nbx-seg button:hover{border-color:var(--teal)}.nbx-seg button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+  .nbx-aud{margin-top:10px}.nbx-aud:empty{display:none}.nbx-aud .input,.nbx-aud select,.nbx-aud input{max-width:none;min-width:0;width:100%}
+  .nbx-find{position:relative}
+  .nbx-found{display:flex;flex-direction:column;margin-top:4px;border-radius:12px}.nbx-found:empty{display:none}
+  .nbx-found button{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--border);border-top:0;background:var(--white);padding:9px 12px;font:inherit;font-size:.82rem;color:var(--ink);cursor:pointer;text-align:left}
+  .nbx-found button:first-child{border-top:1px solid var(--border);border-radius:12px 12px 0 0}.nbx-found button:last-child{border-radius:0 0 12px 12px}.nbx-found button:only-child{border-radius:12px}
+  .nbx-found button:hover{background:var(--cream)}.nbx-found small{color:var(--ink-soft)}.nbx-none{padding:9px 12px;font-size:.8rem;color:var(--ink-soft)}
+  .nbx-summary{margin:14px 0;padding:11px 14px;border-radius:12px;background:rgba(24,143,134,.08);border:1px solid rgba(24,143,134,.25);font-size:.83rem;line-height:1.45}
+  .nbx-summary small{color:var(--ink-soft)}.nbx-summary.is-warn{background:rgba(212,160,23,.1);border-color:rgba(212,160,23,.4)}
+  .nbx-feedbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 8px}.nbx-feedbar .cm-feedtitle{margin:0}
+  .nbx-inline{display:flex;align-items:center;gap:8px;font-size:.84rem;font-weight:600;margin:4px 0 12px;cursor:pointer}
+  .nbx-wa{margin-bottom:18px;padding:18px 20px}.nbx-wa-head{display:flex;justify-content:space-between;align-items:center}
+  .nbx-x{border:0;background:transparent;font-size:1.4rem;line-height:1;color:var(--ink-soft);cursor:pointer;padding:2px 8px;border-radius:8px}.nbx-x:hover{background:var(--cream)}
+  .nbx-em{font-weight:800}
+  @media (max-width:520px){.nbx-chips{grid-template-columns:1fr}}
 </style>
 <script>
   /* ===== AUTOMATIC WEBSITE THEME SYNC =====
@@ -3683,7 +3711,7 @@
     </div>
 
     <div id="view-noticeboard" style="display:none;">
-      <div class="topbar"><div><h1>Notice Board</h1><p>Everything currently posted to the public website's notice board — edit or take down any notice here.</p></div></div>
+      <div class="topbar"><div><h1>Notice Board</h1><p>Post notices to the public website, the parent portal, staff, a class or one student — you pick who sees each one.</p></div></div>
       <div id="noticeBoardBody"></div>
     </div>
 
@@ -4845,6 +4873,7 @@
 <script src="modules/20b-communications-ui.js"></script>
 <script src="modules/21-communications-notices-accounting.js"></script>
 <script src="modules/20c-accounting-ui.js"></script>
+<script src="modules/20d-notice-targeting-ui.js"></script>
 <script src="modules/22c-hostel-ui.js"></script>
 <script src="modules/22d-library-ui.js"></script>
 <script src="modules/22e-transport-ui.js"></script>

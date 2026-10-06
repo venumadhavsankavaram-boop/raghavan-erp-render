@@ -3087,8 +3087,12 @@ app.post('/api/notifications/broadcast', async (req, res) => {
       const staffRows = await sql`SELECT extra FROM staff WHERE id IN (${staffIds})`;
       staffRows.forEach(r => { const uid = r.extra && r.extra.linkedUserId; if (uid) userIds.add(uid); });
     }
-    for (const uid of userIds) await recordNotification(uid, { title, body, tag: type, url });
-    return res.status(200).json({ ok: true, notified: userIds.size });
+    const wantPush = b.push === true;
+    for (const uid of userIds) {
+      if (wantPush) await sendPushToUser(uid, { title, body, tag: type, url });
+      else await recordNotification(uid, { title, body, tag: type, url });
+    }
+    return res.status(200).json({ ok: true, notified: userIds.size, pushed: wantPush });
   } catch (err) {
     console.error('notifications broadcast error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
@@ -3795,6 +3799,53 @@ async function getMyStaffRow(userId) {
   const rows = await sql`SELECT id FROM staff WHERE JSON_UNQUOTE(JSON_EXTRACT(extra, '$.linkedUserId')) = ${userId} LIMIT 1`;
   return rows.length ? rows[0] : null;
 }
+// ---------- Notice Board targeting ----------
+// A Notice Board / Communications message carries its own audience
+// (audienceScope + class/section/individual) and a toWebsite flag, so the
+// public website, each parent's portal and the staff only get what is
+// addressed to them. Older posts (before targeting existed) are still
+// understood: a board post with no audienceScope is read from its label.
+function noticeIsWebsite(m) {
+  if (!m || m.boardRemoved) return false;
+  if (m.toWebsite !== undefined) return !!m.toWebsite;
+  return Array.isArray(m.channels) && m.channels.includes('In-App') && !m.audienceScope;
+}
+function noticeForStudent(m, s) {
+  if (!m || m.boardRemoved || !s) return false;
+  const ch = Array.isArray(m.channels) ? m.channels : [];
+  if (!ch.includes('In-App')) return false;
+  const cls = s.class_name, sec = s.section;
+  let sc = m.audienceScope;
+  if (!sc) {
+    const l = String(m.audienceLabel || '');
+    if (/^all staff/i.test(l)) return false;
+    if (l.includes(' \u2014 Section ')) { const [c, x] = l.split(' \u2014 Section '); return c === cls && x === sec; }
+    if (/\(Whole Class\)$/.test(l)) return l.replace(/\s*\(Whole Class\)$/, '') === cls;
+    return true;
+  }
+  if (sc === 'allstudents' || sc === 'everyone') return true;
+  if (sc === 'class') return m.audienceClass === cls;
+  if (sc === 'section') return m.audienceClass === cls && m.audienceSection === sec;
+  if (sc === 'individual') return m.individualId === s.id;
+  return false; // staff / teachers / website-only / fee defaulters
+}
+async function handleCommsMessagesRead(req, res) {
+  const rows = await sql.query('SELECT * FROM comms_messages FORCE INDEX (idx_comms_messages_created_at) ORDER BY created_at ASC');
+  const all = rows.map(r => hybridToAppShape(r, HYBRID_RESOURCES['comms-messages'].core));
+  if (!req.authUser) {
+    // The public website: only notices explicitly marked for it, and only the
+    // fields it displays — never audiences, recipients or message internals.
+    return res.status(200).json(all.filter(noticeIsWebsite).map(m => ({
+      id: m.id, type: m.type, title: m.title, body: m.body, link: m.link || '',
+      sentDate: m.sentDate, sentBy: m.sentBy, audienceLabel: 'Public website', channels: ['In-App'],
+    })));
+  }
+  if (PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
+    const student = await getLinkedStudent(req.authUser.id);
+    return res.status(200).json(student ? all.filter(m => noticeForStudent(m, student)) : []);
+  }
+  return res.status(200).json(all);
+}
 async function getLinkedStudent(userId) {
   const userRows = await sql`SELECT linked_student_id FROM users WHERE id = ${userId}`;
   const studentId = userRows.length ? userRows[0].linked_student_id : '';
@@ -4455,6 +4506,7 @@ app.all('/api/:resource', async (req, res) => {
     // login's own single linked record, never the full roster and never a
     // write — everything else for 'students' still goes through the normal
     // 'admissions' gate right below.
+    if (resource === 'comms-messages' && req.method === 'GET') return await handleCommsMessagesRead(req, res);
     if (resource === 'students' && req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
       const student = await getLinkedStudent(req.authUser.id);
       return res.status(200).json(student ? [hybridToAppShape(student, HYBRID_RESOURCES.students.core)] : []);

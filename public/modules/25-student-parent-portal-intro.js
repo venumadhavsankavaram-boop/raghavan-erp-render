@@ -903,7 +903,8 @@ let myProfileTab = 'notifications';
   /* --- Notices tab: same feed the public website shows, read-only (no
      compose/edit/delete controls — those stay on the staff Notice Board). --- */
   function renderMyNoticesTab(body){
-    const notices = commsMessages.filter(m => m.channels.includes('In-App') && !m.boardRemoved).slice().sort((a,b) => b.id.localeCompare(a.id));
+    const me = myProfileStudent();
+    const notices = commsMessages.filter(m => nbxVisibleToStudent(m, me)).slice().sort((a,b) => b.id.localeCompare(a.id));
     if(notices.length === 0){
       body.innerHTML = `<div class="empty-state"><b>No notices posted yet</b></div>`;
       return;

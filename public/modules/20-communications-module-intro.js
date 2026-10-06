@@ -162,35 +162,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
       return { ok:true, value:u.href.slice(0, 500) };
     }catch(e){ return { ok:false }; }
   }
-  async function postQuickNotice(){
-    const type = await resolveCommsType('nbType', 'nbNewTypeName');
-    if(!type){ showToast('Enter a name for the new heading.'); return; }
-    const title = document.getElementById('nbTitle').value.trim();
-    const bodyText = document.getElementById('nbBody').value.trim();
-    if(!title){ showToast('Enter a title.'); return; }
-    if(!bodyText){ showToast('Enter a message.'); return; }
-    let targets = [];
-    if(nbAudienceScope === 'allstudents') targets = students.filter(isActive);
-    else if(nbAudienceScope === 'allstaff') targets = staffList.filter(staffIsActive);
-    else if(nbAudienceScope === 'class'){
-      if(!nbAudienceClass){ showToast('Select a class.'); return; }
-      targets = students.filter(s => isActive(s) && s.className===nbAudienceClass);
-    }else if(nbAudienceScope === 'section'){
-      if(!nbAudienceClass || !nbAudienceSection){ showToast('Select a class and section.'); return; }
-      targets = students.filter(s => isActive(s) && s.className===nbAudienceClass && s.section===nbAudienceSection);
-    }
-    const linkEl = document.getElementById('nbLink');
-    const link = cleanNoticeLink(linkEl ? linkEl.value : '');
-    if(!link.ok){ showToast('That link doesn\'t look right — use a web address like https://example.com/page'); return; }
-    const audienceLabels = { allstudents:'All Students', allstaff:'All Staff', class:`${nbAudienceClass} (Whole Class)`, section:`${nbAudienceClass} — Section ${nbAudienceSection}` };
-    commsMessages.push({
-      id:'msg_'+Date.now(), type, title, body:bodyText, link:link.value, audienceLabel:audienceLabels[nbAudienceScope],
-      channels:['In-App'], recipientCount:targets.length, sentBy:currentUser.name, sentDate:new Date().toISOString().slice(0,10),
-    });
-    await storageSet(COMMS_MESSAGES_KEY, commsMessages);
-    renderNoticeBoard(document.getElementById('noticeBoardBody'));
-    showToast('Notice posted to the website.', 'burst');
-  }
 
   /* --- Compose --- */
   function renderCommsCompose(body){
@@ -390,7 +361,7 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     const record = {
       id:'msg_'+Date.now(), type:typeName, title, body:bodyText, audienceLabel:audienceLabels[commsAudienceScope]||commsAudienceScope,
       audienceScope: commsAudienceScope, audienceClass: commsAudienceClass, audienceSection: commsAudienceSection, individualId: commsIndividualId,
-      channels, recipientCount:targets.length, sentBy:currentUser.name, sentDate:new Date().toISOString().slice(0,10),
+      channels, toWebsite:false, recipientCount:targets.length, sentBy:currentUser.name, sentDate:new Date().toISOString().slice(0,10),
     };
     commsMessages.push(record);
     await storageSet(COMMS_MESSAGES_KEY, commsMessages);
@@ -444,23 +415,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   function cancelNoticeEdit(){
     editingNoticeId = '';
     renderNoticeBoard(document.getElementById('noticeBoardBody'));
-  }
-  async function saveNoticeEdit(id){
-    const n = commsMessages.find(m => m.id === id);
-    if(!n) return;
-    const title = document.getElementById('editNoticeTitle').value.trim();
-    const bodyText = document.getElementById('editNoticeBody').value.trim();
-    if(!title || !bodyText){ showToast('Title and message can\'t be empty.'); return; }
-    const linkEl = document.getElementById('editNoticeLink');
-    const link = cleanNoticeLink(linkEl ? linkEl.value : n.link);
-    if(!link.ok){ showToast('That link doesn\'t look right — use a web address like https://example.com/page'); return; }
-    n.title = title;
-    n.body = bodyText;
-    n.link = link.value;
-    await storageSet(COMMS_MESSAGES_KEY, commsMessages);
-    editingNoticeId = '';
-    renderNoticeBoard(document.getElementById('noticeBoardBody'));
-    showToast('Notice updated.', 'burst');
   }
   async function deleteNotice(id){
     if(!await showConfirmDialog('Take this notice down from the website\'s notice board? It stays in the Message Log for your records.')) return;
