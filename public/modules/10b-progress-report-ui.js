@@ -26,6 +26,20 @@
   ];
   const PRC_DEFAULT_ACK = 'I have seen my ward’s progress report and noted the remarks.';
 
+  // Visual designs for the printed report. A design is only a skin (plus a bar
+  // column / trend chart for "bars"); marks, grades and signatures work the same.
+  const PRC_DESIGNS = [
+    { key:'classic', name:'Classic',          desc:'Navy header and clean table — the standard look' },
+    { key:'band',    name:'Modern band',      desc:'Coloured school header band, soft rounded layout' },
+    { key:'cbse',    name:'CBSE style',       desc:'Formal boxed layout with grey headers' },
+    { key:'state',   name:'State board',      desc:'Double border, bold black-and-white ledger look' },
+    { key:'bars',    name:'Performance bars', desc:'A bar per subject, and a trend across exams' },
+    { key:'primary', name:'Primary school',   desc:'Friendly colours and grade chips for young classes' },
+    { key:'elegant', name:'Formal gold',      desc:'Serif type and a gold double border for annual cards' },
+    { key:'minimal', name:'Ink saver',        desc:'No colour fills — cheap to print in black and white' },
+  ];
+  function prcDesignKey(t){ return PRC_DESIGNS.some(d => d.key === (t && t.design)) ? t.design : 'classic'; }
+
   /* ---------- data helpers ---------- */
   function prcInvalidate(){ prcDirty = true; prcMemo = { score:{}, rank:{}, top:{} }; }
   function prcIndex(){
@@ -215,6 +229,68 @@
       .rc-cosch-title{ font-size:9px; font-weight:700; color:#211A4E; margin:6px 0 3px; border-top:1px dashed #999; padding-top:5px; }
       .rc-cosch-grid{ display:grid; grid-template-columns:1fr 1fr; gap:1px 10px; font-size:9px; margin-bottom:5px; }
       .rc-cosch-grid div{ display:flex; justify-content:space-between; border-bottom:1px dotted #ccc; padding:1px 0; }
+
+      *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+      .rc-body{ display:flex; flex-direction:column; flex:1; }
+      /* --- Modern band --- */
+      .rc-d-band{ border:0; box-shadow:0 0 0 1px #c9d3d8; border-radius:3mm; padding:0 !important; overflow:hidden; }
+      .rc-d-band .rc-hdr{ background:linear-gradient(135deg,#211A4E,#188F86); color:#fff; padding:5mm 8mm 3mm; }
+      .rc-d-band .rc-school{ color:#fff; font-size:16px; } .rc-d-band .rc-addr{ color:rgba(255,255,255,.88); margin-bottom:0; }
+      .rc-d-band .rc-logo,.rc-d-band .rc-head img{ border:2px solid #fff; }
+      .rc-d-band .rc-body{ padding:5mm 9mm 7mm; }
+      .rc-d-band .rc-title{ border:0; background:#e8f4f3; color:#211A4E; border-radius:999px; padding:4px 0; }
+      .rc-d-band th{ background:#188F86; } .rc-d-band th,.rc-d-band td{ border-left:0; border-right:0; border-color:#d5dde0; }
+      .rc-d-band .rc-sumbox{ background:#f3f7f8; border:0; border-radius:2.5mm; } .rc-d-band tr.rc-total td{ background:#e8f4f3 !important; border-top-color:#188F86; }
+      .rc-two.rc-d-band .rc-hdr{ padding:2mm 5mm 1.5mm; } .rc-two.rc-d-band .rc-body{ padding:2mm 5mm; }
+      .rc-two.rc-d-band .rc-school{ font-size:12.5px; }
+      /* --- CBSE style --- */
+      .rc-d-cbse{ border:1.6px solid #000; border-radius:0; }
+      .rc-d-cbse .rc-title{ background:#d9dde8; border:1px solid #111; color:#111; }
+      .rc-d-cbse th{ background:#d9dde8; color:#111; border:1px solid #111; } .rc-d-cbse td{ border-color:#111; }
+      .rc-d-cbse tbody tr:nth-child(even) td{ background:#fff; } .rc-d-cbse tr.rc-total td{ background:#eceef5 !important; border-top:2px solid #111; }
+      .rc-d-cbse .rc-sumbox{ border-color:#111; }
+      /* --- State board --- */
+      .rc-d-state{ border:3px double #111; border-radius:0; }
+      .rc-d-state .rc-school{ text-transform:uppercase; letter-spacing:.6px; font-size:16.5px; }
+      .rc-d-state .rc-title{ background:#eee; color:#111; border:1.6px solid #111; }
+      .rc-d-state th{ background:#e4e4e4; color:#111; border:1.2px solid #111; } .rc-d-state td{ border:1.2px solid #111; }
+      .rc-d-state tbody tr:nth-child(even) td{ background:#fff; } .rc-d-state tr.rc-total td{ background:#e4e4e4 !important; border-top:2px solid #111; }
+      .rc-d-state .rc-sumbox{ border:1.2px solid #111; color:#111; } .rc-d-state .rc-info{ border-bottom:1px solid #111; padding-bottom:5px; }
+      /* --- Performance bars --- */
+      .rc-barcell{ min-width:26mm; padding-right:4px !important; }
+      .rc-bar{ display:block; height:6px; background:#e3e3ec; border-radius:3px; overflow:hidden; }
+      .rc-bar i{ display:block; height:100%; background:#188F86; border-radius:3px; }
+      .rc-bar.mid i{ background:#d9822b; } .rc-bar.low i{ background:#b00020; }
+      .rc-trend{ border:1px solid #999; border-radius:2mm; padding:2.5mm 3.5mm; margin-bottom:8px; font-size:9px; }
+      .rc-trend b{ display:block; color:#211A4E; margin-bottom:3px; font-size:9.4px; }
+      .rc-trend-row{ display:grid; grid-template-columns:34mm 1fr 12mm; align-items:center; gap:2mm; margin:2px 0; }
+      .rc-trend-row .rc-bar{ height:7px; } .rc-trend-row span:last-child{ text-align:right; font-weight:700; }
+      .rc-two .rc-trend{ display:none; }
+      .rc-two .rc-bar{ height:4px; }
+      /* --- Primary school --- */
+      .rc-d-primary{ border:2.5px solid #188F86; border-radius:4mm; }
+      .rc-d-primary .rc-title{ background:#188F86; color:#fff; border:0; border-radius:999px; padding:4px 0; }
+      .rc-d-primary th{ background:#188F86; } .rc-d-primary tbody tr:nth-child(even) td{ background:#eef8f7; }
+      .rc-d-primary .rc-sumbox{ border:0; background:#fff4e0; border-radius:3mm; } .rc-d-primary .rc-school{ color:#188F86; }
+      .rc-d-primary tr.rc-total td{ background:#d9f0ee !important; border-top-color:#188F86; }
+      .rc-chip{ display:inline-block; min-width:20px; padding:1px 7px; border-radius:999px; color:#fff; font-weight:700; background:#188F86; text-align:center; }
+      .rc-chip.t-b{ background:#3d6fd1; } .rc-chip.t-c{ background:#d9822b; } .rc-chip.t-d{ background:#b00020; }
+      /* --- Formal gold --- */
+      .rc-d-elegant{ font-family:Georgia,'Times New Roman',serif; border:1px solid #9a7b2f; outline:3px double #9a7b2f; outline-offset:-3mm; padding:10mm 12mm; }
+      .rc-d-elegant.rc-two{ padding:5mm 8mm; outline-offset:-2mm; }
+      .rc-d-elegant .rc-school{ color:#6b4f12; font-size:17px; letter-spacing:.4px; } .rc-d-elegant .rc-addr{ font-style:italic; }
+      .rc-d-elegant .rc-title{ border-color:#9a7b2f; color:#6b4f12; letter-spacing:1.2px; }
+      .rc-d-elegant th{ background:#6b4f12; } .rc-d-elegant th,.rc-d-elegant td{ border-color:#c9b27a; }
+      .rc-d-elegant tbody tr:nth-child(even) td{ background:#fbf6e8; } .rc-d-elegant tr.rc-total td{ background:#f3e9c9 !important; border-top-color:#9a7b2f; }
+      .rc-d-elegant .rc-sumbox{ border-color:#c9b27a; }
+      /* --- Ink saver --- */
+      .rc-d-minimal{ border:0; border-top:3px solid #111; border-radius:0; }
+      .rc-d-minimal .rc-title{ border:0; border-bottom:1px solid #111; color:#111; text-align:left; letter-spacing:.8px; }
+      .rc-d-minimal th{ background:none; color:#111; border:0; border-bottom:1.5px solid #111; }
+      .rc-d-minimal td{ border:0; border-bottom:1px solid #ddd; } .rc-d-minimal tbody tr:nth-child(even) td{ background:none; }
+      .rc-d-minimal tr.rc-total td{ background:none !important; border-top:1.5px solid #111; border-bottom:0; }
+      .rc-d-minimal .rc-sumbox{ border:0; border-top:1px solid #111; } .rc-d-minimal .rc-ack,.rc-d-minimal .rc-slip{ border-color:#111; }
+      .rc-d-minimal .rc-bar i{ background:#444; }
     `;
   }
   function reportCardPrintCss(){ return prcPrintCss(); }
@@ -256,6 +332,7 @@
     const showGP = !!(scheme && scheme.showGP && showGrade), showRem = !!(scheme && scheme.showRemarks && showGrade);
     const showTopper = t.showClassTopper !== false && showMarks && students.filter(x => isActive(x) && x.className===s.className && x.section===s.section).length > 1;
     const top = showTopper ? prcTopperMap(src, s) : {};
+    const design = prcDesignKey(t);
     const multi = src.mode === 'period';
     const hasCode = sc.rows.some(r => r.code), hasDate = !multi && sc.rows.some(r => r.date);
     // an exam column shows "marks" when every subject has the same max, else "marks/max"
@@ -268,6 +345,7 @@
     }
     if(showTopper) head += '<th class="c">Highest in class</th>';
     if(showGrade) head += '<th class="c">Grade</th>';
+    if(design === 'bars' && showMarks) head += '<th>Performance</th>';
     if(showGP) head += '<th class="c">GP</th>';
     if(showRem) head += '<th>Remark</th>';
     head += '</tr>';
@@ -280,7 +358,15 @@
         else tr += `<td class="c">${r.max}</td><td class="c ${fail?'fail':''}">${r.cells[0] && r.cells[0].absent ? 'AB' : (r.anyHas ? r.obtained : '—')}</td>`;
       }
       if(showTopper) tr += `<td class="c">${top[r.name] !== undefined ? top[r.name] : '—'}</td>`;
-      if(showGrade) tr += `<td class="c ${fail?'fail':''}"><b>${escapeHtml(r.grade)}</b></td>`;
+      if(showGrade){
+        const chipTone = r.pct === null ? 'a' : (r.pct >= 75 ? 'a' : (r.pct >= 50 ? 'b' : (r.pct >= 35 ? 'c' : 'd')));
+        tr += `<td class="c ${fail?'fail':''}">${design === 'primary' && r.grade !== '—' ? `<span class="rc-chip t-${fail ? 'd' : chipTone}">${escapeHtml(r.grade)}</span>` : `<b>${escapeHtml(r.grade)}</b>`}</td>`;
+      }
+      if(design === 'bars' && showMarks){
+        const pc = r.anyHas && r.pct !== null && !r.allAbsent ? Math.max(0, Math.min(100, r.pct)) : 0;
+        const tone = fail ? 'low' : (pc >= 60 ? '' : (pc >= 40 ? 'mid' : 'low'));
+        tr += `<td class="rc-barcell"><span class="rc-bar ${tone}" title="${pc}%"><i style="width:${pc}%"></i></span></td>`;
+      }
       if(showGP) tr += `<td class="c">${r.info ? r.info.gp : '—'}</td>`;
       if(showRem) tr += `<td>${r.info ? escapeHtml(r.info.remark) : ''}</td>`;
       return tr + '</tr>';
@@ -289,7 +375,7 @@
     if(showMarks){
       const lead = `<td colspan="${colSpanLead}">Total</td>`;
       const mid = multi ? src.exams.map(() => '<td></td>').join('') + `<td class="c">${sc.totalObtained}/${sc.totalMax}</td>` : `<td class="c">${sc.totalMax}</td><td class="c">${sc.totalObtained}</td>`;
-      foot = `<tr class="rc-total">${lead}${mid}${showTopper?'<td></td>':''}${showGrade?`<td class="c">${sc.info ? escapeHtml(sc.info.grade) : '—'}</td>`:''}${showGP?'<td></td>':''}${showRem?'<td></td>':''}</tr>`;
+      foot = `<tr class="rc-total">${lead}${mid}${showTopper?'<td></td>':''}${showGrade?`<td class="c">${sc.info ? escapeHtml(sc.info.grade) : '—'}</td>`:''}${design === 'bars' && showMarks ? '<td></td>' : ''}${showGP?'<td></td>':''}${showRem?'<td></td>':''}</tr>`;
     }
     return `<table><thead>${head}</thead><tbody>${body}${foot}</tbody></table>`;
   }
@@ -313,21 +399,37 @@
     if(scheme && scheme.showGP && sc.gpa !== null) boxes.push(`<div class="rc-sumbox"><b>${sc.gpa.toFixed(1)}</b>GPA</div>`);
     if(rank && rank.outOf > 1) boxes.push(`<div class="rc-sumbox"><b>${ordinalSuffix(rank.rank)}</b>Rank (of ${rank.outOf})</div>`);
     if(t.showResult !== false && sc.result !== '—') boxes.push(`<div class="rc-sumbox ${sc.result==='FAIL'?'bad':''}"><b>${sc.result}</b>Result${sc.failCount ? ` · ${sc.failCount} subject${sc.failCount===1?'':'s'}` : ''}</div>`);
-    const cls = (opts.perPage === 2) ? 'rc-two' : ('rc-one' + ((t.parentSign || 'box') === 'slip' ? ' rc-full' : ''));
+    const design = prcDesignKey(t);
+    const cls = ((opts.perPage === 2) ? 'rc-two' : ('rc-one' + ((t.parentSign || 'box') === 'slip' ? ' rc-full' : ''))) + ' rc-d-' + design;
+    let trend = '';
+    if(design === 'bars' && src.mode === 'period' && src.exams.length > 1 && showMarks){
+      const rows = src.exams.map((ex, i) => {
+        let o = 0, m = 0;
+        sc.rows.forEach(r => { const c = r.cells[i]; if(r.countable && c && c.marks !== null){ o += c.marks; m += c.max; } });
+        const pc = m > 0 ? prcR1(o / m * 100) : null;
+        return `<div class="rc-trend-row"><span>${escapeHtml(ex.name)}</span><span class="rc-bar ${pc === null || pc >= 60 ? '' : (pc >= 40 ? 'mid' : 'low')}"><i style="width:${pc === null ? 0 : Math.min(100, pc)}%"></i></span><span>${pc === null ? '—' : pc + '%'}</span></div>`;
+      }).join('');
+      trend = `<div class="rc-trend"><b>Performance by exam (% of marks)</b>${rows}</div>`;
+    }
     return `
       <div class="rc-card ${cls}">
-        <div class="rc-head">${opts.logoSrc ? (opts.logoInline ? `<img src="${opts.logoSrc}">` : '<div class="rc-logo"></div>') : ''}</div>
-        <div class="rc-school">${escapeHtml(schoolInfo.name||'')}</div>
-        <div class="rc-addr">${escapeHtml(schoolInfo.address||'')}</div>
-        <div class="rc-title">${escapeHtml(title)}</div>
-        <div class="rc-basis">${basis}${pendNote}</div>
-        <div class="rc-info">${buildInfoFieldLines(s, src.pseudo, t)}</div>
-        ${sc.rows.length ? prcTableHtml(s, sc, src, t) : '<p style="font-size:10px;color:#777;">No subjects are set up for this class in the selected exam.</p>'}
-        <div class="rc-sum">${boxes.join('')}</div>
-        ${coScholasticSectionHtml(s, src.coExam, t)}
-        ${t.footerNote ? `<p class="rc-foot">${escapeHtml(t.footerNote)}</p>` : ''}
-        <div class="rc-grow"></div>
-        ${prcSignHtml(s, t, title)}
+        <div class="rc-hdr">
+          <div class="rc-head">${opts.logoSrc ? (opts.logoInline ? `<img src="${opts.logoSrc}">` : '<div class="rc-logo"></div>') : ''}</div>
+          <div class="rc-school">${escapeHtml(schoolInfo.name||'')}</div>
+          <div class="rc-addr">${escapeHtml(schoolInfo.address||'')}</div>
+        </div>
+        <div class="rc-body">
+          <div class="rc-title">${escapeHtml(title)}</div>
+          <div class="rc-basis">${basis}${pendNote}</div>
+          <div class="rc-info">${buildInfoFieldLines(s, src.pseudo, t)}</div>
+          ${sc.rows.length ? prcTableHtml(s, sc, src, t) : '<p style="font-size:10px;color:#777;">No subjects are set up for this class in the selected exam.</p>'}
+          ${trend}
+          <div class="rc-sum">${boxes.join('')}</div>
+          ${coScholasticSectionHtml(s, src.coExam, t)}
+          ${t.footerNote ? `<p class="rc-foot">${escapeHtml(t.footerNote)}</p>` : ''}
+          <div class="rc-grow"></div>
+          ${prcSignHtml(s, t, title)}
+        </div>
       </div>`;
   }
   // The parent portal (and anything older) still calls this with (student, exam, logo, template).
@@ -433,7 +535,12 @@
           <div class="prc-opts" id="prcOpts"></div>
         </div>
         <div class="sf-card prc-step prc-step--wide">
-          <div class="prc-stephead"><i>3</i><b>Parent signature</b><span class="prc-sub">Click a style to preview it on the report below</span></div>
+          <div class="prc-stephead"><i>3</i><b>Design</b><span class="prc-sub">Choose how the report looks — the preview below updates</span></div>
+          <div class="prc-designs" id="prcDesigns"></div>
+          <div class="prc-design-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="prcCopyAsTemplate()">Save as a new template…</button><span class="prc-hint">Keeps your current template as it is and adds this design as another template.</span></div>
+        </div>
+        <div class="sf-card prc-step prc-step--wide">
+          <div class="prc-stephead"><i>4</i><b>Parent signature</b><span class="prc-sub">Click a style to preview it on the report below</span></div>
           <div class="prc-signs" id="prcSigns"></div>
           <div class="prc-signopts" id="prcSignOpts"></div>
         </div>
@@ -460,7 +567,7 @@
     document.getElementById('prcOnlyComp').checked = prcOnlyComplete;
     document.getElementById('prcTitleInput').value = prcTitle;
     document.getElementById('prcTemplateSel').value = prcTemplateId;
-    prcPaintSource(); prcPaintTitle(); prcPaintOpts(); prcPaintSigns(); prcPaintRoster(); prcPaintPreview();
+    prcPaintSource(); prcPaintTitle(); prcPaintOpts(); prcPaintDesigns(); prcPaintSigns(); prcPaintRoster(); prcPaintPreview();
   }
 
   function prcPaintSource(){
@@ -513,6 +620,40 @@
         ${cur === 'box' ? `<label class="prc-inline" style="margin-top:8px;"><input type="checkbox" ${t.parentRemarks !== false ? 'checked' : ''} onchange="prcSetTplOpt('parentRemarks', this.checked)"> Include a “Parent remarks” line</label>` : ''}` : '';
     }
   }
+  function prcDesignMini(key){
+    const rows = '<b></b><b></b><b></b><b></b>';
+    return `<div class="prc-dm prc-dm-${key}"><div class="prc-dm-h"><i></i></div><div class="prc-dm-t"></div><div class="prc-dm-rows">${rows}</div><div class="prc-dm-s"></div></div>`;
+  }
+  function prcPaintDesigns(){
+    const box = document.getElementById('prcDesigns');
+    if(!box) return;
+    const cur = prcDesignKey(prcTemplate());
+    box.innerHTML = PRC_DESIGNS.map(d => `<button type="button" class="prc-design ${cur === d.key ? 'on' : ''}" aria-pressed="${cur === d.key}" onclick="prcSetDesign('${d.key}')">${prcDesignMini(d.key)}<b>${d.name}</b><span>${d.desc}</span></button>`).join('');
+  }
+  async function prcSetDesign(key){
+    prcTemplate().design = key;
+    prcPaintDesigns(); prcPaintPreview();
+    await prcSaveTemplates();
+  }
+  async function prcCopyAsTemplate(){
+    const cur = prcTemplate();
+    if(!cur || !cur.id){ showToast('Save a template first.'); return; }
+    const d = PRC_DESIGNS.find(x => x.key === prcDesignKey(cur));
+    const name = await showPromptDialog('Name for the new template (it copies the current template with the design “' + (d ? d.name : 'Classic') + '”).', { title:'Save as a new template', okText:'Save', placeholder:'e.g. Annual card — gold', defaultValue:(cur.name || 'Template') + ' — ' + (d ? d.name : '') });
+    if(name === null) return;
+    if(!name.trim()){ showToast('Enter a name for the template.'); return; }
+    const copy = JSON.parse(JSON.stringify(cur));
+    copy.id = 'tmpl_' + Date.now();
+    copy.name = name.trim();
+    copy.isDefault = false;
+    reportTemplates.push(copy);
+    prcTemplateId = copy.id;
+    await storageSet(REPORT_TEMPLATES_KEY, reportTemplates);
+    const sel = document.getElementById('prcTemplateSel');
+    if(sel){ sel.innerHTML = reportTemplates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join(''); sel.value = copy.id; }
+    prcInvalidate(); prcPaintTitle(); prcPaintOpts(); prcPaintDesigns(); prcPaintSigns(); prcPaintRoster(); prcPaintPreview();
+    showToast('Template “' + copy.name + '” added.');
+  }
   async function prcSaveTemplates(){
     if(!prcTemplate().id) return;
     try{ await storageSet(REPORT_TEMPLATES_KEY, reportTemplates); }catch(e){}
@@ -535,7 +676,7 @@
     prcInvalidate(); prcPaintSource(); prcPaintTitle(); prcPaintRoster(); prcPaintPreview();
   }
   function prcSetSource(id){ prcSourceId = id; prcInvalidate(); prcPaintSource(); prcPaintTitle(); prcPaintRoster(); prcPaintPreview(); }
-  function prcSetTemplate(id){ prcTemplateId = id; prcInvalidate(); prcPaintTitle(); prcPaintOpts(); prcPaintSigns(); prcPaintRoster(); prcPaintPreview(); }
+  function prcSetTemplate(id){ prcTemplateId = id; prcInvalidate(); prcPaintTitle(); prcPaintOpts(); prcPaintDesigns(); prcPaintSigns(); prcPaintRoster(); prcPaintPreview(); }
   function prcSetClass(c){ prcClass = c; prcStudentId = ''; prcPaintRoster(); prcPaintPreview(); }
   function prcSetSection(x){ prcSection = x; prcStudentId = ''; prcPaintRoster(); prcPaintPreview(); }
   function prcOnSearch(v){ prcSearchText = v; clearTimeout(prcSearchTimer); prcSearchTimer = setTimeout(prcPaintRoster, 150); }
