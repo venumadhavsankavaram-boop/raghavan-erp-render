@@ -3829,6 +3829,16 @@ function noticeForStudent(m, s) {
   if (sc === 'individual') return m.individualId === s.id;
   return false; // staff / teachers / website-only / fee defaulters
 }
+// Posting a notice to the PUBLIC website needs more than Notice Board access:
+// Admin, Principal, or a role an admin explicitly granted "Publish to Public
+// Website" (noticeboard_website) in Roles & Permissions. Mirrors
+// canPublishToWebsite() in the client.
+async function canPublishToWebsite(role) {
+  if (role === 'Admin') return true;
+  const ov = await getRoleOverride(role);
+  if (ov && ov.noticeboard_website !== undefined) return !!ov.noticeboard_website.create;
+  return role === 'Principal';
+}
 async function handleCommsMessagesRead(req, res) {
   const rows = await sql.query('SELECT * FROM comms_messages FORCE INDEX (idx_comms_messages_created_at) ORDER BY created_at ASC');
   const all = rows.map(r => hybridToAppShape(r, HYBRID_RESOURCES['comms-messages'].core));
@@ -4507,6 +4517,9 @@ app.all('/api/:resource', async (req, res) => {
     // write — everything else for 'students' still goes through the normal
     // 'admissions' gate right below.
     if (resource === 'comms-messages' && req.method === 'GET') return await handleCommsMessagesRead(req, res);
+    if (resource === 'comms-messages' && (req.method === 'POST' || req.method === 'PUT') && req.authUser && noticeIsWebsite(req.body || {}) && !(await canPublishToWebsite(req.authUser.role))) {
+      return res.status(403).json({ error: 'You do not have permission to publish notices to the public website.' });
+    }
     if (resource === 'students' && req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
       const student = await getLinkedStudent(req.authUser.id);
       return res.status(200).json(student ? [hybridToAppShape(student, HYBRID_RESOURCES.students.core)] : []);

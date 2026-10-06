@@ -50,6 +50,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     { key:'noticeboard', label:'Notice Board',         icon:'📌', category:'Communication' },
     { key:'noticeboard_post',     label:'Post / Edit Notices', icon:'✍️', category:'Communication', parent:'noticeboard', isNew:true },
     { key:'noticeboard_headings', label:'Manage Headings',     icon:'🏷️', category:'Communication', parent:'noticeboard', isNew:true },
+    { key:'noticeboard_website',  label:'Publish to Public Website', icon:'🌐', category:'Communication', parent:'noticeboard', isNew:true },
     { key:'websiteinquiries', label:'Website Inquiries', icon:'🌐', category:'Communication' },
     { key:'websitegallery', label:'Website Gallery',   icon:'🖼️', category:'Communication' },
     { key:'contactvendor', label:'Contact Vendor',   icon:'✉️', category:'Communication' },
@@ -331,7 +332,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
   function getPromoTransferTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'promotransfer', action); }
   const COMMS_SUBMODULE_KEYS = ['comms_compose','comms_log'];
   function getCommsTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'announcements', action); }
-  const NOTICEBOARD_SUBMODULE_KEYS = ['noticeboard_post','noticeboard_headings'];
+  const NOTICEBOARD_SUBMODULE_KEYS = ['noticeboard_post','noticeboard_headings','noticeboard_website'];
   function getNoticeBoardTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'noticeboard', action); }
   const MANAGEFEE_SUBMODULE_KEYS = ['managefee_collection','managefee_structure','managefee_types','managefee_discounts','managefee_extra','managefee_late','managefee_defaulters'];
   function getManageFeeTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'managefee', action); }
@@ -347,6 +348,18 @@ const CUSTOM_ROLES_KEY = "custom-roles";
   function canSub(subKey, parentKey, action){
     if(!currentUser) return false;
     return getSubModuleAccess(currentUser.role, subKey, parentKey, action);
+  }
+  // Putting a notice on the PUBLIC school website is a separate, stricter
+  // permission than posting inside the ERP: unless an admin has explicitly
+  // granted "Publish to Public Website" to a role in Roles & Permissions,
+  // only Admin and Principal can do it. (The server enforces the same rule.)
+  function canPublishToWebsite(){
+    if(!currentUser) return false;
+    const role = currentUser.role;
+    if(role === 'Admin') return true;
+    const ov = findRoleOverride(role);
+    if(ov && ov.permissions && ov.permissions.noticeboard_website !== undefined) return !!ov.permissions.noticeboard_website.create;
+    return role === 'Principal';
   }
   function allRoleNames(){
     return [...ROLES, ...customRoles.map(r => r.name).filter(n => !ROLES.includes(n))];
@@ -386,6 +399,10 @@ const CUSTOM_ROLES_KEY = "custom-roles";
         });
       }
     });
+    // Publishing to the public website is never granted by default except to Admin / Principal.
+    if(roleName !== 'Admin' && roleName !== 'Principal' && p.noticeboard_website){
+      PERMISSION_ACTIONS.forEach(a => { p.noticeboard_website[a] = false; });
+    }
     return p;
   }
 

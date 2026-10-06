@@ -81,7 +81,7 @@ function nbxIsErp(n){ return (n.channels || []).includes('In-App') || (n.audienc
 
 /* ---------- composer ---------- */
 function nbxToggle(which){
-  if(which === 'web') nbxWeb = !nbxWeb;
+  if(which === 'web') nbxWeb = canPublishToWebsite() && !nbxWeb;
   if(which === 'inapp') nbxInApp = !nbxInApp;
   if(which === 'push') nbxPush = !nbxPush;
   if(which === 'wa') nbxWa = !nbxWa;
@@ -100,7 +100,7 @@ function nbxPaintComposer(){
     <div class="nbx-sec">
       <div class="nbx-lbl">1 · Where should it appear?</div>
       <div class="nbx-chips">
-        ${nbxChip(nbxWeb, '🌐', 'Public website', 'Anyone visiting the school site', 'web')}
+        ${canPublishToWebsite() ? nbxChip(nbxWeb, '🌐', 'Public website', 'Anyone visiting the school site', 'web') : `<div class="nbx-chip nbx-locked" title="Ask an Admin or the Principal to publish to the website"><span class="nbx-chip-ic" aria-hidden="true">🔒</span><span><b>Public website</b><small>Needs Admin / Principal permission</small></span></div>`}
         ${nbxChip(nbxInApp, '📱', 'In-App', 'Parent portal &amp; staff inbox', 'inapp')}
         ${nbxChip(nbxPush, '🔔', 'Push alert', 'Phone notification', 'push')}
         ${nbxChip(nbxWa, '💬', 'WhatsApp', 'Pre-filled chats you send', 'wa')}
@@ -148,6 +148,7 @@ async function postQuickNotice(){
   const bodyText = document.getElementById('nbBody').value.trim();
   if(!title){ showToast('Enter a title.'); return; }
   if(!bodyText){ showToast('Enter a message.'); return; }
+  if(nbxWeb && !canPublishToWebsite()){ nbxWeb = false; showToast('You do not have permission to publish to the public website.'); return; }
   if(!nbxWeb && !nbxErpOn()){ showToast('Choose where this notice should appear.'); return; }
   const targets = nbxTargets();
   if(nbxErpOn() && !targets.length){ showToast('No recipients match this audience — pick who should get it.'); return; }
@@ -267,7 +268,7 @@ function renderNoticeBoard(body){
           <div class="f-field full" style="margin-bottom:10px;"><label>Title</label><input type="text" id="editNoticeTitle" value="${cmEsc(n.title)}"></div>
           <div class="f-field full" style="margin-bottom:10px;"><label>Message</label><textarea id="editNoticeBody" rows="5">${cmEsc(n.body)}</textarea></div>
           <div class="f-field full" style="margin-bottom:10px;"><label>Read-more link <small>(optional)</small></label><input type="text" id="editNoticeLink" value="${cmEsc(n.link || '')}" placeholder="https://…"></div>
-          <label class="nbx-inline"><input type="checkbox" id="editNoticeWeb" ${nbxIsWebsite(n) ? 'checked' : ''}> Show on the public website</label>
+          ${canPublishToWebsite() ? `<label class="nbx-inline"><input type="checkbox" id="editNoticeWeb" ${nbxIsWebsite(n) ? 'checked' : ''}> Show on the public website</label>` : ''}
           <div class="cm-actions">${sfBtn('link', '', 'Cancel', 'cancelNoticeEdit()')}${sfBtn('primary', '', 'Save changes', `saveNoticeEdit('${n.id}')`)}</div>
         </article>`;
       }
@@ -281,7 +282,7 @@ function renderNoticeBoard(body){
           ${nbxNoteBadges(n)}
           <span class="cm-by">by ${cmEsc(n.sentBy)}</span>
           <span class="cm-actions">
-            ${canEditNb ? sfBtn('soft', '', 'Edit', `editNotice('${n.id}')`) : ''}
+            ${canEditNb && (!nbxIsWebsite(n) || canPublishToWebsite()) ? sfBtn('soft', '', 'Edit', `editNotice('${n.id}')`) : ''}
             ${canDeleteNb ? sfBtn('danger', '', 'Take down', `deleteNotice('${n.id}')`) : ''}
           </span>
         </div>
@@ -300,7 +301,8 @@ async function saveNoticeEdit(id){
   const linkEl = document.getElementById('editNoticeLink');
   const link = cleanNoticeLink(linkEl ? linkEl.value : n.link);
   if(!link.ok){ showToast('That link doesn\'t look right — use a web address like https://example.com/page'); return; }
-  const web = !!document.getElementById('editNoticeWeb').checked;
+  const webBox = document.getElementById('editNoticeWeb');
+  const web = webBox ? !!webBox.checked : nbxIsWebsite(n);
   const ch = (n.channels || []).filter(c => c !== 'Website');
   if(!web && !ch.includes('In-App')){ showToast('This notice is only on the website — use "Take down" to remove it.'); return; }
   n.title = title; n.body = bodyText; n.link = link.value;
