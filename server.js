@@ -1375,6 +1375,7 @@ const KV_KEY_TO_MODULE = {
   'fee-schedule': ['managefee'],
   'receipt-settings': ['managefee'],
   'grading-scale': ['exams', 'result'],
+  'grading-schemes': ['exams', 'result'],
   'exam-types': ['exams', 'result'],
   'exam-groups': ['exams', 'result'],
   'consolidation-scale': ['exams', 'result'],
@@ -3382,7 +3383,7 @@ const PARENT_SHARED_REFERENCE_RESOURCES = ['fee-structure', 'exam-defs', 'subjec
 // leaving the tab empty instead of erroring loudly.
 // 'fee-schedule' added so a parent's Fees tab shows the same term due dates the
 // office sees (it holds only dates and percentages, nothing per-student).
-const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule'];
+const PARENT_SHARED_REFERENCE_KV_KEYS = ['late-fee-settings', 'syllabus-topics', 'fee-schedule', 'grading-scale', 'grading-schemes'];
 
 app.post('/api/login', async (req, res) => {
   try {

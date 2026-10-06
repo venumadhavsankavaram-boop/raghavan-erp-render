@@ -1879,6 +1879,101 @@
   .ivp-stats b{color:var(--navy); font-size:0.9rem;} .ivp-stats b.iv-qty--low{color:var(--warning-ink);} .ivp-stats b.iv-qty--out{color:var(--danger-ink);}
   .ivp .sf-actions{margin-top:auto; padding-top:10px; border-top:1px dashed var(--border);}
   @media (max-width:720px){ .ivp-grid{grid-template-columns:1fr;} }
+  /* ===== Grading wizard (10c) ===== */
+  .gsw-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+  .gsw-head h3,.prc-intro h3,.prc-who-head h3,.prc-prev-head h3{margin:0 0 2px;font-size:1.05rem;color:var(--navy)}
+  .gsw-head p,.prc-intro p{margin:0;font-size:.85rem;color:var(--ink-soft);max-width:620px}
+  .gsw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;margin-bottom:16px}
+  .gsw-card{padding:16px}
+  .gsw-card.is-default{border-color:var(--teal)}
+  .gsw-card-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
+  .gsw-chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
+  .gsw-chip{display:inline-flex;gap:5px;align-items:baseline;padding:3px 8px;border-radius:6px;font-size:.74rem;color:var(--ink);background:rgba(120,120,140,.12)}
+  .gsw-chip em{font-style:normal;color:var(--danger);font-weight:600}
+  .gsw-meta{font-size:.78rem;color:var(--ink-soft);margin-bottom:12px}
+  .gsw-actions{display:flex;gap:6px;flex-wrap:wrap}
+  .gsw-note{font-size:.82rem;color:var(--ink-soft);margin:0 0 14px}
+  .gsw-test{padding:14px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:.84rem}
+  .gsw-test-out{display:flex;gap:6px;flex-wrap:wrap;width:100%}
+  .gsw-steps{display:flex;gap:8px;margin:6px 0 14px;flex-wrap:wrap}
+  .gsw-step{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--ink-soft);padding:6px 12px 6px 6px;border-radius:999px;border:1px solid var(--border)}
+  .gsw-step i{font-style:normal;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--border);color:var(--ink);font-size:.75rem;font-weight:700}
+  .gsw-step.on{border-color:var(--navy);color:var(--navy);font-weight:600}
+  .gsw-step.on i{background:var(--navy);color:#fff}
+  .gsw-step.done i{background:var(--success);color:#fff}
+  .gsw-wiz{padding:18px}
+  .gsw-label{display:block;font-size:.8rem;font-weight:600;color:var(--navy);margin-bottom:8px}
+  .gsw-presets{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+  .gsw-preset{text-align:left;border:1.5px solid var(--border);background:transparent;border-radius:10px;padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:3px;color:var(--ink);font:inherit}
+  .gsw-preset b{font-size:.88rem}.gsw-preset span{font-size:.76rem;color:var(--ink-soft);margin-bottom:6px}
+  .gsw-preset:hover{border-color:var(--teal)}.gsw-preset.on{border-color:var(--navy);box-shadow:0 0 0 2px rgba(33,26,78,.15)}
+  .gsw-preset .gsw-chips{margin:0;gap:3px}.gsw-preset .gsw-chip{font-size:.66rem;padding:2px 5px}
+  .gsw-pass{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px}
+  .gsw-pass p{margin:0;font-size:.8rem;color:var(--ink-soft);max-width:420px}
+  .gsw-table input{width:100%}.gsw-to{color:var(--ink-soft);white-space:nowrap}
+  .gsw-issues{margin-top:10px;font-size:.8rem;padding:8px 12px;border-radius:8px}
+  .gsw-issues.ok{background:var(--success-bg,rgba(24,143,134,.12));color:var(--success-ink,inherit)}
+  .gsw-issues.bad{background:var(--warning-bg,rgba(203,154,46,.15));color:var(--warning-ink,inherit)}
+  .gsw-cols{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  .gsw-radio,.gsw-check,.prc-inline{display:flex;gap:8px;align-items:center;font-size:.84rem;margin:6px 0;cursor:pointer}
+  .gsw-radio small{color:var(--ink-soft);margin-left:4px}
+  .gsw-classes{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:0 10px;max-height:190px;overflow:auto}
+  .gsw-hint{font-size:.78rem;color:var(--ink-soft);margin:4px 0 8px}
+  .gsw-prev{width:100%;border-collapse:collapse;font-size:.82rem}
+  .gsw-prev th,.gsw-prev td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left}
+  .gsw-prev tr.fail td{color:var(--danger)}
+  .gsw-prev-sum{margin:10px 0 4px;font-size:.84rem}
+  #gswPreview{padding:14px}#gswPreview small{color:var(--ink-soft)}
+  .gsw-foot{display:flex;gap:10px;align-items:center;margin-top:14px}
+  @media (max-width:760px){.gsw-cols{grid-template-columns:1fr}.gsw-grid{grid-template-columns:1fr}}
+
+  /* ===== Progress Report center (10b) ===== */
+  .prc-intro{margin-bottom:14px}
+  .prc-setup{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:22px}
+  .prc-step{padding:16px}.prc-step--wide{grid-column:1 / -1}
+  .prc-stephead{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .prc-stephead i{font-style:normal;width:24px;height:24px;border-radius:50%;background:var(--navy);color:#fff;display:grid;place-items:center;font-size:.78rem;font-weight:700}
+  .prc-sub{font-size:.78rem;color:var(--ink-soft);font-weight:400}
+  .prc-lbl{display:block;font-size:.78rem;font-weight:600;color:var(--navy);margin-bottom:5px}
+  .prc-hint{font-size:.78rem;color:var(--ink-soft);margin:6px 0 0}
+  .prc-hint a{color:var(--magenta);cursor:pointer;font-weight:600}
+  .prc-step .input,.gsw-wiz .input,.prc-signopts .input{width:100%;max-width:none;min-width:0}
+  .gsw-table .input{min-width:0}
+  .prc-who .iv-toolbar .input.iv-search{max-width:260px}
+  .prc-row{display:flex;gap:8px;align-items:center}.prc-row .input{flex:1}
+  .prc-step .sf-segments{margin-bottom:10px}
+  .prc-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:.78rem}
+  .prc-chips-l{color:var(--ink-soft)}.prc-plus{color:var(--ink-soft)}
+  .prc-opts{display:flex;gap:4px 16px;flex-wrap:wrap;margin-top:10px}
+  .prc-signs{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .prc-sign{text-align:left;border:1.5px solid var(--border);background:transparent;border-radius:10px;padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:4px;color:var(--ink);font:inherit}
+  .prc-sign b{font-size:.86rem}.prc-sign span{font-size:.75rem;color:var(--ink-soft)}
+  .prc-sign:hover{border-color:var(--teal)}.prc-sign.on{border-color:var(--navy);box-shadow:0 0 0 2px rgba(33,26,78,.18)}
+  .prc-mini{background:#fff;border:1px solid #ccc;border-radius:4px;padding:8px 8px 6px;margin-bottom:8px;height:104px;display:flex;flex-direction:column;justify-content:flex-end;gap:7px;color:#444}
+  .prc-mini-row{display:flex;gap:8px;justify-content:space-between;font-size:.55rem;text-align:center}
+  .prc-mini-row span{flex:1}.prc-mini i{display:block;border-bottom:1px solid #555;height:10px;margin-bottom:2px}
+  .prc-mini-box{border:1px solid #211A4E;border-radius:3px;padding:4px;display:flex;flex-direction:column;gap:4px;font-size:.5rem}
+  .prc-mini-box u{display:block;border-bottom:1px solid #aaa;height:4px;text-decoration:none}.prc-mini-box u.s{width:60%}
+  .prc-mini-box>div{display:flex;gap:6px}.prc-mini-box>div span{flex:1}.prc-mini-box>div span.d{flex:.5}
+  .prc-mini-box.slip{border-style:dashed}
+  .prc-mini-cut{font-size:.5rem;text-align:center;border-top:1px dashed #666;color:#777;line-height:1}
+  .prc-signopts{margin-top:12px;max-width:560px}
+  .prc-who{margin-bottom:22px}
+  .prc-who-head,.prc-prev-head{display:flex;align-items:baseline;gap:10px;margin:0 0 10px}
+  .prc-who .sf-kpis{margin-bottom:12px}
+  .prc-who .iv-toolbar{flex-wrap:wrap;gap:8px}
+  .prc-who .iv-toolbar select{width:auto;min-width:130px}
+  .prc-roster td.c,.prc-roster th.c{text-align:center}
+  .prc-roster tbody tr{cursor:pointer}.prc-roster tbody tr:hover{background:rgba(120,120,160,.07)}
+  .prc-roster tr.prc-sel{background:rgba(24,143,134,.1)}
+  .prc-stu{display:flex;align-items:center;gap:10px}.prc-stu small{display:block;color:var(--ink-soft);font-size:.72rem}
+  .prc-av{width:30px;height:30px;border-radius:50%;background:var(--navy);color:#fff;display:grid;place-items:center;font-size:.7rem;overflow:hidden;flex:none}.prc-av img{width:100%;height:100%;object-fit:cover}
+  .prc-act{text-align:right;white-space:nowrap}
+  .prc-paper{background:var(--border);border-radius:12px;padding:16px;overflow:auto}
+  .prc-paper iframe{display:block;margin:0 auto;border:0;background:#fff;width:794px;max-width:none;min-height:400px;box-shadow:0 2px 14px rgba(0,0,0,.18)}
+  .prc-prev-actions{margin-top:12px}
+  @media (max-width:900px){.prc-setup{grid-template-columns:1fr}.prc-signs{grid-template-columns:1fr 1fr}}
+  @media (max-width:520px){.prc-signs{grid-template-columns:1fr}.prc-paper{padding:8px}}
 </style>
 <script>
   /* ===== AUTOMATIC WEBSITE THEME SYNC =====
@@ -2344,9 +2439,8 @@
         <button type="button" class="mf-tab" id="restab-progress" onclick="switchResultTab('progress')">Progress Reports</button>
         <button type="button" class="mf-tab" id="restab-consolidated" onclick="switchResultTab('consolidated')">Consolidated Report</button>
         <button type="button" class="mf-tab" id="restab-yearend" onclick="switchResultTab('yearend')">🎓 Year-End Marks Cards</button>
-        <button type="button" class="mf-tab" id="restab-examtemplates" onclick="switchResultTab('examtemplates')">Exam Templates</button>
-        <button type="button" class="mf-tab" id="restab-consolscale" onclick="switchResultTab('consolscale')">Consolidation Scale</button>
-        <button type="button" class="mf-tab" id="restab-grading" onclick="switchResultTab('grading')">Grading Scale</button>
+        <button type="button" class="mf-tab" id="restab-examtemplates" onclick="switchResultTab('examtemplates')">Report Periods</button>
+        <button type="button" class="mf-tab" id="restab-grading" onclick="switchResultTab('grading')">Grading</button>
         <button type="button" class="mf-tab" id="restab-templates" onclick="switchResultTab('templates')">Report Templates</button>
       </div>
 
@@ -3730,6 +3824,8 @@
 <script src="modules/09-fees-subtabs.js"></script>
 <script src="modules/09b-attendance-ui.js"></script>
 <script src="modules/10-attendance-exams.js"></script>
+<script src="modules/10b-progress-report-ui.js"></script>
+<script src="modules/10c-grading-wizard-ui.js"></script>
 <script src="modules/11-exams-marks-entry.js"></script>
 <script src="modules/12-exam-room-allotment-admitcards.js"></script>
 <script src="modules/13-reports-teacher-performance.js"></script>

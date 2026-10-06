@@ -215,8 +215,8 @@ const ROOMS_KEY = "exam-rooms";
 
   /* --- Result module (Admit Cards, Progress Reports, Consolidated, Grading Scale, Templates) --- */
   let resultTab = 'admitcards';
-  const RESULT_TAB_PERM_KEYS = { admitcards:'result_admitcards', roomallotment:'result_roomallotment', progress:'result_progress', consolidated:'result_consolidated', yearend:'result_yearend', examtemplates:'result_examtemplates', consolscale:'result_consolscale', grading:'result_grading', templates:'result_templates' };
-  const RESULT_TABS = ['admitcards','roomallotment','progress','consolidated','yearend','examtemplates','consolscale','grading','templates'];
+  const RESULT_TAB_PERM_KEYS = { admitcards:'result_admitcards', roomallotment:'result_roomallotment', progress:'result_progress', consolidated:'result_consolidated', yearend:'result_yearend', examtemplates:'result_examtemplates', grading:'result_grading', templates:'result_templates' };
+  const RESULT_TABS = ['admitcards','roomallotment','progress','consolidated','yearend','examtemplates','grading','templates'];
   function initResultView(){
     document.getElementById('resAyBadge').textContent = 'AY ' + currentAcademicYearValue;
     const accessibleTabs = RESULT_TABS.filter(t => getResultTabAccess(currentUser.role, RESULT_TAB_PERM_KEYS[t]));
@@ -260,7 +260,6 @@ const ROOMS_KEY = "exam-rooms";
     if(resultTab === 'consolidated') return renderConsolidatedTab(body);
     if(resultTab === 'yearend') return renderYearEndTab(body);
     if(resultTab === 'examtemplates') return renderExamTemplatesTab(body);
-    if(resultTab === 'consolscale') return renderConsolidationScaleTab(body);
     if(resultTab === 'grading') return renderGradingScaleTab(body);
     if(resultTab === 'templates') return renderReportTemplatesTab(body);
   }
@@ -332,13 +331,6 @@ const ROOMS_KEY = "exam-rooms";
     renderExamHolidaysTab(document.getElementById('examBody'));
   }
 
-  function gradeForPct(pct){
-    const g = gradingScale.find(g => pct >= g.minPct && pct <= g.maxPct);
-    return g ? g.grade : '—';
-  }
-  function isFailGrade(grade){
-    return gradingScale.length ? grade === gradingScale[gradingScale.length-1].grade : false;
-  }
 
   /* --- Tab: Exams list + Exam Types + Subject configuration --- */
   function renderExamsListTab(body){
@@ -1147,109 +1139,8 @@ const ROOMS_KEY = "exam-rooms";
   }
 
   /* --- Tab: Report Cards (individual + bulk downloads) --- */
-  function renderReportCardsTab(body){
-    if(examDefs.length === 0){
-      body.innerHTML = `<div class="empty-state"><b>No exams yet</b>Create an exam first.</div>`;
-      return;
-    }
-    const examOptions = examDefs.map(ex => `<option value="${ex.id}">${ex.name}</option>`).join('');
-    const templateOptions = reportTemplates.map(t => `<option value="${t.id}" ${t.isDefault?'selected':''}>${t.name}</option>`).join('');
-    body.innerHTML = `
-      <div class="ms-toolbar">
-        <div class="ms-toolbar-left">
-          <div class="search-wrap">
-            <input class="input" id="rcSearch" placeholder="Search student by name..." autocomplete="off" oninput="onRcSearchInput()" onblur="setTimeout(hideRcSuggestions,150)" onfocus="onRcSearchInput()">
-            <div class="search-suggestions" id="rcSearchSuggestions"></div>
-          </div>
-          <select id="rcExamSelect" onchange="onRcExamChange()">${examOptions}</select>
-          <select id="rcTemplateSelect" title="Report template" onchange="onRcTemplateChange()">${templateOptions}</select>
-          <button class="btn btn-ghost btn-sm" onclick="openTemplateManager('reportcard')">Customize Templates</button>
-        </div>
-      </div>
-      <div id="rcResult"><div class="empty-state"><b>Search for a student</b>Pick a student above to preview and print their individual marks card.</div></div>
-
-      <div class="dash-section-title" style="margin-top:28px;"><div><h3>Download Marks Cards — Bulk</h3></div></div>
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:14px; max-width:640px;">Print marks cards for a whole class &amp; section, or every active student in the school, for the exam and template selected above.</p>
-      <div class="ms-toolbar">
-        <div class="ms-toolbar-left">
-          <select id="rcBulkClass"><option value="">All Classes</option>${CLASS_LEVELS.map(c => `<option>${c}</option>`).join('')}</select>
-          <select id="rcBulkSection"><option value="">All Sections</option>${SECTIONS.map(s => `<option value="${s}">Section ${s}</option>`).join('')}</select>
-        </div>
-        <button class="btn btn-primary" onclick="printBulkReportCards()">Download Marks Cards</button>
-      </div>
-    `;
-  }
-  function currentReportTemplate(){
-    const sel = document.getElementById('rcTemplateSelect');
-    const id = sel ? sel.value : '';
-    return reportTemplates.find(t => t.id === id) || reportTemplates.find(t => t.isDefault) || reportTemplates[0];
-  }
-  function bulkMarksCardStudents(){
-    const cls = document.getElementById('rcBulkClass').value;
-    const sec = document.getElementById('rcBulkSection').value;
-    return students.filter(s => isActive(s) && (!cls || s.className===cls) && (!sec || s.section===sec))
-      .sort((a,b) => (a.className+a.section+a.firstName).localeCompare(b.className+b.section+b.firstName));
-  }
-  async function printBulkReportCards(){
-    const examId = document.getElementById('rcExamSelect').value;
-    const exam = examDefs.find(e => e.id === examId);
-    if(!exam) return;
-    const template = currentReportTemplate();
-    const list = bulkMarksCardStudents();
-    if(list.length === 0){ showToast('No active students match that class/section.'); return; }
-    if(list.length > 60 && !await showConfirmDialog(`This will generate ${list.length} marks cards in one print job — continue?`)) return;
-    const logoSrc = document.querySelector('.sb-brand img').src;
-    let pagesHtml = '';
-    list.forEach((s, i) => {
-      pagesHtml += reportCardPageHtml(s, exam, logoSrc, template);
-      const isLast = i === list.length - 1;
-      const isPairEnd = (i % 2) === 1;
-      if(!isLast && isPairEnd) pagesHtml += '<div style="page-break-after:always;"></div>';
-    });
-    const fileTitle = `ReportCards_${exam.name.replace(/\s/g,'')}`;
-    const w = window.open('', '_blank');
-    w.document.write(`
-      <html><head><title>${fileTitle}</title>
-      <style>${reportCardPrintCss()}</style></head>
-      <body onload="window.print()">${pagesHtml}</body></html>
-    `);
-    w.document.close();
-  }
 
   let rcSearchDebounce = null, rcCurrentStudentId = '';
-  function onRcSearchInput(){
-    clearTimeout(rcSearchDebounce);
-    rcSearchDebounce = setTimeout(() => renderRcSuggestions(document.getElementById('rcSearch').value.trim()), 150);
-  }
-  function renderRcSuggestions(q){
-    const box = document.getElementById('rcSearchSuggestions');
-    if(!box) return;
-    if(q.length < 2){ box.classList.remove('open'); box.innerHTML=''; return; }
-    const ql = q.toLowerCase();
-    const matches = students.filter(s => (s.firstName||'').toLowerCase().includes(ql) || (s.lastName||'').toLowerCase().includes(ql) || (s.admissionNo||'').toLowerCase().includes(ql)).slice(0,8);
-    if(matches.length===0){ box.innerHTML = `<div class="sg-empty">No students match "${q}"</div>`; box.classList.add('open'); return; }
-    box.innerHTML = matches.map(s => `<div class="sg-item" onmousedown="selectRcSuggestion('${s.id}')">
-      <div class="sg-avatar">${s.photo?`<img src="${s.photo}">`:initials(s)}</div>
-      <div><div class="sg-name">${s.firstName} ${s.lastName}</div><div class="sg-meta">${s.admissionNo} · ${s.className} — Section ${s.section}</div></div>
-    </div>`).join('');
-    box.classList.add('open');
-  }
-  function selectRcSuggestion(id){
-    hideRcSuggestions();
-    document.getElementById('rcSearch').value = '';
-    rcCurrentStudentId = id;
-    loadReportCardPreview();
-  }
-  function hideRcSuggestions(){
-    const box = document.getElementById('rcSearchSuggestions');
-    if(box) box.classList.remove('open');
-  }
-  function onRcExamChange(){
-    if(rcCurrentStudentId) loadReportCardPreview();
-  }
-  function onRcTemplateChange(){
-    if(rcCurrentStudentId) loadReportCardPreview();
-  }
   function coScholasticEditorHtml(s, exam, t){
     if(!t || t.layout !== 'modern') return '';
     const rec = examCoScholastic[coScholasticKeyFor(exam.id, s.id)] || { areas:{}, discipline:'' };
@@ -1269,85 +1160,7 @@ const ROOMS_KEY = "exam-rooms";
     `;
   }
 
-  function loadReportCardPreview(){
-    const s = students.find(x => x.id === rcCurrentStudentId);
-    const examId = document.getElementById('rcExamSelect').value;
-    const exam = examDefs.find(e => e.id === examId);
-    if(!s || !exam) return;
-    const t = currentReportTemplate() || { showAttendance:true, showClassTopper:true, showRank:true };
-    const showTopper = t.showClassTopper !== false;
-    const showRank = t.showRank !== false;
-    const rows = getExamSubjects(exam, s.className, s.section).map(subj => {
-      const r = examResults.find(r => r.examId===exam.id && r.studentId===s.id && r.subject===subj.name);
-      const topper = showTopper ? classTopperMarksFor(exam, s.className, s.section, subj.name) : null;
-      return { subject: subj.name, code: subj.code||'', date: subj.date||'', marks: r ? r.marks : null, absent: r ? !!r.absent : false, max: subj.maxMarks, countable: subj.countable!==false, elective: !!subj.elective, topper };
-    }).sort((a,b) => (a.date||'').localeCompare(b.date||''));
-    const countableRows = rows.filter(r => r.countable);
-    const totalMax = countableRows.reduce((sum,r) => sum+r.max, 0);
-    const totalObtained = countableRows.reduce((sum,r) => sum+(Number(r.marks)||0), 0);
-    const pct = totalMax > 0 ? Math.round((totalObtained/totalMax)*1000)/10 : 0;
-    const grade = gradeForPct(pct);
-    const rankInfo = showRank ? classSectionRankFor(exam, s.className, s.section, s.id) : null;
-    const attEndDate = exam.endDate || exam.startDate;
-    let attCardHtml = '';
-    if(t.showAttendance !== false){
-      if(attEndDate){
-        const attStats = computeAttendanceStats(s.id, undefined, attEndDate);
-        attCardHtml = attStats.total > 0
-          ? `<div class="fee-sum-card"><b>${attStats.pct}%</b><span>Attendance (till ${attEndDate})</span></div>`
-          : `<div class="fee-sum-card"><b>—</b><span>No attendance recorded yet</span></div>`;
-      }else{
-        attCardHtml = `<div class="fee-sum-card"><b>—</b><span>Set an exam date to show attendance</span></div>`;
-      }
-    }
 
-    document.getElementById('rcResult').innerHTML = `
-      <div class="profile-head">
-        ${s.photo ? `<img class="profile-photo" src="${s.photo}">` : `<div class="profile-photo">${initials(s)}</div>`}
-        <div><h2>${s.firstName} ${s.lastName}</h2><div class="p-meta">${s.admissionNo} · ${s.className} — Section ${s.section} · ${exam.name}</div></div>
-        <div class="profile-actions"><button class="btn btn-primary" onclick="printReportCard('${s.id}','${exam.id}')">Print Report Card</button></div>
-      </div>
-      <div class="table-wrap">
-        <table><thead><tr><th>Code</th><th>Subject</th><th>Date</th><th>Marks Obtained</th><th>Max Marks</th>${showTopper ? '<th>Highest in Class</th>' : ''}</tr></thead>
-        <tbody>
-        ${rows.map(r => `<tr><td>${r.code||'—'}</td><td>${r.subject}${r.elective?' <span class="pill" style="font-size:0.62rem;">Elective</span>':''}${!r.countable?' <span class="pill" style="font-size:0.62rem; background:rgba(203,154,46,0.18); color:#8a6a1f;">Not counted</span>':''}</td><td>${r.date||'—'}</td><td>${r.absent ? 'AB' : (r.marks!==null?r.marks:'—')}</td><td>${r.max}</td>${showTopper ? `<td>${r.topper!==null?r.topper:'—'}</td>` : ''}</tr>`).join('')}
-        <tr class="rcpt-total-row"><td colspan="3"><b>Total</b></td><td><b>${totalObtained}</b></td><td><b>${totalMax}</b></td>${showTopper ? '<td></td>' : ''}</tr>
-        </tbody></table>
-      </div>
-      <div class="fee-summary-row" style="margin-top:16px;">
-        <div class="fee-sum-card"><b>${pct}%</b><span>Percentage</span></div>
-        <div class="fee-sum-card"><span class="grade-pill ${isFailGrade(grade)?'fail':''}" style="font-size:1.1rem;">${grade}</span><span>Grade</span></div>
-        ${rankInfo ? `<div class="fee-sum-card"><b>${ordinalSuffix(rankInfo.rank)}</b><span>Class Rank (${s.className} — ${s.section}, of ${rankInfo.outOf})</span></div>` : ''}
-        ${attCardHtml}
-      </div>
-      ${coScholasticEditorHtml(s, exam, t)}
-    `;
-  }
-
-  function reportCardPrintCss(){
-    return `
-      @page{ size:A4; margin:8mm; }
-      body{ font-family:Arial,Helvetica,sans-serif; color:#111; }
-      .rc-card{ min-height:136mm; box-sizing:border-box; padding:6mm 8mm; border:1px solid #666; border-radius:3mm; page-break-inside:avoid; }
-      .rc-card + .rc-card{ margin-top:6mm; }
-      .rc-head{ display:flex; align-items:center; gap:8px; justify-content:center; margin-bottom:3px; }
-      .rc-head img{ width:30px; height:30px; border-radius:50%; }
-      .rc-school{ font-weight:700; font-size:14px; text-align:center; }
-      .rc-addr{ font-size:9px; text-align:center; color:#555; margin-bottom:6px; }
-      .rc-title{ text-align:center; font-weight:700; font-size:11px; border-top:1px solid #333; border-bottom:1px solid #333; padding:3px 0; margin-bottom:7px; }
-      .rc-info{ display:grid; grid-template-columns:1fr 1fr; gap:3px 10px; font-size:9.5px; margin-bottom:7px; }
-      .rc-card table{ width:100%; border-collapse:collapse; font-size:9.5px; margin-bottom:7px; }
-      .rc-card th,.rc-card td{ border:1px solid #999; padding:3px 6px; text-align:left; }
-      .rc-card th{ background:#211A4E; color:#fff; }
-      .rc-summary{ display:flex; gap:18px; font-size:10.5px; margin-bottom:8px; }
-      .rc-foot{ font-size:9px; color:#555; margin:0 0 6px; }
-      .rc-sign{ display:flex; justify-content:space-between; font-size:9.5px; margin-top:10px; }
-      .rc-sign img{ height:22px; display:block; margin-bottom:2px; }
-      .rc-cosch-title{ font-size:9px; font-weight:700; color:#211A4E; margin:6px 0 3px; border-top:1px dashed #999; padding-top:5px; }
-      .rc-cosch-grid{ display:grid; grid-template-columns:1fr 1fr; gap:1px 10px; font-size:9px; margin-bottom:5px; }
-      .rc-cosch-grid div{ display:flex; justify-content:space-between; border-bottom:1px dotted #ccc; padding:1px 0; }
-    `;
-  }
   function buildInfoFieldLines(s, exam, t){
     const fields = t.infoFields || DEFAULT_INFO_FIELDS;
     const labels = { admissionNo:'Admission No', rollNo:'Roll Number', className:'Class', section:'Section', fatherName:'Father Name', motherName:'Mother Name', dob:'Date of Birth', gender:'Gender', bloodGroup:'Blood Group', address:'Address', phone:'Phone', email:'Email' };
@@ -1441,74 +1254,6 @@ const ROOMS_KEY = "exam-rooms";
       <div class="rc-cosch-title">CO-SCHOLASTIC AREAS (Grade A–E)</div>
       <div class="rc-cosch-grid">${areaLines}${disciplineLine}</div>
     `;
-  }
-  function reportCardPageHtml(s, exam, logoSrc, template){
-    const t = template || reportTemplates.find(x => x.isDefault) || reportTemplates[0] || { signatureLabel1:'Class Teacher', signatureLabel2:'Principal / Correspondent', showElective:true, showNotCounted:true, showAttendance:true, showClassTopper:true, showRank:true };
-    const showTopper = t.showClassTopper !== false;
-    const showRank = t.showRank !== false;
-    const rows = getExamSubjects(exam, s.className, s.section).map(subj => {
-      const r = examResults.find(r => r.examId===exam.id && r.studentId===s.id && r.subject===subj.name);
-      const topper = showTopper ? classTopperMarksFor(exam, s.className, s.section, subj.name) : null;
-      return { subject: subj.name, code: subj.code||'', date: subj.date||'', marks: r ? r.marks : null, absent: r ? !!r.absent : false, max: subj.maxMarks, countable: subj.countable!==false, elective: !!subj.elective, topper };
-    }).sort((a,b) => (a.date||'').localeCompare(b.date||''));
-    const countableRows = rows.filter(r => r.countable);
-    const totalMax = countableRows.reduce((sum,r) => sum+r.max, 0);
-    const totalObtained = countableRows.reduce((sum,r) => sum+(Number(r.marks)||0), 0);
-    const pct = totalMax > 0 ? Math.round((totalObtained/totalMax)*1000)/10 : 0;
-    const grade = gradeForPct(pct);
-    const rankInfo = showRank ? classSectionRankFor(exam, s.className, s.section, s.id) : null;
-    const titleText = (t.titleOverride && t.titleOverride.trim()) ? t.titleOverride.toUpperCase() : `REPORT CARD — ${exam.name.toUpperCase()}`;
-    return `
-      <div class="rc-card">
-      <div class="rc-head"><img src="${logoSrc}"></div>
-      <div class="rc-school">${schoolInfo.name}</div>
-      <div class="rc-addr">${schoolInfo.address}</div>
-      <div class="rc-title">${titleText}</div>
-      <div class="rc-info">
-        ${buildInfoFieldLines(s, exam, t)}
-      </div>
-      <table>
-        <thead><tr><th>Code</th><th>Subject</th><th>Date</th><th>Marks Obtained</th><th>Max Marks</th>${showTopper ? '<th>Highest in Class</th>' : ''}</tr></thead>
-        <tbody>
-        ${rows.map(r => `<tr><td>${r.code||'—'}</td><td>${r.subject}${(r.elective && t.showElective!==false)?' (Elective)':''}${(!r.countable && t.showNotCounted!==false)?' (Not counted)':''}</td><td>${r.date||'—'}</td><td>${r.absent ? 'AB' : (r.marks!==null?r.marks:'—')}</td><td>${r.max}</td>${showTopper ? `<td>${r.topper!==null ? r.topper : '—'}</td>` : ''}</tr>`).join('')}
-        <tr><td colspan="3"><b>Total</b></td><td><b>${totalObtained}</b></td><td><b>${totalMax}</b></td>${showTopper ? '<td></td>' : ''}</tr>
-        </tbody>
-      </table>
-      <div class="rc-summary">
-        <div>Percentage: <b>${pct}%</b></div>
-        <div>Grade: <b>${grade}</b></div>
-        ${rankInfo ? `<div>Class Rank: <b>${ordinalSuffix(rankInfo.rank)}</b> of ${rankInfo.outOf} (${s.className} — ${s.section})</div>` : ''}
-      </div>
-      ${coScholasticSectionHtml(s, exam, t)}
-      ${t.footerNote ? `<p class="rc-foot">${t.footerNote}</p>` : ''}
-      <div class="rc-sign">
-        <div>${resolveReportSignature1(t,s) ? `<img src="${resolveReportSignature1(t,s)}">` : ''}${t.signatureLabel1 || 'Class Teacher'}</div>
-        <div>${resolveReportSignature2(t) ? `<img src="${resolveReportSignature2(t)}" style="margin-left:auto;">` : ''}${t.signatureLabel2 || 'Principal / Correspondent'}</div>
-      </div>
-      </div>
-    `;
-  }
-  async function printReportCard(studentId, examId){
-    await Promise.all([
-      ensureDataLoaded('examResults', loadExamResultsData),
-      ensureDataLoaded('attendanceRecords', loadAttendanceRecordsData),
-    ]);
-    const s = students.find(x => x.id === studentId);
-    const exam = examDefs.find(e => e.id === examId);
-    if(!s || !exam) return;
-    const template = currentReportTemplate();
-    const logoSrc = document.querySelector('.sb-brand img').src;
-    // The <title> here becomes the browser's default "Save as PDF" filename,
-    // so a descriptive, unique one saves the user from renaming every file
-    // by hand — one of the "output options" a print dialog alone doesn't give.
-    const fileTitle = `ReportCard_${(s.admissionNo||s.id)}_${(s.firstName+s.lastName).replace(/\s/g,'')}_${exam.name.replace(/\s/g,'')}`;
-    const w = window.open('', '_blank');
-    w.document.write(`
-      <html><head><title>${fileTitle}</title>
-      <style>${reportCardPrintCss()}</style></head>
-      <body onload="window.print()">${reportCardPageHtml(s, exam, logoSrc, template)}</body></html>
-    `);
-    w.document.close();
   }
 
   /* --- Tab: Results Summary --- */
@@ -1772,7 +1517,7 @@ const ROOMS_KEY = "exam-rooms";
       <div class="breadcrumb"><a onclick="backToTemplatesList()">Report Templates</a> &nbsp;/&nbsp; ${t ? t.name : 'New Template'}</div>
       <div class="profile-card" style="max-width:620px;">
         <div class="form-grid">
-          <div class="f-field full"><label>Template Name <span class="required-star">*</span></label><input type="text" id="tmplName" value="${t?t.name:''}" placeholder="e.g. Half Yearly Format"></div>
+          <div class="f-field full"><label>Report Period Name <span class="required-star">*</span></label><input type="text" id="tmplName" value="${t?t.name:''}" placeholder="e.g. Half Yearly Format"></div>
           <div class="f-field full"><label>Title Override <span style="font-weight:400; color:var(--ink-soft);">— leave blank to use "REPORT CARD — [Exam Name]"</span></label><input type="text" id="tmplTitle" value="${t?(t.titleOverride||''):''}" placeholder="e.g. HALF YEARLY PROGRESS REPORT"></div>
         </div>
         <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:14px 0 8px; display:block;">Student Info Fields to Show</label>
@@ -1815,7 +1560,7 @@ const ROOMS_KEY = "exam-rooms";
         </div>
         <div style="display:flex; gap:10px; margin-top:16px;">
           <button class="btn btn-ghost" onclick="backToTemplatesList()">Cancel</button>
-          <button class="btn btn-primary" onclick="saveTemplate()">Save Template</button>
+          <button class="btn btn-primary" onclick="saveTemplate()">Save Report Period</button>
         </div>
       </div>
     `;
@@ -1833,7 +1578,7 @@ const ROOMS_KEY = "exam-rooms";
   }
   async function saveTemplate(){
     const name = document.getElementById('tmplName').value.trim();
-    if(!name){ showToast('Enter a template name.'); return; }
+    if(!name){ showToast('Enter a name for the report period.'); return; }
     const infoFields = {};
     INFO_FIELD_DEFS.forEach(f => {
       infoFields[f.key] = f.key === 'studentName' ? true : document.querySelector(`.tmpl-infofield-check[value="${f.key}"]`).checked;
@@ -2046,7 +1791,7 @@ const ROOMS_KEY = "exam-rooms";
     return `
       <div class="profile-card" style="max-width:640px;">
         <div class="form-grid">
-          <div class="f-field full"><label>Template Name <span class="required-star">*</span></label><input type="text" id="twName" value="${d.name}" placeholder="e.g. Board Exam Style"></div>
+          <div class="f-field full"><label>Report Period Name <span class="required-star">*</span></label><input type="text" id="twName" value="${d.name}" placeholder="e.g. Board Exam Style"></div>
           <div class="f-field full"><label>Title Override <span style="font-weight:400; color:var(--ink-soft);">— leave blank for "Admit Card"</span></label><input type="text" id="twTitle" value="${d.titleOverride||''}" placeholder="e.g. HALL TICKET"></div>
         </div>
         ${d.layout==='strip' ? `
@@ -2072,7 +1817,7 @@ const ROOMS_KEY = "exam-rooms";
   }
   function twCollectAdmitDetails(){
     const name = document.getElementById('twName').value.trim();
-    if(!name){ showToast('Enter a template name.'); return; }
+    if(!name){ showToast('Enter a name for the report period.'); return; }
     twDraft.name = name;
     twDraft.titleOverride = document.getElementById('twTitle').value.trim();
     const cppEl = document.getElementById('twCardsPerPage');
@@ -2089,7 +1834,7 @@ const ROOMS_KEY = "exam-rooms";
     return `
       <div class="profile-card" style="max-width:640px;">
         <div class="form-grid">
-          <div class="f-field full"><label>Template Name <span class="required-star">*</span></label><input type="text" id="twName" value="${d.name}" placeholder="e.g. Half Yearly Format"></div>
+          <div class="f-field full"><label>Report Period Name <span class="required-star">*</span></label><input type="text" id="twName" value="${d.name}" placeholder="e.g. Half Yearly Format"></div>
           <div class="f-field full"><label>Title Override <span style="font-weight:400; color:var(--ink-soft);">— leave blank to use "REPORT CARD — [Exam Name]"</span></label><input type="text" id="twTitle" value="${d.titleOverride||''}" placeholder="e.g. HALF YEARLY PROGRESS REPORT"></div>
         </div>
         <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:14px 0 8px; display:block;">Student Info Fields to Show</label>
@@ -2173,7 +1918,7 @@ const ROOMS_KEY = "exam-rooms";
   }
   function twCollectReportDetails(){
     const name = document.getElementById('twName').value.trim();
-    if(!name){ showToast('Enter a template name.'); return; }
+    if(!name){ showToast('Enter a name for the report period.'); return; }
     twDraft.name = name;
     twDraft.titleOverride = document.getElementById('twTitle').value.trim();
     const infoFields = {};
@@ -2242,15 +1987,15 @@ const ROOMS_KEY = "exam-rooms";
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">
         Define named groups of exams — e.g. "2 Unit Tests" combining two unit tests, "Summative 1" for a single exam, or "Annual" combining all 6 exams for the year-end consolidated report. Each group gets its own combined percentage and grade using the Consolidation Scale.
       </p>
-      <button class="btn btn-primary btn-sm" style="margin-bottom:16px;" onclick="openExamGroupEditor()">+ Add Exam Template</button>
+      <button class="btn btn-primary btn-sm" style="margin-bottom:16px;" onclick="openExamGroupEditor()">+ New Report Period</button>
       <div class="table-wrap" style="max-width:760px;">
-        <table><thead><tr><th>Template</th><th>Exams Included</th><th></th></tr></thead>
+        <table><thead><tr><th>Report Period</th><th>Exams Included</th><th></th></tr></thead>
         <tbody>
         ${examGroups.length ? examGroups.map(g => `<tr>
           <td class="name-cell">${g.name}</td>
           <td>${g.examIds.map(id => { const ex=examDefs.find(x=>x.id===id); return ex ? `<span class="pill">${ex.name}</span>` : ''; }).join(' ')}</td>
           <td><button class="btn-edit-text" onclick="openExamGroupEditor('${g.id}')">Edit</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteExamGroup('${g.id}')">Delete</button></td>
-        </tr>`).join('') : `<tr><td colspan="3"><div class="empty-state"><b>No exam templates yet</b>Click "+ Add Exam Template" to combine specific exams into a named group.</div></td></tr>`}
+        </tr>`).join('') : `<tr><td colspan="3"><div class="empty-state"><b>No report periods yet</b>Click "+ New Report Period" to combine specific exams into a named group.</div></td></tr>`}
         </tbody></table>
       </div>
     `;
@@ -2270,16 +2015,16 @@ const ROOMS_KEY = "exam-rooms";
     const g = editingExamGroupId ? examGroups.find(x => x.id === editingExamGroupId) : null;
     const selectedIds = g ? g.examIds : [];
     body.innerHTML = `
-      <div class="breadcrumb"><a onclick="backToExamTemplatesList()">Exam Templates</a> &nbsp;/&nbsp; ${g ? g.name : 'New Template'}</div>
+      <div class="breadcrumb"><a onclick="backToExamTemplatesList()">Report Periods</a> &nbsp;/&nbsp; ${g ? g.name : 'New Report Period'}</div>
       <div class="profile-card" style="max-width:520px;">
-        <div class="f-field full" style="margin-bottom:14px;"><label>Template Name <span class="required-star">*</span></label><input type="text" id="egName" value="${g?g.name:''}" placeholder="e.g. 2 Unit Tests, Summative 1, Annual (All 6 Exams)"></div>
+        <div class="f-field full" style="margin-bottom:14px;"><label>Report Period Name <span class="required-star">*</span></label><input type="text" id="egName" value="${g?g.name:''}" placeholder="e.g. 2 Unit Tests, Summative 1, Annual (All 6 Exams)"></div>
         <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin-bottom:8px; display:block;">Exams Included <span class="required-star">*</span></label>
         <div class="disc-checklist" style="max-height:220px; margin-bottom:16px;">
           ${examDefs.length ? examDefs.map(ex => `<label class="disc-check-item"><input type="checkbox" class="eg-exam-check" value="${ex.id}" ${selectedIds.includes(ex.id)?'checked':''}> ${ex.name}</label>`).join('') : `<div style="font-size:0.82rem; color:var(--ink-soft);">No exams created yet — add some under the "Exams" tab first.</div>`}
         </div>
         <div style="display:flex; gap:10px;">
           <button class="btn btn-ghost" onclick="backToExamTemplatesList()">Cancel</button>
-          <button class="btn btn-primary" onclick="saveExamGroup()">Save Template</button>
+          <button class="btn btn-primary" onclick="saveExamGroup()">Save Report Period</button>
         </div>
       </div>
     `;
@@ -2287,7 +2032,7 @@ const ROOMS_KEY = "exam-rooms";
   async function saveExamGroup(){
     const name = document.getElementById('egName').value.trim();
     const examIds = Array.from(document.querySelectorAll('.eg-exam-check:checked')).map(c => c.value);
-    if(!name){ showToast('Enter a template name.'); return; }
+    if(!name){ showToast('Enter a name for the report period.'); return; }
     if(examIds.length === 0){ showToast('Select at least one exam.'); return; }
     if(editingExamGroupId){
       const idx = examGroups.findIndex(x => x.id === editingExamGroupId);
@@ -2296,11 +2041,11 @@ const ROOMS_KEY = "exam-rooms";
       examGroups.push({ id:'eg_'+Date.now(), name, examIds });
     }
     await storageSet(EXAM_GROUPS_KEY, examGroups);
-    showToast('Exam template saved.', 'burst');
+    showToast('Report period saved.', 'burst');
     backToExamTemplatesList();
   }
   async function deleteExamGroup(id){
-    if(!await showConfirmDialog('Delete this exam template?')) return;
+    if(!await showConfirmDialog('Delete this report period?')) return;
     examGroups = examGroups.filter(g => g.id !== id);
     await storageSet(EXAM_GROUPS_KEY, examGroups);
     renderExamTemplatesTab(document.getElementById('resultBody'));
@@ -2355,59 +2100,7 @@ const ROOMS_KEY = "exam-rooms";
     await storageSet(CONSOLIDATION_SCALE_KEY, consolidationScale);
     showToast('Consolidation scale saved.', 'burst');
   }
-  function gradeForConsolPct(pct){
-    const band = consolidationScale.find(g => pct >= g.minPct && pct <= g.maxPct);
-    return band ? band.grade : (consolidationScale.length ? consolidationScale[consolidationScale.length-1].grade : '—');
-  }
 
-  function renderGradingScaleTab(body){
-    body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:600px;">Define grade boundaries by percentage — used on report cards and results summaries. The lowest band is treated as the fail grade.</p>
-      <div class="table-wrap" style="margin-bottom:16px;">
-        <table><thead><tr><th>Grade</th><th>Min %</th><th>Max %</th><th></th></tr></thead>
-        <tbody>
-        ${gradingScale.map((g,i) => `<tr>
-          <td><input type="text" class="input gs-grade" value="${g.grade}" style="max-width:80px;"></td>
-          <td><input type="number" class="input gs-min" value="${g.minPct}" min="0" max="100" style="max-width:80px;"></td>
-          <td><input type="number" class="input gs-max" value="${g.maxPct}" min="0" max="100" style="max-width:80px;"></td>
-          <td><button class="btn-danger-text" onclick="removeGradeRow(${i})">Remove</button></td>
-        </tr>`).join('')}
-        </tbody></table>
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="addGradeRow()">+ Add Grade</button>
-      <button class="btn btn-primary" onclick="saveGradingScale()" style="margin-left:10px;">Save Grading Scale</button>
-    `;
-  }
-  function addGradeRow(){
-    gradingScale.push({ grade:'', minPct:0, maxPct:0 });
-    renderGradingScaleTab(document.getElementById('resultBody'));
-  }
-  function removeGradeRow(i){
-    gradingScale.splice(i,1);
-    renderGradingScaleTab(document.getElementById('resultBody'));
-  }
-  async function saveGradingScale(){
-    const grades = document.querySelectorAll('.gs-grade');
-    const mins = document.querySelectorAll('.gs-min');
-    const maxs = document.querySelectorAll('.gs-max');
-    for(let i=0;i<grades.length;i++){
-      if(!grades[i].value.trim()) continue;
-      const minV = Number(mins[i].value)||0, maxV = Number(maxs[i].value)||0;
-      if(minV<0 || minV>100 || maxV<0 || maxV>100){
-        showToast(`"${grades[i].value.trim()}" grade's Min/Max % must each be between 0 and 100.`);
-        return;
-      }
-      if(minV>maxV){
-        showToast(`"${grades[i].value.trim()}" grade's Min % can't be greater than its Max %.`);
-        return;
-      }
-    }
-    gradingScale = Array.from(grades).map((el,i) => ({
-      grade: el.value.trim(), minPct: Number(mins[i].value)||0, maxPct: Number(maxs[i].value)||0,
-    })).filter(g => g.grade);
-    await storageSet(GRADING_SCALE_KEY, gradingScale);
-    showToast('Grading scale saved.', 'burst');
-  }
 
   /* ===== ROOM ALLOTMENT MODULE (Hall Ticket Numbers, Class Selection, Rooms & Matrix, Final Printout, Notice Board) ===== */
   

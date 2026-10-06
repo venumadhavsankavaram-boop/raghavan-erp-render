@@ -1037,7 +1037,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
   function renderConsolidatedTab(body){
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:640px;">
-        Pulls together exams side by side, with a final consolidated percentage and grade using the <a onclick="switchResultTab('consolscale')" style="color:var(--magenta); cursor:pointer; font-weight:600;">Consolidation Scale</a>. Choose an <a onclick="switchResultTab('examtemplates')" style="color:var(--magenta); cursor:pointer; font-weight:600;">Exam Template</a> to combine just a subset — like two Unit Tests — or leave it on "All Exams" for the full year-end view.
+        Pulls together exams side by side, with a final consolidated percentage and grade using the <a onclick="switchResultTab('grading')" style="color:var(--magenta); cursor:pointer; font-weight:600;">Grading scheme</a>. Choose a <a onclick="switchResultTab('examtemplates')" style="color:var(--magenta); cursor:pointer; font-weight:600;">Report Period</a> to combine just a subset — like two Unit Tests — or leave it on "All Exams" for the full year-end view.
       </p>
       <div class="ms-toolbar">
         <div class="ms-toolbar-left">

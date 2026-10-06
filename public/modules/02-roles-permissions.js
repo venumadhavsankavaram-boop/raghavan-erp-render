@@ -27,9 +27,8 @@ const CUSTOM_ROLES_KEY = "custom-roles";
     { key:'result_progress',     label:'Progress Reports',      icon:'📄', category:'Academics', parent:'result', isNew:true },
     { key:'result_consolidated', label:'Consolidated Report',   icon:'📊', category:'Academics', parent:'result', isNew:true },
     { key:'result_yearend',      label:'Year-End Marks Cards',  icon:'🎓', category:'Academics', parent:'result', isNew:true },
-    { key:'result_examtemplates', label:'Exam Templates',       icon:'🧩', category:'Academics', parent:'result', isNew:true },
-    { key:'result_consolscale',  label:'Consolidation Scale',   icon:'📐', category:'Academics', parent:'result', isNew:true },
-    { key:'result_grading',      label:'Grading Scale',         icon:'🎯', category:'Academics', parent:'result', isNew:true },
+    { key:'result_examtemplates', label:'Report Periods',       icon:'🧩', category:'Academics', parent:'result', isNew:true },
+    { key:'result_grading',      label:'Grading',               icon:'🎯', category:'Academics', parent:'result', isNew:true },
     { key:'result_templates',    label:'Report Templates',      icon:'🗂️', category:'Academics', parent:'result', isNew:true },
     { key:'timetable',   label:'Timetable',          icon:'🗓️', category:'Academics' },
     { key:'timetable_class',    label:'Class Timetable (edit)', icon:'📅', category:'Academics', parent:'timetable', isNew:true },
@@ -314,7 +313,7 @@ const CUSTOM_ROLES_KEY = "custom-roles";
   // Thin, named wrappers kept for every existing call site + readability —
   // all delegate to getSubModuleAccess above.
   function getAccountingTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'accounting', action); }
-  const RESULT_SUBMODULE_KEYS = ['result_admitcards','result_roomallotment','result_progress','result_consolidated','result_yearend','result_examtemplates','result_consolscale','result_grading','result_templates'];
+  const RESULT_SUBMODULE_KEYS = ['result_admitcards','result_roomallotment','result_progress','result_consolidated','result_yearend','result_examtemplates','result_grading','result_templates'];
   function getResultTabAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'result', action); }
   const STAFF_SUBPAGE_KEYS = ['staff_depts','staff_idcards','staff_payroll'];
   function getStaffSubpageAccess(role, moduleKey, action){ return getSubModuleAccess(role, moduleKey, 'staff', action); }
