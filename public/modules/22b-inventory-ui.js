@@ -176,7 +176,7 @@ function paintInvItemsRows(){
       <td>${sold}</td>
       <td>${fmtMoney(it.sellingPrice)}</td>
       <td>${ivStockBadge(it)}</td>
-      <td class="sf-actions">${ivItemActions(it)}</td>
+      <td class="ivq-act"><div class="ivq-actions">${ivItemActions(it)}</div></td>
     </tr>`;
   }).join('');
   document.getElementById('ivItemsEmpty').innerHTML = rows.length ? '' :
