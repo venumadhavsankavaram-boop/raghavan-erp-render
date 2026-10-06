@@ -1974,6 +1974,56 @@
   .prc-prev-actions{margin-top:12px}
   @media (max-width:900px){.prc-setup{grid-template-columns:1fr}.prc-signs{grid-template-columns:1fr 1fr}}
   @media (max-width:520px){.prc-signs{grid-template-columns:1fr}.prc-paper{padding:8px}}
+
+  /* ===== Accounting (20c) ===== */
+  .acx-in{color:var(--success,#0f6a63)}.acx-out{color:var(--danger,var(--magenta))}
+  .acx-r{text-align:right}.acx-num{width:150px;text-align:right}
+  .acx-note{font-size:.82rem;color:var(--ink-soft);margin:0 0 12px;max-width:760px}
+  .acx-wide{max-width:900px;margin-bottom:14px}.acx-grow{flex:1;margin:0;min-width:240px}
+  .acx-two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;align-items:start}
+  .acx-three{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-items:start}
+  .acx-card{padding:16px;margin-bottom:14px}.acx-two .acx-card,.acx-three .acx-card{margin-bottom:0}
+  .acx-card h4,.acx-panel-head h4{margin:0 0 10px;font-size:1rem;color:var(--navy)}
+  .acx-card h4 small{font-weight:600;color:var(--ink-soft);margin-left:6px;font-size:.75rem}
+  .acx-share{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+  .acx-share-top{display:flex;gap:10px;align-items:baseline;font-size:.86rem}
+  .acx-share-top span{flex:1;min-width:0}.acx-share-top small{display:block;font-size:.72rem;color:var(--ink-soft)}
+  .acx-share-top em{font-style:normal;color:var(--ink-soft);width:38px;text-align:right;font-size:.78rem}
+  .acx-bar{height:6px;border-radius:999px;background:rgba(120,120,140,.16);overflow:hidden;margin-top:5px}
+  .acx-bar-sm{height:5px;margin-top:6px;min-width:90px}
+  .acx-bar i{display:block;height:100%;border-radius:999px}
+  .acx-bar-in{background:var(--teal)}.acx-bar-out{background:var(--magenta)}
+  .acx-modes{list-style:none;margin:0;padding:0}
+  .acx-modes li{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border);font-size:.88rem}
+  .acx-modes li:last-child{border:0}
+  .acx-empty{padding:22px 12px;text-align:center;color:var(--ink-soft);display:flex;flex-direction:column;gap:4px;font-size:.85rem}
+  .acx-empty b{color:var(--ink);font-size:.9rem}
+  .acx-tablehead{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);font-size:.9rem}
+  .acx-tablehead span{color:var(--ink-soft);font-size:.8rem}
+  .acx-ref{display:block;color:var(--ink-soft);font-size:.72rem}
+  .acx-void td{opacity:.55}.acx-void td.acx-act{opacity:1}.acx-void td:first-child b,.acx-void td:nth-child(7) b{text-decoration:line-through}
+  .acx-act{text-align:right;white-space:nowrap}.acx-act .sf-actions{justify-content:flex-end}
+  .acx-netcol{min-width:130px}
+  .acx-pending td{background:rgba(203,154,46,.07)}
+  .acx-date{display:flex;flex-direction:column;gap:4px;font-size:.78rem;font-weight:600;color:var(--navy);margin-bottom:12px}
+  .acx-date .input{min-width:180px;max-width:260px}
+  .iv-toolbar .acx-date{margin-bottom:0}
+  .acx-panel{display:none;margin-bottom:14px}.acx-panel.is-open{display:block}
+  .acx-panel-in{padding:18px}
+  .acx-panel-head p{margin:-4px 0 14px;font-size:.8rem;color:var(--ink-soft);max-width:760px}
+  .acx-panel .form-grid{margin-bottom:14px}
+  .acx-form-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .acx-linehead{display:flex;justify-content:space-between;align-items:center;margin:4px 0 8px}
+  .acx-jv .input{width:100%;max-width:none;min-width:0}
+  .acx-jv tfoot td{font-weight:700;border-top:2px solid var(--border)}
+  .acx-add{display:flex;gap:8px;margin:0 0 12px}.acx-add .input{flex:1;min-width:0;max-width:none}
+  .acx-chips{display:flex;flex-wrap:wrap;gap:7px}
+  .acx-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 6px 5px 11px;border-radius:999px;background:rgba(120,120,140,.12);font-size:.8rem;color:var(--ink)}
+  .acx-chip button{border:0;background:rgba(120,120,140,.2);color:var(--ink);width:18px;height:18px;border-radius:50%;line-height:1;cursor:pointer;font-size:.9rem;padding:0}
+  .acx-chip button:hover{background:var(--danger,#c0392b);color:#fff}
+  .acx-stmt{display:flex;gap:10px;align-items:flex-end;margin-bottom:14px;flex-wrap:wrap}.acx-stmt .acx-date{margin:0}
+  .acx-kpis-in{margin-top:6px}
+  @media (max-width:900px){.acx-two,.acx-three{grid-template-columns:1fr}}
 </style>
 <script>
   /* ===== AUTOMATIC WEBSITE THEME SYNC =====
@@ -3839,6 +3889,7 @@
 <script src="modules/20-communications-module-intro.js"></script>
 <script src="modules/20b-communications-ui.js"></script>
 <script src="modules/21-communications-notices-accounting.js"></script>
+<script src="modules/20c-accounting-ui.js"></script>
 <script src="modules/22-facilities-rooms-library-transport-timetable.js"></script>
 <script src="modules/22b-inventory-ui.js"></script>
 <script src="modules/23-inventory-sales-admin-tools.js"></script>

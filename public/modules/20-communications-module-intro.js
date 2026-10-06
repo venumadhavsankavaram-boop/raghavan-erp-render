@@ -599,86 +599,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
      A voided voucher is excluded everywhere here (it didn't really happen
      financially) but stays visible, struck through, on its own Income/
      Expense tab — that's the audit trail; it just shouldn't move any total. */
-  function renderAcctOverview(body){
-    const liveIncome = acctIncome.filter(i => !i.voided);
-    const liveExpenses = acctExpenses.filter(e => !e.voided);
-    const feeIncome = acctFeeIncomeTotal();
-    const otherIncome = acctOtherIncomeTotal();
-    const totalIncome = feeIncome + otherIncome;
-    const totalExpense = acctExpenseTotal();
-    const netPosition = totalIncome - totalExpense;
-
-    const expenseByCat = {};
-    liveExpenses.forEach(e => { const k=e.category; if(!expenseByCat[k]) expenseByCat[k]={amt:0,count:0}; expenseByCat[k].amt += Number(e.amount)||0; expenseByCat[k].count++; });
-    const topExpenseCats = Object.entries(expenseByCat).sort((a,b) => b[1].amt-a[1].amt);
-
-    // Income by source — fee collections broken into their real sub-types (Fee/Bus/Stock/Hostel/Extra), not lumped
-    const FEE_CAT_LABELS = { fee:'Tuition Fee', bus:'Bus Fee', stock:'Stock Fee', hostel:'Hostel Fee', extra:'Extra Fees (Admission, Inventory, Fines, etc.)' };
-    const incomeByCat = {};
-    payments.filter(pBookedInLedger).forEach(p => {
-      const label = FEE_CAT_LABELS[p.category] || (CATS[p.category]||p.category);
-      if(!incomeByCat[label]) incomeByCat[label] = {amt:0,count:0};
-      incomeByCat[label].amt += Number(p.amount)||0;
-      incomeByCat[label].count++;
-    });
-    liveIncome.forEach(i => { if(!incomeByCat[i.category]) incomeByCat[i.category]={amt:0,count:0}; incomeByCat[i.category].amt += Number(i.amount)||0; incomeByCat[i.category].count++; });
-    const topIncomeCats = Object.entries(incomeByCat).sort((a,b) => b[1].amt-a[1].amt);
-
-    // Cash position by payment mode — what's actually cash-in-hand vs bank vs UPI etc.
-    const modeNet = {};
-    payments.filter(pBookedInLedger).forEach(p => { const m=p.mode||'Unspecified'; modeNet[m]=(modeNet[m]||0)+(Number(p.amount)||0); });
-    liveIncome.forEach(i => { const m=i.mode||'Unspecified'; modeNet[m]=(modeNet[m]||0)+(Number(i.amount)||0); });
-    liveExpenses.forEach(e => { const m=e.mode||'Unspecified'; modeNet[m]=(modeNet[m]||0)-(Number(e.amount)||0); });
-    const modeRows = Object.entries(modeNet).sort((a,b) => b[1]-a[1]);
-
-    const recentTx = [
-      ...payments.filter(pBookedInLedger).map(p => ({ date:p.date, type: p.voided?'Fee Income (Refunded)':'Fee Income', party:p.studentName||'Student', category:FEE_CAT_LABELS[p.category]||CATS[p.category]||p.category, amount:Number(p.amount)||0, sign:1 })),
-      ...liveIncome.map(i => ({ date:i.date, type:'Other Income', party:i.party, category:i.category, amount:Number(i.amount)||0, sign:1 })),
-      ...liveExpenses.map(e => ({ date:e.date, type:'Expense', party:e.party, category:e.category, amount:Number(e.amount)||0, sign:-1 })),
-    ].sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0,25);
-
-    body.innerHTML = `
-      <div class="fee-summary-row" style="margin-bottom:24px;">
-        <div class="fee-sum-card"><b>${fmtMoney(totalIncome)}</b><span>Total Income</span></div>
-        <div class="fee-sum-card"><b style="color:var(--magenta);">${fmtMoney(totalExpense)}</b><span>Total Expenses</span></div>
-        <div class="fee-sum-card"><b style="color:${netPosition>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(netPosition)}</b><span>Current Cash Position</span></div>
-      </div>
-      <div class="fee-summary-row" style="margin-bottom:24px;">
-        <div class="fee-sum-card"><b>${fmtMoney(feeIncome)}</b><span>Fee Collections</span></div>
-        <div class="fee-sum-card"><b>${fmtMoney(otherIncome)}</b><span>Other Income</span></div>
-      </div>
-      <div class="dash-section-title"><div><h3>Income by Source</h3></div></div>
-      <div class="table-wrap" style="margin-bottom:28px;">
-        <table><thead><tr><th>Source</th><th>Transactions</th><th>Amount</th><th>% of Total</th></tr></thead>
-        <tbody>
-        ${topIncomeCats.length ? topIncomeCats.map(([cat,d]) => `<tr><td class="name-cell">${cat}</td><td>${d.count}</td><td style="color:#0f6a63; font-weight:600;">${fmtMoney(d.amt)}</td><td>${totalIncome>0?Math.round(d.amt/totalIncome*100):0}%</td></tr>`).join('') : `<tr><td colspan="4"><div class="empty-state"><b>No income recorded yet</b></div></td></tr>`}
-        ${topIncomeCats.length ? `<tr style="font-weight:700; background:rgba(24,143,134,0.06);"><td>Total</td><td>${topIncomeCats.reduce((s,[,d])=>s+d.count,0)}</td><td style="color:#0f6a63;">${fmtMoney(totalIncome)}</td><td>100%</td></tr>` : ''}
-        </tbody></table>
-      </div>
-      <div class="dash-section-title"><div><h3>Expenses by Category</h3></div></div>
-      <div class="table-wrap" style="margin-bottom:28px;">
-        <table><thead><tr><th>Category</th><th>Transactions</th><th>Amount</th><th>% of Total</th></tr></thead>
-        <tbody>
-        ${topExpenseCats.length ? topExpenseCats.map(([cat,d]) => `<tr><td class="name-cell">${cat}</td><td>${d.count}</td><td>${fmtMoney(d.amt)}</td><td>${totalExpense>0?Math.round(d.amt/totalExpense*100):0}%</td></tr>`).join('') : `<tr><td colspan="4"><div class="empty-state"><b>No expenses recorded yet</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-      <div class="dash-section-title"><div><h3>Cash Position by Payment Mode</h3></div></div>
-      <p style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:10px;">Net of everything collected minus everything paid out, split by how it moved — useful for knowing exactly how much is cash-in-hand versus in the bank right now.</p>
-      <div class="table-wrap" style="margin-bottom:28px;">
-        <table><thead><tr><th>Mode</th><th>Net Position</th></tr></thead>
-        <tbody>
-        ${modeRows.length ? modeRows.map(([mode,net]) => `<tr><td class="name-cell">${mode}</td><td style="color:${net>=0?'#0f6a63':'var(--magenta)'}; font-weight:600;">${fmtMoney(net)}</td></tr>`).join('') : `<tr><td colspan="2"><div class="empty-state"><b>No transactions yet</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-      <div class="dash-section-title"><div><h3>Recent Transactions</h3></div></div>
-      <div class="table-wrap">
-        <table><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Party</th><th>Amount</th></tr></thead>
-        <tbody>
-        ${recentTx.length ? recentTx.map(t => `<tr><td>${t.date||'—'}</td><td>${t.type}</td><td>${t.category||'—'}</td><td>${t.party||'—'}</td><td style="color:${t.sign>0?'#0f6a63':'var(--magenta)'}; font-weight:600;">${t.sign>0?'+':'-'}${fmtMoney(t.amount)}</td></tr>`).join('') : `<tr><td colspan="5"><div class="empty-state"><b>No transactions yet</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-    `;
-  }
 
   /* --- Daily Collections: Admin-only cash-handover reconciliation — "how much
      did we collect today, by every mode, across every source" — pulls from
@@ -686,124 +606,9 @@ const COMMS_MESSAGES_KEY = "comms-messages";
      non-Student buyers (Staff/Walk-in), since those never create a `payments`
      row of their own. Gated to currentUser.role==='Admin' in renderAccountingBody,
      deliberately bypassing the configurable per-role accounting permissions. */
-  function renderAcctDailyCollectionsTab(body){
-    const d = acctDailyCollectionsDate || acctToday();
-    const todayStr = acctToday();
-    const FEE_CAT_LABELS = { fee:'Tuition Fee', bus:'Bus Fee', stock:'Stock Fee', hostel:'Hostel Fee', extra:'Extra Fees / Inventory (Student)' };
-
-    const feePays = payments.filter(p => pBookedInLedger(p) && p.date === d);
-    const otherInc = acctIncome.filter(i => !i.voided && i.date === d);
-    const invSales = (typeof inventorySales !== 'undefined' ? inventorySales : []).filter(s => s.buyerType !== 'Student' && s.date === d && Number(s.paidAmount||0) !== 0);
-
-    const modeTotals = {};
-    const addMode = (mode, amt) => { const m = mode || 'Unspecified'; modeTotals[m] = (modeTotals[m]||0) + amt; };
-    feePays.forEach(p => addMode(p.mode, Number(p.amount)||0));
-    otherInc.forEach(i => addMode(i.mode, Number(i.amount)||0));
-    invSales.forEach(s => addMode(s.mode, Number(s.paidAmount)||0));
-    const modeRows = Object.entries(modeTotals).sort((a,b) => b[1]-a[1]);
-    const grandTotal = Object.values(modeTotals).reduce((s,v) => s+v, 0);
-
-    const sourceTotals = {};
-    const addSource = (label, amt) => { if(!sourceTotals[label]) sourceTotals[label] = {amt:0,count:0}; sourceTotals[label].amt += amt; sourceTotals[label].count++; };
-    feePays.forEach(p => addSource(FEE_CAT_LABELS[p.category] || p.category || 'Fee Payment', Number(p.amount)||0));
-    otherInc.forEach(i => addSource('Other Income — ' + i.category, Number(i.amount)||0));
-    invSales.forEach(s => addSource('Inventory Sale (Staff / Walk-in)', Number(s.paidAmount)||0));
-    const sourceRows = Object.entries(sourceTotals).sort((a,b) => b[1].amt-a[1].amt);
-
-    const txRows = [
-      ...feePays.map(p => ({ type: Number(p.amount)<0 ? 'Refund' : 'Fee Payment', party: p.studentName||'Student', detail: FEE_CAT_LABELS[p.category]||p.category, mode: p.mode||'—', ref: p.receiptNo||'—', amount: Number(p.amount)||0 })),
-      ...otherInc.map(i => ({ type:'Other Income', party: i.party||'—', detail: i.category, mode: i.mode||'—', ref: i.voucherNo||'—', amount: Number(i.amount)||0 })),
-      ...invSales.map(s => ({ type:'Inventory Sale', party: s.buyerName||s.buyerType, detail: s.itemName, mode: s.mode||'—', ref:'—', amount: Number(s.paidAmount)||0 })),
-    ].sort((a,b) => b.amount-a.amount);
-
-    body.innerHTML = `
-      <div style="display:flex; align-items:flex-end; gap:12px; margin-bottom:18px; flex-wrap:wrap;">
-        <div class="f-field" style="margin:0;">
-          <label>Date</label>
-          <input type="date" id="acctDcDate" value="${d}" max="${todayStr}" onchange="acctDailyCollectionsDate=this.value; renderAcctDailyCollectionsTab(document.getElementById('accountingBody'));">
-        </div>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:0 0 8px;">Everything collected on this date, across every payment mode and every module — fee payments, inventory sales, and other income — so it can be checked against what's physically handed over.</p>
-      </div>
-      <div class="fee-summary-row" style="margin-bottom:24px;">
-        <div class="fee-sum-card"><b style="color:#0f6a63;">${fmtMoney(grandTotal)}</b><span>Total Collected on ${d}</span></div>
-        <div class="fee-sum-card"><b>${txRows.length}</b><span>Transactions</span></div>
-      </div>
-      <div class="dash-section-title"><div><h3>By Payment Mode</h3></div></div>
-      <div class="table-wrap" style="margin-bottom:28px;">
-        <table><thead><tr><th>Mode</th><th>Amount</th><th>% of Total</th></tr></thead>
-        <tbody>
-        ${modeRows.length ? modeRows.map(([mode,amt]) => `<tr><td class="name-cell">${mode}</td><td style="color:${amt>=0?'#0f6a63':'var(--magenta)'}; font-weight:600;">${fmtMoney(amt)}</td><td>${grandTotal!==0?Math.round(amt/grandTotal*100):0}%</td></tr>`).join('') : `<tr><td colspan="3"><div class="empty-state"><b>No collections recorded for this date</b></div></td></tr>`}
-        ${modeRows.length ? `<tr style="font-weight:700; background:rgba(24,143,134,0.06);"><td>Total</td><td style="color:#0f6a63;">${fmtMoney(grandTotal)}</td><td>100%</td></tr>` : ''}
-        </tbody></table>
-      </div>
-      <div class="dash-section-title"><div><h3>By Source</h3></div></div>
-      <div class="table-wrap" style="margin-bottom:28px;">
-        <table><thead><tr><th>Source</th><th>Transactions</th><th>Amount</th></tr></thead>
-        <tbody>
-        ${sourceRows.length ? sourceRows.map(([label,v]) => `<tr><td class="name-cell">${label}</td><td>${v.count}</td><td style="font-weight:600;">${fmtMoney(v.amt)}</td></tr>`).join('') : `<tr><td colspan="3"><div class="empty-state"><b>No collections recorded for this date</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-      <div class="dash-section-title"><div><h3>Transaction Detail</h3></div></div>
-      <div class="table-wrap">
-        <table><thead><tr><th>Type</th><th>Detail</th><th>Party</th><th>Mode</th><th>Receipt/Voucher</th><th>Amount</th></tr></thead>
-        <tbody>
-        ${txRows.length ? txRows.map(t => `<tr><td>${t.type}</td><td>${t.detail||'—'}</td><td>${t.party||'—'}</td><td>${t.mode}</td><td>${t.ref}</td><td style="color:${t.amount>=0?'#0f6a63':'var(--magenta)'}; font-weight:600;">${fmtMoney(t.amount)}</td></tr>`).join('') : `<tr><td colspan="6"><div class="empty-state"><b>No transactions on this date</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-    `;
-  }
 
   /* --- Income vouchers (non-fee income: donations, grants, etc.) --- */
   let acctIncomeSearch = '';
-  function renderAcctIncomeTab(body){
-    const q = acctIncomeSearch.toLowerCase();
-    const filtered = acctIncome.filter(i => !q || (i.party||'').toLowerCase().includes(q) || i.category.toLowerCase().includes(q) || (i.referenceNo||'').toLowerCase().includes(q) || i.voucherNo.toLowerCase().includes(q)).sort((a,b) => (b.date||'').localeCompare(a.date||''));
-    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_income', 'create');
-    const canPrint = getAccountingTabAccess(currentUser.role, 'accounting_income', 'print');
-    const canVoid = getAccountingTabAccess(currentUser.role, 'accounting_income', 'delete');
-    body.innerHTML = `
-      ${canCreate ? `
-      <div class="profile-card" style="max-width:640px; margin-bottom:24px;">
-        <h4>💰 Record Income</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">For anything other than student fees — donations, grants, rental income, interest, and so on. Pick the <b>Account</b> this income belongs to (Tuition Fee, Vehicle Fee, Inventory, Hostel Fee, or General) so the "P&amp;L by Account" tab can total it up correctly. A Receipt Voucher number is assigned automatically when you save.</p>
-        <div class="form-grid" style="margin-bottom:14px;">
-          <div class="f-field"><label>Date</label><input type="date" id="acctIncDate" value="${new Date().toISOString().slice(0,10)}"></div>
-          <div class="f-field"><label>Amount (₹)</label><input type="number" id="acctIncAmount" min="0" placeholder="0"></div>
-          <div class="f-field">
-            <label>Category</label>
-            <select id="acctIncCategory" onchange="onAcctCategoryChange('acctIncCategory','acctIncNewCategory')">
-              ${acctIncomeCategories.map(c => `<option>${c}</option>`).join('')}
-              <option value="__new__">+ New Category...</option>
-            </select>
-          </div>
-          <div class="f-field" id="acctIncNewCategoryField" style="display:none;"><label>New Category Name</label><input type="text" id="acctIncNewCategory" placeholder="e.g. Alumni Contribution"></div>
-          <div class="f-field">
-            <label>Account</label>
-            <select id="acctIncCostCenter">${acctCostCenters.map(c => `<option>${c}</option>`).join('')}</select>
-          </div>
-          <div class="f-field"><label>Received From</label><input type="text" id="acctIncParty" placeholder="e.g. Rotary Club of Kadapa"></div>
-          <div class="f-field">
-            <label>Payment Mode</label>
-            <select id="acctIncMode" onchange="onAcctModeChange('acctIncMode','acctIncRefField')"><option>Cash</option><option>Bank Transfer</option><option>UPI</option><option>Cheque</option><option>Card</option><option>Online</option></select>
-          </div>
-          <div class="f-field" id="acctIncRefField" style="display:none;"><label>Reference / Cheque No.</label><input type="text" id="acctIncRef" placeholder="e.g. Cheque no. or UTR"></div>
-          <div class="f-field"><label>Deposited Into</label><select id="acctIncBankAccount"><option value="">(Auto — by Payment Mode)</option>${acctBankAccounts.filter(b=>b.active!==false).map(b => `<option value="${b.id}">${b.name}</option>`).join('')}</select></div>
-          <div class="f-field full"><label>Description / Narration</label><input type="text" id="acctIncDesc" placeholder="Optional notes about this income"></div>
-        </div>
-        <button class="btn btn-primary" onclick="saveIncomeVoucher()">Save Income Voucher</button>
-      </div>
-      ` : ''}
-
-      <h4 style="margin-bottom:10px;">Income Vouchers (${acctIncome.length})</h4>
-      <input class="input" style="max-width:280px; margin-bottom:12px;" placeholder="Search vouchers..." value="${acctIncomeSearch}" oninput="acctIncomeSearch=this.value; renderAcctIncomeTab(document.getElementById('accountingBody'));">
-      <div class="table-wrap">
-        <table><thead><tr><th>Voucher No.</th><th>Date</th><th>Category</th><th>Account</th><th>Received From</th><th>Mode</th><th>Amount</th><th></th></tr></thead>
-        <tbody>
-        ${filtered.length ? filtered.map(i => `<tr${i.voided?' style="opacity:0.55; text-decoration:line-through;"':''}><td>${i.voucherNo}</td><td>${i.date}</td><td>${i.category}</td><td>${i.costCenter||'—'}</td><td>${i.party||'—'}</td><td>${i.mode}${i.referenceNo?' ('+i.referenceNo+')':''}</td><td style="color:#0f6a63; font-weight:600;">${fmtMoney(i.amount)}</td><td style="text-decoration:none; white-space:nowrap;">${canPrint?`<button class="btn-edit-text" onclick="printAccountingVoucher('income','${i.id}')">Print</button>`:''}${canVoid && !i.voided?` <button class="btn-danger-text" onclick="voidAccountingEntry('income','${i.id}')">Void</button>`:''}${i.voided?` <span class="pill" style="font-size:0.62rem;" title="${escapeHtml(i.voidReason||'')}">Voided</span>`:''}</td></tr>`).join('') : `<tr><td colspan="8"><div class="empty-state"><b>No income vouchers yet${acctIncomeSearch?' match your search':''}</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-    `;
-  }
   function onAcctCategoryChange(selectId, newFieldInputId){
     const sel = document.getElementById(selectId);
     const wrap = document.getElementById(newFieldInputId+'Field');
@@ -850,55 +655,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
 
   /* --- Expense vouchers --- */
   let acctExpenseSearch = '';
-  function renderAcctExpenseTab(body){
-    const q = acctExpenseSearch.toLowerCase();
-    const filtered = acctExpenses.filter(e => !q || (e.party||'').toLowerCase().includes(q) || e.category.toLowerCase().includes(q) || (e.referenceNo||'').toLowerCase().includes(q) || e.voucherNo.toLowerCase().includes(q)).sort((a,b) => (b.date||'').localeCompare(a.date||''));
-    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_expenses', 'create');
-    const canPrint = getAccountingTabAccess(currentUser.role, 'accounting_expenses', 'print');
-    const canVoid = getAccountingTabAccess(currentUser.role, 'accounting_expenses', 'delete');
-    body.innerHTML = `
-      ${canCreate ? `
-      <div class="profile-card" style="max-width:640px; margin-bottom:24px;">
-        <h4>💸 Record Expense</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Salaries, utilities, maintenance, supplies — anything the school spends on. Pick the <b>Account</b> this expense should be weighed against (Tuition Fee, Vehicle Fee, Inventory, Hostel Fee, or General) so the "P&amp;L by Account" tab can show whether that part of the school is running at a profit or a loss — e.g. driver salary and fuel go under Vehicle Fee, canteen stock purchases go under Inventory. A Payment Voucher number is assigned automatically when you save.</p>
-        <div class="form-grid" style="margin-bottom:14px;">
-          <div class="f-field"><label>Date</label><input type="date" id="acctExpDate" value="${new Date().toISOString().slice(0,10)}"></div>
-          <div class="f-field"><label>Amount (₹)</label><input type="number" id="acctExpAmount" min="0" placeholder="0"></div>
-          <div class="f-field">
-            <label>Category</label>
-            <select id="acctExpCategory" onchange="onAcctCategoryChange('acctExpCategory','acctExpNewCategory')">
-              ${acctExpenseCategories.map(c => `<option>${c}</option>`).join('')}
-              <option value="__new__">+ New Category...</option>
-            </select>
-          </div>
-          <div class="f-field" id="acctExpNewCategoryField" style="display:none;"><label>New Category Name</label><input type="text" id="acctExpNewCategory" placeholder="e.g. Sports Equipment"></div>
-          <div class="f-field">
-            <label>Account</label>
-            <select id="acctExpCostCenter">${acctCostCenters.map(c => `<option>${c}</option>`).join('')}</select>
-          </div>
-          <div class="f-field"><label>Paid To</label><input type="text" id="acctExpParty" placeholder="e.g. APSEB Electricity Board"></div>
-          <div class="f-field">
-            <label>Payment Mode</label>
-            <select id="acctExpMode" onchange="onAcctModeChange('acctExpMode','acctExpRefField')"><option>Cash</option><option>Bank Transfer</option><option>UPI</option><option>Cheque</option><option>Card</option><option>Online</option></select>
-          </div>
-          <div class="f-field" id="acctExpRefField" style="display:none;"><label>Reference / Cheque No.</label><input type="text" id="acctExpRef" placeholder="e.g. Cheque no. or UTR"></div>
-          <div class="f-field"><label>Paid From</label><select id="acctExpBankAccount"><option value="">(Auto — by Payment Mode)</option>${acctBankAccounts.filter(b=>b.active!==false).map(b => `<option value="${b.id}">${b.name}</option>`).join('')}</select></div>
-          <div class="f-field full"><label>Description / Narration</label><input type="text" id="acctExpDesc" placeholder="Optional notes about this expense"></div>
-        </div>
-        <button class="btn btn-primary" onclick="saveExpenseVoucher()">Save Expense Voucher</button>
-      </div>
-      ` : ''}
-
-      <h4 style="margin-bottom:10px;">Expense Vouchers (${acctExpenses.length})</h4>
-      <input class="input" style="max-width:280px; margin-bottom:12px;" placeholder="Search vouchers..." value="${acctExpenseSearch}" oninput="acctExpenseSearch=this.value; renderAcctExpenseTab(document.getElementById('accountingBody'));">
-      <div class="table-wrap">
-        <table><thead><tr><th>Voucher No.</th><th>Date</th><th>Category</th><th>Account</th><th>Paid To</th><th>Mode</th><th>Amount</th><th></th></tr></thead>
-        <tbody>
-        ${filtered.length ? filtered.map(e => `<tr${e.voided?' style="opacity:0.55; text-decoration:line-through;"':''}><td>${e.voucherNo}</td><td>${e.date}</td><td>${e.category}</td><td>${e.costCenter||'—'}</td><td>${e.party||'—'}</td><td>${e.mode}${e.referenceNo?' ('+e.referenceNo+')':''}</td><td style="color:var(--magenta); font-weight:600;">${fmtMoney(e.amount)}</td><td style="text-decoration:none; white-space:nowrap;">${canPrint?`<button class="btn-edit-text" onclick="printAccountingVoucher('expense','${e.id}')">Print</button>`:''}${canVoid && !e.voided?` <button class="btn-danger-text" onclick="voidAccountingEntry('expense','${e.id}')">Void</button>`:''}${e.voided?` <span class="pill" style="font-size:0.62rem;" title="${escapeHtml(e.voidReason||'')}">Voided</span>`:''}</td></tr>`).join('') : `<tr><td colspan="8"><div class="empty-state"><b>No expense vouchers yet${acctExpenseSearch?' match your search':''}</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-    `;
-  }
   async function saveExpenseVoucher(){
     const date = document.getElementById('acctExpDate').value;
     const amount = Number(document.getElementById('acctExpAmount').value) || 0;
@@ -934,51 +690,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   }
 
   /* --- Categories management --- */
-  function renderAcctCategoriesTab(body){
-    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_categories', 'create');
-    const canDelete = getAccountingTabAccess(currentUser.role, 'accounting_categories', 'delete');
-    body.innerHTML = `
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; max-width:820px; margin-bottom:20px;">
-        <div class="profile-card">
-          <h4>💸 Expense Categories</h4>
-          ${canCreate ? `<div style="display:flex; gap:8px; margin:12px 0;">
-            <input class="input" id="acctNewExpCat" placeholder="e.g. Sports Equipment" style="flex:1;">
-            <button class="btn btn-primary btn-sm" onclick="addAcctCategory('expense')">Add</button>
-          </div>` : ''}
-          <div class="table-wrap">
-            <table><tbody>
-            ${acctExpenseCategories.length ? acctExpenseCategories.map((c,i) => `<tr><td>${c}</td><td style="text-align:right;">${canDelete ? `<button class="btn-danger-text" onclick="removeAcctCategory('expense',${i})">Remove</button>` : ''}</td></tr>`).join('') : `<tr><td><div class="empty-state"><b>No categories yet</b></div></td></tr>`}
-            </tbody></table>
-          </div>
-        </div>
-        <div class="profile-card">
-          <h4>💰 Income Categories</h4>
-          ${canCreate ? `<div style="display:flex; gap:8px; margin:12px 0;">
-            <input class="input" id="acctNewIncCat" placeholder="e.g. Alumni Contribution" style="flex:1;">
-            <button class="btn btn-primary btn-sm" onclick="addAcctCategory('income')">Add</button>
-          </div>` : ''}
-          <div class="table-wrap">
-            <table><tbody>
-            ${acctIncomeCategories.length ? acctIncomeCategories.map((c,i) => `<tr><td>${c}</td><td style="text-align:right;">${canDelete ? `<button class="btn-danger-text" onclick="removeAcctCategory('income',${i})">Remove</button>` : ''}</td></tr>`).join('') : `<tr><td><div class="empty-state"><b>No categories yet</b></div></td></tr>`}
-            </tbody></table>
-          </div>
-        </div>
-      </div>
-      <div class="profile-card" style="max-width:400px;">
-        <h4>📈 Accounts (for Profit &amp; Loss)</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 12px;">Which part of the school an income or expense belongs to — Tuition Fee, Vehicle Fee, Inventory, Hostel Fee, General — so the "P&amp;L by Account" tab can show whether each one is running at a profit or a loss.</p>
-        ${canCreate ? `<div style="display:flex; gap:8px; margin:12px 0;">
-          <input class="input" id="acctNewCostCenter" placeholder="e.g. Sports Wing" style="flex:1;">
-          <button class="btn btn-primary btn-sm" onclick="addAcctCostCenter()">Add</button>
-        </div>` : ''}
-        <div class="table-wrap">
-          <table><tbody>
-          ${acctCostCenters.length ? acctCostCenters.map((c,i) => `<tr><td>${c}</td><td style="text-align:right;">${canDelete ? `<button class="btn-danger-text" onclick="removeAcctCostCenter(${i})">Remove</button>` : ''}</td></tr>`).join('') : `<tr><td><div class="empty-state"><b>No accounts yet</b></div></td></tr>`}
-          </tbody></table>
-        </div>
-      </div>
-    `;
-  }
   async function addAcctCategory(type){
     const inputId = type==='expense' ? 'acctNewExpCat' : 'acctNewIncCat';
     const name = document.getElementById(inputId).value.trim();
@@ -1028,55 +739,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   }
 
   /* --- P&L by Account --- */
-  function renderAcctSegmentsTab(body){
-    const segments = {};
-    function seg(name){
-      if(!segments[name]) segments[name] = { income:0, expense:0 };
-      return segments[name];
-    }
-    // A student buying from the Inventory / canteen counter is recorded as a
-    // Fee payment with category 'extra' (so it shows on their fee ledger) —
-    // that's indistinguishable from any other one-off Extra Fee by category
-    // alone, which is why it was landing in General / Other. Match it back
-    // to the actual inventory sale it came from (via extraFeeId → sefId) and
-    // count it as Inventory income instead.
-    const inventorySefIds = new Set(inventorySales.filter(s => s.sefId).map(s => s.sefId));
-    payments.filter(pBookedInLedger).forEach(p => {
-      const key = (p.category === 'extra' && inventorySefIds.has(p.extraFeeId)) ? 'Inventory' : feePaymentCostCenter(p);
-      seg(key).income += Number(p.amount)||0;
-    });
-    // A non-student buyer (staff, walk-in, etc.) at the inventory counter
-    // never creates a Fee payment at all — it only exists in the Inventory
-    // module's own sales log — so pull those in directly or that income
-    // would be invisible here, not just miscategorised.
-    inventorySales.filter(s => s.buyerType !== 'Student').forEach(s => { seg('Inventory').income += Number(s.paidAmount)||0; });
-    // Grouped strictly by the Account picked on each voucher — never by its
-    // free-typed Category, which can vary in spelling/capitalisation between
-    // entries that are really the same account and would otherwise split
-    // one account across several near-duplicate rows. Anything with no
-    // Account set (older entries from before that field existed) goes into
-    // one clean General / Other row.
-    acctIncome.filter(i => !i.voided).forEach(i => { seg(i.costCenter || 'General / Other').income += Number(i.amount)||0; });
-    acctExpenses.filter(e => !e.voided).forEach(e => { seg(e.costCenter || 'General / Other').expense += Number(e.amount)||0; });
-    const names = Object.keys(segments).sort((a,b) => (segments[b].income - segments[b].expense) - (segments[a].income - segments[a].expense));
-    const totalIncome = names.reduce((s,n) => s + segments[n].income, 0);
-    const totalExpense = names.reduce((s,n) => s + segments[n].expense, 0);
-    body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:680px;">Profit &amp; loss by account — student fee collections are matched to an account automatically (tuition fee → Tuition Fee, bus fee → Vehicle Fee (Transport), hostel fee → Hostel Fee, everything else → General / Other), and every Inventory / canteen counter sale — to a student or anyone else — is pulled in as Inventory income. Income and Payment vouchers use whichever Account was picked when they were saved. This is what tells you, for example, whether running the school bus is actually profitable once fuel, driver salary and maintenance are counted against the bus fee it collects — or whether the canteen is making money once what it paid for stock is counted against what it sold.</p>
-      <div class="table-wrap">
-        <table><thead><tr><th>Account</th><th>Income</th><th>Expenditure</th><th>Net</th></tr></thead>
-        <tbody>
-        ${names.length ? names.map(n => {
-          const s = segments[n];
-          const net = s.income - s.expense;
-          return `<tr><td class="name-cell">${n}</td><td style="color:#0f6a63; font-weight:600;">${fmtMoney(s.income)}</td><td style="color:var(--magenta); font-weight:600;">${fmtMoney(s.expense)}</td><td style="font-weight:700; color:${net>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(net)}</td></tr>`;
-        }).join('') : `<tr><td colspan="4"><div class="empty-state"><b>No income or expenditure recorded yet</b></div></td></tr>`}
-        </tbody>
-        ${names.length ? `<tfoot><tr style="font-weight:700; border-top:2px solid var(--border);"><td>Total</td><td style="color:#0f6a63;">${fmtMoney(totalIncome)}</td><td style="color:var(--magenta);">${fmtMoney(totalExpense)}</td><td style="color:${(totalIncome-totalExpense)>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(totalIncome-totalExpense)}</td></tr></tfoot>` : ''}
-        </table>
-      </div>
-    `;
-  }
 
   /* --- Print & Void --- */
   function printAccountingVoucher(type, id){
@@ -1181,49 +843,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   }
 
   /* ===== Chart of Accounts tab ===== */
-  function renderAcctChartTab(body){
-    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_chartofaccounts', 'create');
-    const canDelete = getAccountingTabAccess(currentUser.role, 'accounting_chartofaccounts', 'delete');
-    const ledger = acctBuildLedger();
-    const coa = getChartOfAccounts();
-    const groups = ['Assets','Liabilities','Equity','Income','Expense'];
-    const byGroup = {}; groups.forEach(g => byGroup[g] = []);
-    coa.forEach(acct => {
-      const rows = ledger[acct.key] || [];
-      const bal = acctBalanceFromRows(rows, acct.type);
-      byGroup[acct.group].push({ acct, bal, count: rows.length });
-    });
-    body.innerHTML = `
-      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:760px;">Every account the school's books use, grouped the way a proper Chart of Accounts is — Assets, Liabilities, Equity, Income and Expense — with each account's live balance. Bank &amp; Cash accounts are managed under <b>Bank &amp; Reconciliation</b>, Fixed Assets under <b>Fixed Assets</b>, and Income/Expense categories under <b>Categories</b>. Add any other Asset, Liability or Equity account here — a bank loan, caution deposits held for students, a corpus/capital fund, and so on.</p>
-      ${groups.map(g => `
-        <div class="dash-section-title"><div><h3>${g}</h3></div></div>
-        <div class="table-wrap" style="margin-bottom:24px;">
-          <table><thead><tr><th>Account</th><th>Type</th><th>Entries</th><th style="text-align:right;">Balance</th></tr></thead>
-          <tbody>
-          ${byGroup[g].length ? byGroup[g].map(({acct,bal,count}) => `<tr${acct.active===false?' style="opacity:0.5;"':''}><td class="name-cell">${acct.name}${acct.active===false?' <span class="pill" style="font-size:0.6rem;">Inactive</span>':''}</td><td>${acct.sub}</td><td>${count}</td><td style="text-align:right; font-weight:600; color:${bal.balance>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(Math.abs(bal.balance))} ${bal.normalDebit ? (bal.balance<0?'Cr':'Dr') : (bal.balance<0?'Dr':'Cr')}</td></tr>`).join('') : `<tr><td colspan="4"><div class="empty-state"><b>No ${g.toLowerCase()} accounts yet</b></div></td></tr>`}
-          </tbody></table>
-        </div>
-      `).join('')}
-      ${canCreate ? `
-      <div class="profile-card" style="max-width:640px; margin-bottom:20px;">
-        <h4>➕ Add Other Account (Asset / Liability / Equity)</h4>
-        <div class="form-grid" style="margin-bottom:14px;">
-          <div class="f-field full"><label>Account Name</label><input type="text" id="acctOLName" placeholder="e.g. Bank Loan — SBI, Corpus Fund, Caution Deposits Payable"></div>
-          <div class="f-field"><label>Type</label><select id="acctOLType"><option>Asset</option><option>Liability</option><option>Equity</option></select></div>
-          <div class="f-field"><label>Opening Balance (₹)</label><input type="number" id="acctOLOpening" min="0" placeholder="0"></div>
-          <div class="f-field"><label>Opening Date</label><input type="date" id="acctOLOpeningDate" value="${acctToday()}"></div>
-        </div>
-        <button class="btn btn-primary" onclick="saveAcctOtherLedger()">Add Account</button>
-      </div>` : ''}
-      <h4 style="margin-bottom:10px;">Other Accounts (${acctOtherLedgers.length})</h4>
-      <div class="table-wrap">
-        <table><thead><tr><th>Account</th><th>Type</th><th>Opening Balance</th><th></th></tr></thead>
-        <tbody>
-        ${acctOtherLedgers.length ? acctOtherLedgers.map(l => `<tr${l.active===false?' style="opacity:0.5;"':''}><td class="name-cell">${l.name}</td><td>${l.type}</td><td>${fmtMoney(l.openingBalance||0)}</td><td style="white-space:nowrap;">${canDelete ? `<button class="btn-edit-text" onclick="toggleAcctOtherLedgerActive('${l.id}')">${l.active===false?'Reactivate':'Deactivate'}</button> <button class="btn-danger-text" onclick="deleteAcctOtherLedger('${l.id}')">Delete</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="4"><div class="empty-state"><b>No other accounts yet</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-    `;
-  }
   async function saveAcctOtherLedger(){
     const name = document.getElementById('acctOLName').value.trim();
     const type = document.getElementById('acctOLType').value;
@@ -1265,62 +884,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
       credit: Number(row.querySelector('.jv-line-credit').value) || 0,
     }));
   }
-  function renderAcctJournalTab(body){
-    ensureJvDraft();
-    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_journal', 'create');
-    const canVoid = getAccountingTabAccess(currentUser.role, 'accounting_journal', 'delete');
-    const coa = getChartOfAccounts().filter(a => a.active !== false);
-    const totalDebit = jvDraftLines.reduce((s,l)=>s+(Number(l.debit)||0),0);
-    const totalCredit = jvDraftLines.reduce((s,l)=>s+(Number(l.credit)||0),0);
-    const q = acctJournalSearch.toLowerCase();
-    const filtered = acctJournalVouchers.filter(j => !q || (j.narration||'').toLowerCase().includes(q) || j.voucherNo.toLowerCase().includes(q)).sort((a,b) => (b.date||'').localeCompare(a.date||''));
-    body.innerHTML = `
-      ${canCreate ? `
-      <div class="profile-card" style="margin-bottom:24px;">
-        <h4>📒 New Journal Voucher</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">For adjustments, opening entries, transfers between bank accounts (use type Contra), or anything that doesn't fit a simple Income/Expense voucher. Every line needs either a Debit or a Credit, and the voucher can only be saved once total Debit equals total Credit. A voucher number is assigned automatically when you save.</p>
-        <div class="form-grid" style="margin-bottom:14px;">
-          <div class="f-field"><label>Date</label><input type="date" id="jvDate" value="${acctToday()}"></div>
-          <div class="f-field"><label>Type</label><select id="jvType"><option>Journal</option><option>Contra</option></select></div>
-          <div class="f-field full"><label>Narration</label><input type="text" id="jvNarration" placeholder="e.g. Transfer from Cash to SBI Bank Account"></div>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <h4 style="margin:0;">Lines</h4>
-          <button class="btn btn-primary btn-sm" onclick="addJvLine()">+ Add Line</button>
-        </div>
-        <div class="table-wrap" style="overflow-x:auto; margin-bottom:10px;">
-          <table style="min-width:560px;"><thead><tr><th>Account</th><th style="width:130px;">Debit (₹)</th><th style="width:130px;">Credit (₹)</th><th></th></tr></thead>
-          <tbody>
-          ${jvDraftLines.map((l,i) => `<tr class="jv-line-row">
-            <td><select class="input jv-line-account" style="width:100%;">
-              <option value="">Select account...</option>
-              ${coa.map(a => `<option value="${a.key}" ${l.accountKey===a.key?'selected':''}>${a.group} — ${a.name}</option>`).join('')}
-            </select></td>
-            <td><input type="number" class="input jv-line-debit" min="0" value="${l.debit||''}"></td>
-            <td><input type="number" class="input jv-line-credit" min="0" value="${l.credit||''}"></td>
-            <td>${jvDraftLines.length > 2 ? `<button class="btn-danger-text" onclick="removeJvLine(${i})">🗑️</button>` : ''}</td>
-          </tr>`).join('')}
-          </tbody>
-          <tfoot><tr style="font-weight:700;"><td>Total</td><td>${fmtMoney(totalDebit)}</td><td>${fmtMoney(totalCredit)}</td><td></td></tr></tfoot>
-          </table>
-        </div>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin-bottom:12px;">Totals above reflect the lines as of the last Add/Remove — the exact check happens when you save.</p>
-        <button class="btn btn-primary" onclick="saveJournalVoucher()">Save Journal Voucher</button>
-      </div>` : ''}
-
-      <h4 style="margin-bottom:10px;">Journal Vouchers (${acctJournalVouchers.length})</h4>
-      <input class="input" style="max-width:280px; margin-bottom:12px;" placeholder="Search vouchers..." value="${acctJournalSearch}" oninput="acctJournalSearch=this.value; renderAcctJournalTab(document.getElementById('accountingBody'));">
-      <div class="table-wrap">
-        <table><thead><tr><th>Voucher No.</th><th>Date</th><th>Type</th><th>Narration</th><th>Amount</th><th></th></tr></thead>
-        <tbody>
-        ${filtered.length ? filtered.map(j => {
-          const amt = (j.lines||[]).reduce((s,l)=>s+(Number(l.debit)||0),0);
-          return `<tr${j.voided?' style="opacity:0.55; text-decoration:line-through;"':''}><td>${j.voucherNo}</td><td>${j.date}</td><td>${j.type||'Journal'}</td><td>${j.narration||'—'}</td><td style="font-weight:600;">${fmtMoney(amt)}</td><td style="text-decoration:none; white-space:nowrap;">${canVoid && !j.voided?`<button class="btn-danger-text" onclick="voidJournalVoucher('${j.id}')">Void</button>`:''}${j.voided?` <span class="pill" style="font-size:0.62rem;" title="${escapeHtml(j.voidReason||'')}">Voided</span>`:''}</td></tr>`;
-        }).join('') : `<tr><td colspan="6"><div class="empty-state"><b>No journal vouchers yet${acctJournalSearch?' match your search':''}</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-    `;
-  }
   function addJvLine(){ syncJvLinesFromInputs(); jvDraftLines.push(jvBlankLine()); renderAcctJournalTab(document.getElementById('accountingBody')); }
   function removeJvLine(i){ syncJvLinesFromInputs(); jvDraftLines.splice(i,1); renderAcctJournalTab(document.getElementById('accountingBody')); }
   async function saveJournalVoucher(){
@@ -1360,80 +923,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
 
   /* ===== Bank Accounts & Reconciliation tab ===== */
   let acctReconAccountId = '';
-  function renderAcctBankTab(body){
-    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_bank', 'create');
-    const canDelete = getAccountingTabAccess(currentUser.role, 'accounting_bank', 'delete');
-    if((!acctReconAccountId || !acctBankAccounts.some(b=>b.id===acctReconAccountId)) && acctBankAccounts.length) acctReconAccountId = acctBankAccounts[0].id;
-    const ledger = acctBuildLedger();
-    body.innerHTML = `
-      ${canCreate ? `
-      <div class="profile-card" style="max-width:640px; margin-bottom:24px;">
-        <h4>➕ Add Bank / Cash Account</h4>
-        <div class="form-grid" style="margin-bottom:14px;">
-          <div class="f-field full"><label>Account Name</label><input type="text" id="acctBankName" placeholder="e.g. Bank Account — SBI Current A/c"></div>
-          <div class="f-field"><label>Type</label><select id="acctBankType"><option>Bank</option><option>Cash</option></select></div>
-          <div class="f-field"><label>Bank Name</label><input type="text" id="acctBankBankName" placeholder="e.g. State Bank of India"></div>
-          <div class="f-field"><label>Account Number</label><input type="text" id="acctBankAccNo" placeholder="Optional"></div>
-          <div class="f-field"><label>IFSC</label><input type="text" id="acctBankIfsc" placeholder="Optional"></div>
-          <div class="f-field"><label>Opening Balance (₹)</label><input type="number" id="acctBankOpening" min="0" placeholder="0"></div>
-          <div class="f-field"><label>Opening Date</label><input type="date" id="acctBankOpeningDate" value="${acctToday()}"></div>
-        </div>
-        <button class="btn btn-primary" onclick="saveAcctBankAccount()">Add Account</button>
-      </div>` : ''}
-
-      <h4 style="margin-bottom:10px;">Bank &amp; Cash Accounts (${acctBankAccounts.length})</h4>
-      <div class="table-wrap" style="margin-bottom:28px;">
-        <table><thead><tr><th>Account</th><th>Type</th><th>Bank</th><th>A/c No.</th><th style="text-align:right;">Balance</th><th></th></tr></thead>
-        <tbody>
-        ${acctBankAccounts.map(b => {
-          const bal = acctBalanceFromRows(ledger['bank:'+b.id]||[], 'Asset');
-          return `<tr${b.active===false?' style="opacity:0.5;"':''}><td class="name-cell">${b.name}</td><td>${b.type}</td><td>${b.bankName||'—'}</td><td>${b.accountNo||'—'}</td><td style="text-align:right; font-weight:600; color:${bal.balance>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(bal.balance)}</td><td style="white-space:nowrap;">${canDelete && acctBankAccounts.filter(x=>x.active!==false).length>1 ? `<button class="btn-edit-text" onclick="toggleAcctBankActive('${b.id}')">${b.active===false?'Reactivate':'Deactivate'}</button>` : ''}</td></tr>`;
-        }).join('')}
-        </tbody></table>
-      </div>
-
-      <div class="dash-section-title"><div><h3>Bank Reconciliation</h3></div></div>
-      <p style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:12px; max-width:700px;">Tick off every transaction that has actually cleared on your bank statement. The Reconciled Balance should match your bank statement's closing balance once everything on it is ticked — anything left unticked is still in transit (a cheque issued but not yet presented, for example).</p>
-      <div class="f-field" style="max-width:320px; margin-bottom:16px;">
-        <label>Account</label>
-        <select id="acctReconAccountSel" onchange="acctReconAccountId=this.value; renderAcctBankTab(document.getElementById('accountingBody'));">
-          ${acctBankAccounts.map(b => `<option value="${b.id}" ${acctReconAccountId===b.id?'selected':''}>${b.name}</option>`).join('')}
-        </select>
-      </div>
-      ${renderAcctReconciliationBody(acctReconAccountId, ledger)}
-    `;
-  }
-  function renderAcctReconciliationBody(bankId, ledger){
-    const bank = acctBankAccounts.find(b => b.id === bankId);
-    if(!bank) return `<div class="empty-state"><b>Add a bank/cash account above first.</b></div>`;
-    const rows = (ledger['bank:'+bankId]||[]).slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
-    let reconciledBal = 0, ledgerBal = 0;
-    const trs = rows.map(r => {
-      const rid = acctRowId(r);
-      const reconciled = !!acctReconciled[rid];
-      const net = r.debit - r.credit;
-      ledgerBal += net;
-      if(reconciled) reconciledBal += net;
-      return `<tr><td><input type="checkbox" ${reconciled?'checked':''} onchange="toggleAcctReconciledRow('${rid.replace(/'/g,"\\'")}')"></td><td>${r.date}</td><td>${r.narration}</td><td>${r.source}</td><td style="text-align:right; color:${net>=0?'#0f6a63':'var(--magenta)'};">${net>=0?'+':''}${fmtMoney(net)}</td></tr>`;
-    }).join('');
-    const statementBal = bank.lastStatementBalance != null ? Number(bank.lastStatementBalance) : null;
-    const diff = statementBal != null ? Math.round((statementBal - reconciledBal)*100)/100 : null;
-    return `
-      <div class="fee-summary-row" style="margin-bottom:16px;">
-        <div class="fee-sum-card"><b>${fmtMoney(ledgerBal)}</b><span>Ledger Balance</span></div>
-        <div class="fee-sum-card"><b>${fmtMoney(reconciledBal)}</b><span>Reconciled Balance</span></div>
-        <div class="fee-sum-card"><b style="color:${diff===0?'#0f6a63':(diff==null?'inherit':'var(--magenta)')};">${statementBal!=null?fmtMoney(diff):'—'}</b><span>Difference vs Statement</span></div>
-      </div>
-      <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:14px;">
-        <div class="f-field"><label>Bank Statement Closing Balance (₹)</label><input type="number" id="acctStatementBal" value="${bank.lastStatementBalance||''}" placeholder="Enter to compare"></div>
-        <button class="btn btn-ghost btn-sm" onclick="saveAcctStatementBalance('${bankId}')">Save</button>
-      </div>
-      <div class="table-wrap">
-        <table><thead><tr><th style="width:40px;">✓</th><th>Date</th><th>Narration</th><th>Source</th><th style="text-align:right;">Amount</th></tr></thead>
-        <tbody>${rows.length ? trs : `<tr><td colspan="5"><div class="empty-state"><b>No transactions on this account yet</b></div></td></tr>`}</tbody></table>
-      </div>
-    `;
-  }
   async function saveAcctBankAccount(){
     const name = document.getElementById('acctBankName').value.trim();
     const type = document.getElementById('acctBankType').value;
@@ -1469,45 +958,6 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   }
 
   /* ===== Fixed Assets tab ===== */
-  function renderAcctAssetsTab(body){
-    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_assets', 'create');
-    const canDelete = getAccountingTabAccess(currentUser.role, 'accounting_assets', 'delete');
-    const totalCost = acctFixedAssets.reduce((s,a)=>s+(Number(a.purchaseCost)||0),0);
-    const totalDep = acctFixedAssets.reduce((s,a)=>s+acctAccumulatedDepreciation(a, acctToday()),0);
-    const totalBook = totalCost - totalDep;
-    body.innerHTML = `
-      <div class="fee-summary-row" style="margin-bottom:20px;">
-        <div class="fee-sum-card"><b>${fmtMoney(totalCost)}</b><span>Total Asset Cost</span></div>
-        <div class="fee-sum-card"><b style="color:var(--magenta);">${fmtMoney(totalDep)}</b><span>Accumulated Depreciation</span></div>
-        <div class="fee-sum-card"><b>${fmtMoney(totalBook)}</b><span>Current Book Value</span></div>
-      </div>
-      ${canCreate ? `
-      <div class="profile-card" style="max-width:680px; margin-bottom:24px;">
-        <h4>🏢 Add Fixed Asset</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Buildings, furniture, computers, lab equipment, vehicles — anything the school owns that loses value over time. Depreciation is calculated automatically using the straight-line method (Cost − Salvage Value) ÷ Useful Life, prorated by how long you've owned it.</p>
-        <div class="form-grid" style="margin-bottom:14px;">
-          <div class="f-field full"><label>Asset Name</label><input type="text" id="assetName" placeholder="e.g. Computer Lab — 20 Desktops"></div>
-          <div class="f-field"><label>Category</label><input type="text" id="assetCategory" placeholder="e.g. IT Equipment, Furniture, Vehicle, Building"></div>
-          <div class="f-field"><label>Purchase Date</label><input type="date" id="assetPurchaseDate" value="${acctToday()}"></div>
-          <div class="f-field"><label>Purchase Cost (₹)</label><input type="number" id="assetCost" min="0" placeholder="0"></div>
-          <div class="f-field"><label>Salvage Value (₹)</label><input type="number" id="assetSalvage" min="0" placeholder="0"></div>
-          <div class="f-field"><label>Useful Life (Years)</label><input type="number" id="assetLife" min="1" placeholder="e.g. 5"></div>
-        </div>
-        <button class="btn btn-primary" onclick="saveAcctFixedAsset()">Add Asset</button>
-      </div>` : ''}
-      <h4 style="margin-bottom:10px;">Fixed Assets Register (${acctFixedAssets.length})</h4>
-      <div class="table-wrap">
-        <table><thead><tr><th>Asset</th><th>Category</th><th>Purchase Date</th><th>Cost</th><th>Acc. Depreciation</th><th>Book Value</th><th></th></tr></thead>
-        <tbody>
-        ${acctFixedAssets.length ? acctFixedAssets.map(a => {
-          const dep = acctAccumulatedDepreciation(a, acctToday());
-          const book = acctAssetBookValue(a, acctToday());
-          return `<tr${a.active===false?' style="opacity:0.5;"':''}><td class="name-cell">${a.name}${a.active===false?' <span class="pill" style="font-size:0.6rem;">Disposed</span>':''}</td><td>${a.category||'—'}</td><td>${a.purchaseDate||'—'}</td><td>${fmtMoney(a.purchaseCost)}</td><td style="color:var(--magenta);">${fmtMoney(dep)}</td><td style="font-weight:600;">${fmtMoney(book)}</td><td style="white-space:nowrap;">${canDelete && a.active!==false ? `<button class="btn-danger-text" onclick="disposeAcctFixedAsset('${a.id}')">Mark Disposed</button>` : ''}</td></tr>`;
-        }).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No fixed assets recorded yet</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-    `;
-  }
   async function saveAcctFixedAsset(){
     const name = document.getElementById('assetName').value.trim();
     const category = document.getElementById('assetCategory').value.trim();

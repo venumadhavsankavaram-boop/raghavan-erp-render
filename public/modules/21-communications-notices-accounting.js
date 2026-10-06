@@ -1,38 +1,3 @@
-function renderAcctBudgetTab(body){
-    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_budget', 'create');
-    const canDelete = getAccountingTabAccess(currentUser.role, 'accounting_budget', 'delete');
-    const coa = getChartOfAccounts().filter(a => (a.type==='Income'||a.type==='Expense') && a.active!==false);
-    const nextYear = Number(acctToday().slice(0,4)) + 1;
-    body.innerHTML = `
-      ${canCreate ? `
-      <div class="profile-card" style="max-width:680px; margin-bottom:24px;">
-        <h4>📅 Add Budget Line</h4>
-        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Set a budgeted amount for an Income or Expense account over a period (a term, a financial year, etc.) and compare it against what actually happened.</p>
-        <div class="form-grid" style="margin-bottom:14px;">
-          <div class="f-field full"><label>Label</label><input type="text" id="budgetLabel" placeholder="e.g. FY 2026-27"></div>
-          <div class="f-field"><label>Start Date</label><input type="date" id="budgetStart" value="${acctToday().slice(0,4)}-04-01"></div>
-          <div class="f-field"><label>End Date</label><input type="date" id="budgetEnd" value="${nextYear}-03-31"></div>
-          <div class="f-field"><label>Account</label><select id="budgetAccount">${coa.map(a => `<option value="${a.key}">${a.group} — ${a.name}</option>`).join('')}</select></div>
-          <div class="f-field"><label>Budgeted Amount (₹)</label><input type="number" id="budgetAmount" min="0" placeholder="0"></div>
-        </div>
-        <button class="btn btn-primary" onclick="saveAcctBudget()">Add Budget Line</button>
-      </div>` : ''}
-      <h4 style="margin-bottom:10px;">Budget vs Actual (${acctBudgets.length})</h4>
-      <div class="table-wrap">
-        <table><thead><tr><th>Label</th><th>Period</th><th>Account</th><th>Budgeted</th><th>Actual</th><th>Variance</th><th></th></tr></thead>
-        <tbody>
-        ${acctBudgets.length ? acctBudgets.map(b => {
-          const acct = coaAccountByKey(b.accountKey);
-          const actual = acctActualForAccountInRange(b.accountKey, b.startDate, b.endDate);
-          const variance = actual - (Number(b.budgetedAmount)||0);
-          const isExpense = acct && acct.type === 'Expense';
-          const overBudget = isExpense ? variance > 0 : variance < 0;
-          return `<tr><td>${b.label}</td><td>${b.startDate} to ${b.endDate}</td><td>${acct?acct.name:b.accountKey}</td><td>${fmtMoney(b.budgetedAmount)}</td><td>${fmtMoney(actual)}</td><td style="font-weight:600; color:${overBudget?'var(--magenta)':'#0f6a63'};">${variance>=0?'+':''}${fmtMoney(variance)}</td><td>${canDelete?`<button class="btn-danger-text" onclick="deleteAcctBudget('${b.id}')">Delete</button>`:''}</td></tr>`;
-        }).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No budget lines yet</b></div></td></tr>`}
-        </tbody></table>
-      </div>
-    `;
-  }
   async function saveAcctBudget(){
     const label = document.getElementById('budgetLabel').value.trim();
     const startDate = document.getElementById('budgetStart').value;
