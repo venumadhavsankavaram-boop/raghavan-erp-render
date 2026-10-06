@@ -144,6 +144,7 @@
   }
 
   /* ---------- the printed report ---------- */
+  function prcLogoCss(src){ return src ? `.rc-logo{ background-image:url("${src}"); }` : ''; }
   function prcPrintCss(){
     return `
       @page{ size:A4; margin:9mm; }
@@ -156,7 +157,8 @@
       .rc-card.rc-full{ min-height:274mm; }
       .rc-grow{ flex:1; min-height:8mm; }
       .rc-head{ display:flex; align-items:center; gap:8px; justify-content:center; margin-bottom:3px; }
-      .rc-head img{ width:34px; height:34px; border-radius:50%; }
+      .rc-head img,.rc-logo{ width:34px; height:34px; border-radius:50%; }
+      .rc-logo{ background-size:cover; background-position:center; }
       .rc-school{ font-weight:700; font-size:15px; text-align:center; }
       .rc-addr{ font-size:9px; text-align:center; color:#555; margin-bottom:6px; }
       .rc-title{ text-align:center; font-weight:700; font-size:12px; letter-spacing:.3px; text-transform:uppercase; border-top:1.5px solid #211A4E; border-bottom:1.5px solid #211A4E; padding:4px 0; margin-bottom:3px; color:#211A4E; }
@@ -287,6 +289,8 @@
     const basis = src.mode === 'period'
       ? `Marks counted: ${src.exams.map(e => escapeHtml(e.name)).join(' + ')} — total of all ${src.exams.length} exam${src.exams.length===1?'':'s'}`
       : `Exam: ${escapeHtml(src.name)}${src.pseudo.startDate ? ' · ' + escapeHtml(src.pseudo.startDate) + (src.pseudo.endDate && src.pseudo.endDate !== src.pseudo.startDate ? ' – ' + escapeHtml(src.pseudo.endDate) : '') : ''}`;
+    const pending = sc.rows.filter(x => x.countable && !x.anyHas).map(x => x.name);
+    const pendNote = pending.length ? ` · <b style="color:#b00020;">Marks pending: ${pending.map(escapeHtml).join(', ')}</b>` : '';
     const boxes = [];
     if(showMarks) boxes.push(`<div class="rc-sumbox"><b>${sc.totalObtained} / ${sc.totalMax}</b>Total marks</div>`, `<div class="rc-sumbox"><b>${sc.pct}%</b>Percentage</div>`);
     if(showGrade) boxes.push(`<div class="rc-sumbox ${sc.info && sc.info.fail ? 'bad':''}"><b>${sc.info ? escapeHtml(sc.info.grade) : '—'}</b>Overall grade${scheme && scheme.showRemarks && sc.info && sc.info.remark ? ' · ' + escapeHtml(sc.info.remark) : ''}</div>`);
@@ -296,11 +300,11 @@
     const cls = (opts.perPage === 2) ? 'rc-two' : ('rc-one' + ((t.parentSign || 'box') === 'slip' ? ' rc-full' : ''));
     return `
       <div class="rc-card ${cls}">
-        <div class="rc-head">${opts.logoSrc ? `<img src="${opts.logoSrc}">` : ''}</div>
+        <div class="rc-head">${opts.logoSrc ? (opts.logoInline ? `<img src="${opts.logoSrc}">` : '<div class="rc-logo"></div>') : ''}</div>
         <div class="rc-school">${escapeHtml(schoolInfo.name||'')}</div>
         <div class="rc-addr">${escapeHtml(schoolInfo.address||'')}</div>
         <div class="rc-title">${escapeHtml(title)}</div>
-        <div class="rc-basis">${basis}</div>
+        <div class="rc-basis">${basis}${pendNote}</div>
         <div class="rc-info">${buildInfoFieldLines(s, src.pseudo, t)}</div>
         ${sc.rows.length ? prcTableHtml(s, sc, src, t) : '<p style="font-size:10px;color:#777;">No subjects are set up for this class in the selected exam.</p>'}
         <div class="rc-sum">${boxes.join('')}</div>
@@ -314,7 +318,7 @@
   function reportCardPageHtml(s, exam, logoSrc, template){
     const src = prcMakeSrc('e:'+exam.id, exam.name, [exam], 'exam');
     const t = template || prcTemplate();
-    return prcReportHtml(s, src, t, { logoSrc, perPage:1, title:'' });
+    return prcReportHtml(s, src, t, { logoSrc, logoInline:true, perPage:1, title:'' });
   }
 
   /* ---------- printing ---------- */
@@ -332,7 +336,7 @@
     });
     const w = window.open('', '_blank');
     if(!w){ showToast('Your browser blocked the print window — allow pop-ups for this site and try again.'); return; }
-    w.document.write(`<html><head><title>${escapeHtml(fileTitle)}</title><style>${prcPrintCss()}</style></head><body onload="window.print()">${pages}</body></html>`);
+    w.document.write(`<html><head><title>${escapeHtml(fileTitle)}</title><style>${prcPrintCss()}${prcLogoCss(logoSrc)}</style></head><body onload="window.print()">${pages}</body></html>`);
     w.document.close();
   }
   async function prcPrintOne(studentId){
@@ -546,7 +550,7 @@
         <td><div class="prc-stu"><span class="prc-av">${s.photo ? `<img src="${s.photo}">` : escapeHtml(initials(s))}</span><span><b>${escapeHtml(s.firstName+' '+s.lastName)}</b><small>${escapeHtml(s.className)} — ${escapeHtml(s.section)}</small></span></div></td>
         <td>${escapeHtml(s.admissionNo||'')}</td>
         <td class="c">${sc.anyHas ? `${sc.totalObtained}/${sc.totalMax}` : '—'}</td>
-        <td class="c">${sc.anyHas && disp !== 'grades' ? sc.pct + '%' : '—'}</td>
+        <td class="c">${sc.anyHas && disp !== 'grades' ? sc.pct + '%' + (sc.missing ? '<sup title="Provisional: some marks are not entered yet">*</sup>' : '') : '—'}</td>
         <td class="c">${sc.anyHas && sc.info ? `<span class="grade-pill ${sc.info.fail?'fail':''}">${escapeHtml(sc.info.grade)}</span>` : '—'}</td>
         <td class="c">${rank && rank.outOf > 1 ? ordinalSuffix(rank.rank) : '—'}</td>
         <td>${status}</td>
@@ -567,7 +571,7 @@
     if(!s){ host.innerHTML = `<div class="empty-state"><b>No student to preview</b>Pick a class that has students.</div>`; if(sub) sub.textContent=''; return; }
     if(sub) sub.textContent = `${s.firstName} ${s.lastName} · ${s.className} — ${s.section}`;
     const html = prcReportHtml(s, src, t, { logoSrc:prcLogo(), perPage:1, title:prcTitle });
-    const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${prcPrintCss()} body{ background:#fff; padding:0; margin:0; } .rc-card{ margin:0; }</style></head><body>${html}</body></html>`;
+    const doc = `<!doctype html><html><head><meta charset="utf-8"><style>${prcPrintCss()}${prcLogoCss(prcLogo())} body{ background:#fff; padding:0; margin:0; } .rc-card{ margin:0; }</style></head><body>${html}</body></html>`;
     const editor = (t.layout === 'modern') ? coScholasticEditorHtml(s, src.coExam, t) : '';
     host.innerHTML = `
       <div class="prc-paper"><iframe id="prcFrame" title="Report preview" scrolling="no"></iframe></div>
