@@ -151,8 +151,24 @@
       *{ box-sizing:border-box; }
       body{ font-family:Arial,Helvetica,sans-serif; color:#111; margin:0; }
       .rc-card{ padding:7mm 9mm; border:1.2px solid #333; border-radius:2mm; page-break-inside:avoid; background:#fff; }
-      .rc-card.rc-two{ min-height:136mm; }
-      .rc-card.rc-two + .rc-card.rc-two{ margin-top:6mm; }
+      .rc-card.rc-two{ height:139mm; overflow:hidden; padding:3.5mm 6mm; border-width:1px; }
+      .rc-card.rc-two + .rc-card.rc-two{ margin-top:0; }
+      .rc-two .rc-grow{ display:none; }
+      .rc-two .rc-head{ margin-bottom:1px; } .rc-two .rc-head img,.rc-two .rc-logo{ width:24px; height:24px; }
+      .rc-two .rc-school{ font-size:12.5px; } .rc-two .rc-addr{ font-size:7.8px; margin-bottom:3px; }
+      .rc-two .rc-title{ font-size:10.5px; padding:2px 0; } .rc-two .rc-basis{ font-size:7.6px; margin-bottom:3px; }
+      .rc-two .rc-info{ font-size:8.2px; gap:1px 8px; margin-bottom:4px; }
+      .rc-two table{ font-size:8.2px !important; margin-bottom:4px !important; }
+      .rc-two th,.rc-two td{ padding:1.6px 4px !important; }
+      .rc-two th small{ font-size:6.8px; }
+      .rc-two .rc-sum{ gap:4px; margin-bottom:4px; } .rc-two .rc-sumbox{ padding:2px 4px; font-size:7.4px; } .rc-two .rc-sumbox b{ font-size:10.5px; }
+      .rc-two .rc-foot,.rc-two .rc-remarks{ font-size:7.8px; margin:2px 0 4px; }
+      .rc-two .rc-sign,.rc-two .rc-sign3{ margin-top:5px; font-size:8.2px; }
+      .rc-two .rc-sg2 .imgbox,.rc-two .rc-sg .rc-sgline{ height:16px; } .rc-two .rc-sg2 img,.rc-two .rc-sg .rc-sgline img{ height:16px; }
+      .rc-two .rc-ack{ margin-top:4px; padding:1.5mm 3mm; font-size:8.2px; } .rc-two .rc-ack p{ margin:0 0 3px; } .rc-two .rc-ack-row{ margin-bottom:4px; }
+      .rc-two .rc-cut{ margin:5px 0 3px; font-size:7.2px; } .rc-two .rc-slip{ padding:1.5mm 3mm; font-size:8px; }
+      .rc-two .rc-cosch-title{ margin:3px 0 2px; padding-top:2px; font-size:7.8px; } .rc-two .rc-cosch-grid{ font-size:7.6px; margin-bottom:2px; }
+      .rc-two .ln{ height:9px; }
       .rc-card.rc-one{ display:flex; flex-direction:column; }
       .rc-card.rc-full{ min-height:274mm; }
       .rc-grow{ flex:1; min-height:8mm; }
