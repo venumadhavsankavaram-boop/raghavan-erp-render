@@ -79,19 +79,37 @@ const SETTINGS_KEY = "finance-settings";
     const oldArray = _apiLastSynced[key] || [];
     const newIds = new Set(newArray.map(x => x.id));
     try{
+      // Diff with lookups (a Map) instead of scanning the old array for every
+      // item: attendance has 20k+ rows, and the scan made each save freeze the
+      // browser for seconds. Requests then go out a few at a time instead of
+      // strictly one after another, so marking a whole class is not 40
+      // sequential round trips. Deletes finish before creates/updates, as before.
+      const oldById = new Map(oldArray.map(x => [x.id, x]));
+      const deletes = [], writes = [];
       for(const item of oldArray){
-        if(!newIds.has(item.id)){
-          await throwIfNotOk(await fetch(apiPath + '?id=' + encodeURIComponent(item.id), { method:'DELETE', headers: actorHeaders() }));
-        }
+        if(!newIds.has(item.id)) deletes.push(() => fetch(apiPath + '?id=' + encodeURIComponent(item.id), { method:'DELETE', headers: actorHeaders() }));
       }
       for(const item of newArray){
-        const old = oldArray.find(x => x.id === item.id);
-        if(!old){
-          await throwIfNotOk(await fetch(apiPath, { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(item) }));
-        }else if(JSON.stringify(old) !== JSON.stringify(item)){
-          await throwIfNotOk(await fetch(apiPath, { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(item) }));
+        const prev = oldById.get(item.id);
+        if(!prev){
+          writes.push(() => fetch(apiPath, { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(item) }));
+        }else if(prev !== item && JSON.stringify(prev) !== JSON.stringify(item)){
+          writes.push(() => fetch(apiPath, { method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify(item) }));
         }
       }
+      const runPool = async (jobs, width) => {
+        let next = 0, failed = null;
+        const worker = async () => {
+          while(failed === null && next < jobs.length){
+            const job = jobs[next++];
+            try{ await throwIfNotOk(await job()); }catch(e){ if(failed === null) failed = e; }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(width, jobs.length) }, worker));
+        if(failed !== null) throw failed;
+      };
+      await runPool(deletes, 6);
+      await runPool(writes, 6);
       _apiLastSynced[key] = JSON.parse(JSON.stringify(newArray));
       // Local fallback copy only — the real save already succeeded above.
       // See the matching comment in persist() for why this is wrapped: a
