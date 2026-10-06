@@ -6,9 +6,9 @@
      fees, ...) prints on ONE receipt, with an Instalment column and a total.
    - The header shows only the SCHOOL's phone; the parent's number appears in
      the student details, labelled Father / Mother / Guardian.
-   - Two copies (Student + Office) fill one A4 sheet, each EXACTLY half (210 x 148 mm,
-     cut along the dashed line). A button switches to a single copy for A5 paper.
-     Many fee heads tighten the spacing so nothing is cut off.
+   - Both copies (Student + Office) sit SIDE BY SIDE on the top half of an A4 sheet
+     (210 x 148 mm, each copy 105 x 148 mm, cut along the dashed line). A button prints
+     the same block on half-A4 (A5 landscape) paper. Many fee heads tighten the spacing so nothing is cut off.
    ========================================================================== */
 function frcEsc(v){ return escapeHtml(v == null ? '' : String(v)); }
 function frcMoney(n){ return (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -33,9 +33,10 @@ function frcLogoSrc(){
 function frcCopyHtml(label, d){
   const rows = d.recs.map((r, i) => `<tr>
       <td class="n">${i + 1}</td>
-      <td><b>${frcEsc(feeLabelFor(r))}</b>${r.note ? `<small>${frcEsc(r.note)}</small>` : ''}</td>
+      <td><b>${frcEsc(feeLabelFor(r))}</b>${r.note ? ` <small>${frcEsc(r.note)}</small>` : ''}</td>
       <td><span class="chip">${frcEsc(frcInstalmentText(r))}</span></td>
       <td class="a">${frcMoney(r.amount)}</td></tr>`).join('');
+  const rel = d.s.fatherName ? 'Father' : (d.s.motherName ? 'Mother' : 'Guardian');
   return `<section class="copy">
     <header class="hd">
       <div class="hd-l">
@@ -56,9 +57,9 @@ function frcCopyHtml(label, d){
       <div><small>Student</small><b>${frcEsc((d.s.firstName + ' ' + d.s.lastName).toUpperCase())}</b></div>
       <div><small>Admission No</small><b>${frcEsc(d.s.admissionNo)}</b></div>
       <div><small>Class &amp; Section</small><b>${frcEsc(d.s.className)} — ${frcEsc(d.s.section)}</b></div>
-      <div><small>${d.s.fatherName ? 'Father' : (d.s.motherName ? 'Mother' : 'Guardian')}</small><b>${frcEsc(d.parentName)}</b></div>
+      <div><small>${rel}</small><b>${frcEsc(d.parentName)}</b></div>
       <div><small>Mobile${d.contact.rel ? ' (' + d.contact.rel + ')' : ''}</small><b>${frcEsc(d.contact.phone || '—')}</b></div>
-      <div><small>Address</small><b class="addrv">${frcEsc(d.address)}</b></div>
+      <div class="wide"><small>Address</small><b class="addrv">${frcEsc(d.address)}</b></div>
     </div>
     <div class="mid"><table class="items">
       <thead><tr><th class="n">#</th><th>Fee head</th><th>Instalment</th><th class="a">Amount (₹)</th></tr></thead>
@@ -68,12 +69,12 @@ function frcCopyHtml(label, d){
         <tr class="tot"><td colspan="3" class="r">Total paid</td><td class="a">${frcMoney(d.netPaid)}</td></tr>
       </tfoot>
     </table></div>
-    <div class="words"><small>Amount in words</small> ${frcEsc(d.words)}</div>
     <div class="foot">
-      <div class="due"><small>Remaining due (all fees)</small><b>₹ ${frcMoney(d.due)}</b></div>
+      <div class="fl"><div class="words"><small>In words</small>${frcEsc(d.words)}</div>
+        <div class="due"><small>Remaining due (all fees)</small><b>₹ ${frcMoney(d.due)}</b></div></div>
       <div class="sign"><span></span>${frcEsc(d.signer)}<br><small>Authorised signatory</small></div>
     </div>
-    <div class="note">Fee once paid is neither refundable nor transferable. This is a computer-generated receipt.</div>
+    <div class="note">Fee once paid is neither refundable nor transferable. Computer-generated receipt.</div>
   </section>`;
 }
 
@@ -89,52 +90,51 @@ function frcDocHtml(d){
     .bar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;padding:8px 10px;background:#211A4E;color:#fff;font-size:13px}
     .bar button{font:inherit;font-weight:700;border:0;border-radius:8px;padding:7px 14px;cursor:pointer;background:rgba(255,255,255,.14);color:#fff}
     .bar button.on{background:#E9B949;color:#211A4E}.bar .go{background:#168a5f}
-    .sheet{width:210mm;margin:10px auto;background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.18)}
-    .half{width:210mm;height:148mm;padding:5mm 6mm;overflow:hidden;page-break-inside:avoid;break-inside:avoid}
-    .half+.half{border-top:1.5px dashed #aaa}
-    .half .cutlbl{display:none}
-    .copy{height:100%;border:1.4px solid #211A4E;border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
-    .hd{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 14px;background:#211A4E;color:#fff;flex:none}
-    .hd-l{display:flex;align-items:center;gap:10px;min-width:0}
-    .logo{width:40px;height:40px;border-radius:50%;background:#fff;object-fit:cover;flex:none;border:2px solid #E9B949}
-    .school{font-size:16px;font-weight:800;letter-spacing:.2px}
-    .addr{font-size:9.5px;opacity:.88;margin-top:1px}
-    .hd-r{text-align:right;flex:none}
-    .ttl{font-size:15px;font-weight:800;color:#E9B949;letter-spacing:1.2px}
-    .copylbl{display:inline-block;margin-top:3px;font-size:9px;font-weight:700;letter-spacing:.8px;padding:2px 9px;border-radius:99px;background:rgba(255,255,255,.16)}
-    small{display:block;font-size:8.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#6b6b82}
-    .meta{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:10px;align-items:center;padding:6px 14px;background:#F5F1E6;border-bottom:1px solid #e6dfca;flex:none}
-    .meta b{font-size:12px}
-    .paid span{display:inline-block;border:1.6px solid #168a5f;color:#168a5f;font-weight:800;font-size:11px;letter-spacing:1.2px;padding:2px 10px;border-radius:6px;transform:rotate(-4deg)}
-    .who{display:grid;grid-template-columns:repeat(3,1fr);gap:5px 14px;padding:7px 14px;flex:none}
-    .who b{font-size:11px;display:block;margin-top:1px;overflow-wrap:anywhere}.who .addrv{font-weight:600;font-size:10px}
-    .mid{flex:1;min-height:0}
-    .items{width:calc(100% - 28px);margin:0 14px;border-collapse:collapse;font-size:11px}
-    .items th{background:#eceaf4;text-align:left;font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;padding:5px 8px;border-bottom:1.5px solid #211A4E}
-    .items td{padding:5px 8px;border-bottom:1px solid #e4e2ee;vertical-align:top}
-    .items td small{text-transform:none;letter-spacing:0;font-weight:500;font-size:9px;margin-top:1px}
-    .items .n{width:26px;color:#8a8aa0}.items .a{text-align:right;white-space:nowrap}.items .r{text-align:right;color:#555}
-    .chip{display:inline-block;background:#E8F4F2;color:#0f6a63;font-weight:700;font-size:10px;padding:2px 8px;border-radius:99px;white-space:nowrap}
-    .items tfoot td{border-bottom:0}.items .tot td{background:#211A4E;color:#fff;font-weight:800;font-size:12.5px}
-    .items .tot td:first-child{border-radius:6px 0 0 6px}.items .tot td:last-child{border-radius:0 6px 6px 0;color:#E9B949}
-    .words{padding:6px 14px 0;font-size:11px;font-weight:600}.words small{display:inline;margin-right:6px}
-    .foot{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;padding:6px 14px 4px;flex:none}
-    .due b{font-size:13px;color:#c0392b}
-    .sign{text-align:center;font-size:10.5px;font-weight:700;min-width:130px}.sign span{display:block;border-bottom:1px solid #333;height:18px;margin-bottom:3px}.sign small{display:inline}
-    .note{padding:4px 14px 6px;font-size:8.5px;color:#777;font-style:italic;border-top:1px dashed #d8d8e4;margin:0 14px;flex:none}
-    body.compact .hd{padding:6px 12px}body.compact .who{padding:5px 14px;gap:3px 14px}body.compact .items td{padding:3px 8px}body.compact .items th{padding:3px 8px}body.compact .foot{padding-top:3px}
-    body.tight .hd{padding:5px 12px}body.tight .logo{width:32px;height:32px}body.tight .meta{padding:4px 14px}body.tight .who{padding:4px 14px;gap:2px 14px}
-    body.tight .items{font-size:10px}body.tight .items td{padding:2px 8px}body.tight .items th{padding:2px 8px}body.tight .words{padding-top:3px}body.tight .foot{padding-top:2px}body.tight .note{display:none}
-    body[data-mode=a5] .sheet{width:210mm}body[data-mode=a5] .half:nth-child(2){display:none}
+    .sheet{width:210mm;height:148mm;margin:10px auto;background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.18);overflow:hidden;display:flex}
+    .half{width:105mm;height:148mm;padding:4mm 4mm;overflow:hidden;flex:none}
+    .half+.half{border-left:1.5px dashed #aaa}
+    .copy{height:100%;border:1.2px solid #211A4E;border-radius:7px;overflow:hidden;display:flex;flex-direction:column}
+    .hd{display:flex;flex-wrap:wrap;gap:3px 8px;padding:6px 8px 5px;background:#211A4E;color:#fff;flex:none}
+    .hd-l{display:flex;align-items:center;gap:7px;min-width:0;width:100%}
+    .logo{width:30px;height:30px;border-radius:50%;background:#fff;object-fit:cover;flex:none;border:1.5px solid #E9B949}
+    .school{font-size:11px;font-weight:800;line-height:1.15}
+    .addr{font-size:7px;opacity:.88;line-height:1.25}
+    .hd-r{width:100%;display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,.22);padding-top:3px}
+    .ttl{font-size:10.5px;font-weight:800;color:#E9B949;letter-spacing:1.2px}
+    .copylbl{font-size:6.5px;font-weight:700;letter-spacing:.6px;padding:1px 8px;border-radius:99px;background:rgba(255,255,255,.16)}
+    small{display:block;font-size:6px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:#6b6b82;line-height:1.2}
+    .meta{display:grid;grid-template-columns:1.5fr 1fr .9fr auto;gap:5px;align-items:center;padding:4px 8px;background:#F5F1E6;border-bottom:1px solid #e6dfca;flex:none}
+    .meta b{font-size:8.5px}
+    .paid span{display:inline-block;border:1.3px solid #168a5f;color:#168a5f;font-weight:800;font-size:7.5px;letter-spacing:.8px;padding:1px 6px;border-radius:5px;transform:rotate(-4deg)}
+    .who{display:grid;grid-template-columns:1.3fr 1fr;gap:3px 8px;padding:5px 8px;flex:none}
+    .who b{font-size:9.5px;display:block;overflow-wrap:anywhere;line-height:1.2}
+    .who .wide{grid-column:1/-1}.who .addrv{font-weight:600;font-size:7.5px}
+    .mid{flex:1;min-height:0;overflow:hidden}
+    .items{width:calc(100% - 16px);margin:0 8px;border-collapse:collapse;font-size:10px}
+    .items th{background:#eceaf4;text-align:left;font-size:6.2px;text-transform:uppercase;letter-spacing:.3px;padding:3px 4px;border-bottom:1.2px solid #211A4E}
+    .items td{padding:5px 4px;border-bottom:1px solid #e4e2ee;vertical-align:middle}
+    .items td small{display:inline;text-transform:none;letter-spacing:0;font-weight:500;font-size:6.5px}
+    .items .n{width:12px;color:#8a8aa0}.items .a{text-align:right;white-space:nowrap}.items .r{text-align:right;color:#555}
+    .chip{display:inline-block;background:#E8F4F2;color:#0f6a63;font-weight:700;font-size:7.5px;padding:1px 5px;border-radius:8px;line-height:1.25}
+    .items tfoot td{border-bottom:0}.items .tot td{background:#211A4E;color:#fff;font-weight:800;font-size:11px}
+    .items .tot td:first-child{border-radius:4px 0 0 4px}.items .tot td:last-child{border-radius:0 4px 4px 0;color:#E9B949}
+    .foot{display:flex;justify-content:space-between;align-items:flex-end;gap:6px;padding:4px 8px 3px;flex:none}
+    .fl{min-width:0;flex:1}.words{font-size:8.5px;font-weight:600;line-height:1.25}.words small{display:block}
+    .due{margin-top:3px}.due small{display:block}.due b{font-size:10px;color:#c0392b}
+    .sign{text-align:center;font-size:7px;font-weight:700;width:30mm;flex:none}.sign span{display:block;border-bottom:1px solid #333;height:16px;margin-bottom:2px}.sign small{display:block}
+    .note{padding:2px 8px 4px;font-size:6px;color:#777;font-style:italic;border-top:1px dashed #d8d8e4;margin:0 8px;flex:none}
+    body.compact .items{font-size:9px}body.compact .items td{padding:3.2px 4px}body.compact .who{padding:4px 8px;gap:2px 8px}
+    body.tight .items{font-size:8.2px}body.tight .items td{padding:1.7px 4px}body.tight .items th{padding:2px 4px}body.tight .who{padding:3px 8px;gap:1px 8px}
+    body.tight .hd{padding:4px 8px 3px}body.tight .logo{width:24px;height:24px}body.tight .meta{padding:2px 8px}body.tight .note{display:none}body.tight .sign span{height:10px}
     @media print{
       body{background:#fff}.bar{display:none}
-      .sheet{margin:0;box-shadow:none;width:auto}
+      .sheet{margin:0;box-shadow:none}
     }
   </style></head>
   <body class="${dens}" data-mode="a4">
     <div class="bar">
-      <button id="mA4" class="on" onclick="frcMode('a4')">A4 sheet · 2 copies (each exactly half)</button>
-      <button id="mA5" onclick="frcMode('a5')">A5 paper · 1 copy</button>
+      <button id="mA4" class="on" onclick="frcMode('a4')">A4 paper · both copies on the top half</button>
+      <button id="mA5" onclick="frcMode('a5')">Half-A4 paper (A5 landscape)</button>
       <button class="go" onclick="window.print()">🖨 Print</button>
     </div>
     <div class="sheet">
