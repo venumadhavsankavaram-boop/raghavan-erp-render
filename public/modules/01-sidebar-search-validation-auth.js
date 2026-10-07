@@ -566,6 +566,9 @@ let sbPreSearchCollapse = null;
       const res = await fetch('/api/students');
       if(!res.ok) throw new Error('bad response');
       students = await res.json();
+      // Photos arrive as short image URLs (see student-media in server.js); make them absolute
+      // so they also work inside print windows opened from this page.
+      try{ students.forEach(st => { if(typeof st.photo === 'string' && st.photo.startsWith('/api/student-media/')) st.photo = location.origin + st.photo; }); }catch(e){}
       _studentsLastSynced = JSON.parse(JSON.stringify(students));
     }catch(e){
       // Server unreachable — fall back to whatever's in this browser so the app still works.

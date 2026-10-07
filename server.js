@@ -1785,6 +1785,63 @@ app.get('/api/staff-media/:id/:field', async (req, res) => {
   }
 });
 
+// ---------- Student photos: served as images, not inline ----------
+// Same idea as staff media above. Every student's photo is a full-size base64 data URL
+// stored in the record (~190 KB each); ~500 students came to ~70-95 MB for the Students
+// list that every login loads. The list now carries a short URL per photo instead, and
+// the image comes from GET /api/student-media/:id (browser-cached). Saving a record that
+// still holds the URL keeps the stored photo untouched.
+function studentMediaLight(shaped) {
+  if (!shaped || !shaped.id) return shaped;
+  const v = shaped.photo;
+  if (typeof v === 'string' && v.startsWith('data:')) {
+    shaped.photo = `/api/student-media/${encodeURIComponent(shaped.id)}?v=${staffMediaVersion(v)}`;
+  }
+  return shaped;
+}
+async function studentMediaKeepStored(body) {
+  if (typeof body.photo !== 'string' || !body.photo.includes('/api/student-media/')) return;
+  const rows = await sql.query('SELECT extra FROM students WHERE id = $1', [body.id]);
+  let extra = rows.length ? rows[0].extra : {};
+  if (typeof extra === 'string') { try { extra = JSON.parse(extra); } catch (e) { extra = {}; } }
+  body.photo = (extra && extra.photo) || '';
+}
+app.get('/api/student-media/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.authUser) return res.status(401).end();
+    const role = req.authUser.role;
+    let allowed = MANAGEMENT_ROLES.includes(role) || role === 'Teacher';
+    if (!allowed && PARENT_LOGIN_ROLES.includes(role)) {
+      const st = await getLinkedStudent(req.authUser.id);
+      allowed = !!(st && String(st.id) === String(id));
+    } else if (!allowed) {
+      const override = await getRoleOverride(role);
+      const defaults = SERVER_ROLE_VIEWS[role] || [];
+      allowed = (override && override.admissions !== undefined) ? !!override.admissions.view : defaults.includes('admissions');
+      if (!allowed) allowed = defaults.includes('fees') || defaults.includes('attendance');
+    }
+    if (!allowed) return res.status(403).end();
+    const rows = await sql.query('SELECT extra FROM students WHERE id = $1', [id]);
+    if (!rows.length) return res.status(404).end();
+    let extra = rows[0].extra;
+    if (typeof extra === 'string') { try { extra = JSON.parse(extra); } catch (e) { extra = {}; } }
+    const v = extra && extra.photo;
+    const m = typeof v === 'string' ? /^data:([^;,]+)(;base64)?,(.*)$/s.exec(v) : null;
+    if (!m) return res.status(404).end();
+    const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]));
+    const etag = '"' + staffMediaVersion(v) + '"';
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+    res.setHeader('Content-Type', m[1] || 'image/jpeg');
+    return res.status(200).send(buf);
+  } catch (err) {
+    console.error('student-media error:', err);
+    return res.status(500).end();
+  }
+});
+
 async function handleHybrid(req, res, config) {
   const { table, core, softDelete, deleteViaApprovalOnly } = config;
   if (req.method === 'GET') {
@@ -1815,7 +1872,7 @@ async function handleHybrid(req, res, config) {
         shaped.deletedByName = r.deleted_by_name;
         shaped.purgesAt = r.deleted_at ? new Date(new Date(r.deleted_at).getTime() + TRASH_RETENTION_DAYS * 86400000).toISOString() : null;
       }
-      return table === 'staff' ? staffMediaLight(shaped) : shaped;
+      return table === 'staff' ? staffMediaLight(shaped) : (table === 'students' ? studentMediaLight(shaped) : shaped);
     }));
   }
   if (req.method === 'POST' || req.method === 'PUT') {
@@ -1840,6 +1897,7 @@ async function handleHybrid(req, res, config) {
     const body = req.body || {};
     if (!body.id) return res.status(400).json({ error: 'Missing id.' });
     if (table === 'staff') await staffMediaKeepStored(body);
+    if (table === 'students') await studentMediaKeepStored(body);
     const { coreVals, extra } = splitCoreExtra(body, core);
     const cols = core.map(f => f.col);
     const vals = core.map(f => coreVals[f.app]);
@@ -4624,7 +4682,7 @@ app.all('/api/:resource', async (req, res) => {
     }
     if (resource === 'students' && req.method === 'GET' && req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
       const student = await getLinkedStudent(req.authUser.id);
-      return res.status(200).json(student ? [hybridToAppShape(student, HYBRID_RESOURCES.students.core)] : []);
+      return res.status(200).json(student ? [studentMediaLight(hybridToAppShape(student, HYBRID_RESOURCES.students.core))] : []);
     }
     // See PARENT_OWN_RECORD_RESOURCES above — the same self-service carve-out
     // as 'students', for every other per-student table "My Portal" reads
@@ -4664,7 +4722,7 @@ app.all('/api/:resource', async (req, res) => {
       if (!pairs.length) return res.status(200).json([]);
       const rows = await sql`SELECT * FROM students WHERE deleted_at IS NULL`;
       const filtered = rows.filter(r => pairs.some(p => p.className === r.class_name && p.section === r.section));
-      return res.status(200).json(filtered.map(r => hybridToAppShape(r, HYBRID_RESOURCES.students.core)));
+      return res.status(200).json(filtered.map(r => studentMediaLight(hybridToAppShape(r, HYBRID_RESOURCES.students.core))));
     }
     // A Teacher login only ever gets to see or touch attendance for the one
     // class they're the Class Teacher of, and exam marks for the
