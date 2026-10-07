@@ -930,6 +930,29 @@ const ROOMS_KEY = "exam-rooms";
     renderExamBody();
   }
 
+  /* --- Marks entry follows the exam timetable: a subject's marks column is shown to its
+     Subject Teacher from the paper's scheduled date (papers dated later are listed as
+     "upcoming" and stay closed). Admins / other roles see every subject. Subjects with no
+     date set are always open. Columns are ordered by paper date. --- */
+  function marksTodayIso(){
+    const d = new Date(), p = x => String(x).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function marksSortByDate(list){
+    return list.slice().sort((a, b) => (a.date || '9999-99-99').localeCompare(b.date || '9999-99-99') || String(a.name).localeCompare(String(b.name)));
+  }
+  function marksPrettyDate(iso){
+    const d = new Date(iso + 'T00:00:00');
+    return isNaN(d) ? iso : d.toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short' });
+  }
+  // → { open:[…], upcoming:[…] } for the current user. Only teachers are date-gated.
+  function marksSubjectsByDate(subjects){
+    const sorted = marksSortByDate(subjects);
+    if(!myTeacherScope()) return { open: sorted, upcoming: [] };
+    const today = marksTodayIso();
+    return { open: sorted.filter(s => !s.date || s.date <= today), upcoming: sorted.filter(s => s.date && s.date > today) };
+  }
+
   function renderMarksSheet(body){
     const exam = examDefs.find(e => e.id === examCurrentExamId);
     if(!exam){ examMarksView = 'grid'; return renderExamBody(); }
@@ -942,6 +965,16 @@ const ROOMS_KEY = "exam-rooms";
     if(scope){
       const mySubjectNames = new Set(scope.subjectSections.filter(ss => ss.className===examCurrentClass && ss.section===examCurrentSection).map(ss => ss.subject));
       subjects = subjects.filter(s => mySubjectNames.has(s.name));
+    }
+    const dated = marksSubjectsByDate(subjects);
+    const upcomingSubjects = dated.upcoming;
+    subjects = dated.open;
+    const todayIso = marksTodayIso();
+    if(subjects.length === 0 && upcomingSubjects.length){
+      body.innerHTML = `
+        <div class="breadcrumb"><a onclick="backToMarksGrid()">All Classes</a> &nbsp;/&nbsp; ${examCurrentClass} — Section ${examCurrentSection} &nbsp;/&nbsp; ${exam.name}</div>
+        <div class="empty-state"><b>Marks entry opens on the paper's date</b>${upcomingSubjects.map(s => `${escapeHtml(s.name)} — ${marksPrettyDate(s.date)}`).join('<br>')}</div>`;
+      return;
     }
     if(subjects.length === 0){
       const noneAssigned = scope && getExamSubjects(exam, examCurrentClass, examCurrentSection).length > 0;
@@ -962,6 +995,7 @@ const ROOMS_KEY = "exam-rooms";
         <span><a onclick="backToMarksGrid()">All Classes</a> &nbsp;/&nbsp; ${examCurrentClass} — Section ${examCurrentSection} &nbsp;/&nbsp; ${exam.name}</span>
         ${canEnterMarks ? `<span id="marksAutoSaveStatus" style="font-size:0.78rem; color:var(--ink-soft);"></span>` : ''}
       </div>
+      ${upcomingSubjects.length ? `<div style="font-size:0.8rem; padding:9px 12px; border-radius:10px; background:rgba(46,111,158,0.1); margin:6px 0 10px;">🗓 <b>Upcoming papers</b> — marks entry opens on the paper's date: ${upcomingSubjects.map(s => `${escapeHtml(s.name)} <span style="color:var(--ink-soft);">(${marksPrettyDate(s.date)})</span>`).join(' · ')}</div>` : ''}
       ${canEnterMarks ? `<p style="font-size:0.76rem; color:var(--ink-soft); margin:2px 0 10px;">Marks are saved automatically as you type — "Save Marks" is just there to double-check everything looks right.</p>
       <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
         <label class="btn btn-ghost btn-sm" style="cursor:pointer;">📤 Upload via Excel<input type="file" accept=".xlsx,.xls" id="marksExcelInput" style="display:none;" onchange="importMarksExcel(event)"></label>
@@ -970,7 +1004,7 @@ const ROOMS_KEY = "exam-rooms";
         <table><thead><tr>
           <th>Roll No</th>
           <th>Student</th>
-          ${subjects.map(s => `<th>${s.name} <span style="font-weight:400; color:var(--ink-soft);">(/${s.maxMarks}${s.date ? ' · '+s.date : ''})</span>${subjInternalMax(s) ? `<div style="font-weight:500; font-size:0.68rem; color:var(--ink-soft);">Written ${subjWrittenMax(s)} + Internal ${subjInternalMax(s)}</div>` : ''}</th>`).join('')}
+          ${subjects.map(s => `<th>${s.name}${s.date === todayIso ? ' <span class="pill" style="background:rgba(24,143,134,0.16); color:#0f6a63;">Today</span>' : ''} <span style="font-weight:400; color:var(--ink-soft);">(/${s.maxMarks}${s.date ? ' · '+s.date : ''})</span>${subjInternalMax(s) ? `<div style="font-weight:500; font-size:0.68rem; color:var(--ink-soft);">Written ${subjWrittenMax(s)} + Internal ${subjInternalMax(s)}</div>` : ''}</th>`).join('')}
         </tr></thead>
         <tbody>
         ${list.map(s => `
@@ -1194,7 +1228,9 @@ const ROOMS_KEY = "exam-rooms";
     const file = e.target.files[0];
     if(!file) return;
     const exam = examDefs.find(ex => ex.id === examCurrentExamId);
-    const subjects = getExamSubjects(exam, examCurrentClass, examCurrentSection);
+    let subjects = getExamSubjects(exam, examCurrentClass, examCurrentSection);
+    { const sc = myTeacherScope(); if(sc){ const mine = new Set(sc.subjectSections.filter(ss => ss.className===examCurrentClass && ss.section===examCurrentSection).map(ss => ss.subject)); subjects = subjects.filter(x => mine.has(x.name)); } }
+    subjects = marksSubjectsByDate(subjects).open;
     const reader = new FileReader();
     reader.onload = async function(evt){
       try{
