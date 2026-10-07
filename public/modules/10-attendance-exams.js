@@ -367,7 +367,7 @@ const ROOMS_KEY = "exam-rooms";
         </div>
       </div>
 
-      ${canCreate ? `<button class="btn btn-primary" style="margin-bottom:16px;" onclick="openExamModal()">+ Add Exam</button>` : ''}
+      ${canCreate ? `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;"><button class="btn btn-primary" onclick="openExamModal()">+ Add Exam</button>${(canEdit && examDefs.length > 1) ? `<button class="btn btn-ghost" onclick="openExamCopyWizard()">⧉ Copy subjects from another exam</button>` : ''}</div>` : ''}
       ${examDefs.length ? examDefs.map(ex => {
         const type = examTypeByName(ex.examType);
         return `
@@ -375,6 +375,7 @@ const ROOMS_KEY = "exam-rooms";
           <div><div class="lm-name">${ex.name}</div><div class="lm-meta">${ex.examType||'—'}${type && type.scopeClasses && type.scopeClasses.length ? ' · ' + type.scopeClasses.join(', ') + ' only' : ''} · ${ex.startDate ? (ex.startDate + (ex.endDate && ex.endDate!==ex.startDate ? ' – ' + ex.endDate : '')) : 'No dates set'}</div></div>
           <div style="display:flex; gap:10px;">
             ${canEdit ? `<button class="btn-edit-text" onclick="openSubjConfigGrid('${ex.id}')">Configure Subjects</button>` : ''}
+            ${(canEdit && examDefs.length > 1) ? `<button class="btn-edit-text" onclick="openExamCopyWizard('${ex.id}')">Copy subjects</button>` : ''}
             ${canEdit ? `<button class="btn-edit-text" onclick="openExamModal('${ex.id}')">Edit</button>` : ''}
             ${canDelete ? `<button class="btn-danger-text" onclick="deleteExam('${ex.id}')">Delete</button>` : ''}
           </div>
@@ -483,7 +484,7 @@ const ROOMS_KEY = "exam-rooms";
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToExamsList()">All Exams</a> &nbsp;/&nbsp; ${exam.name} — choose a class to manage its subjects</div>
       ${type && type.scopeClasses && type.scopeClasses.length ? `<p style="font-size:0.82rem; color:var(--ink-soft); margin:-8px 0 16px;">"${exam.examType}" is only offered to ${type.scopeClasses.join(', ')} — other classes are hidden here.</p>` : ''}
-      ${canCreate ? `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;"><button class="btn btn-ghost btn-sm" onclick="openBulkSubjectModal()">+ Add Subject to Multiple Classes</button><button class="btn btn-primary btn-sm" onclick="openMarksWizard()">⚙ Marks Structure Wizard</button></div>` : ''}
+      ${canCreate ? `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;"><button class="btn btn-ghost btn-sm" onclick="openBulkSubjectModal()">+ Add Subject to Multiple Classes</button><button class="btn btn-ghost btn-sm" onclick="openExamCopyWizard('${exam.id}')">⧉ Copy subjects from another exam</button><button class="btn btn-primary btn-sm" onclick="openMarksWizard()">⚙ Marks Structure Wizard</button></div>` : ''}
       <div class="class-compact-grid">${rows}</div>
     `;
   }
