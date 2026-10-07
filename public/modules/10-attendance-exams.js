@@ -1005,6 +1005,7 @@ const ROOMS_KEY = "exam-rooms";
      highlighted and simply skipped (never blocks the rest from saving), and
      any pending save is flushed immediately before leaving the sheet. --- */
   let marksAutoSaveTimer = null;
+  window.addEventListener('online', function(){ if(marksAutoSaveTimer){ clearTimeout(marksAutoSaveTimer); marksAutoSaveTimer = setTimeout(autoSaveMarksSheet, 300); } });
   function marksBeforeUnloadGuard(e){ e.preventDefault(); e.returnValue = ''; return ''; }
   function scheduleMarksAutoSave(){
     const status = document.getElementById('marksAutoSaveStatus');
@@ -1050,7 +1051,16 @@ const ROOMS_KEY = "exam-rooms";
         if(r){ r.marks = isAbsent ? null : val; r.absent = isAbsent; }
         else { examResults.push({ id:'res_'+studentId+'_'+exam.id+'_'+subject.replace(/\s/g,''), examId:exam.id, studentId, subject, marks: isAbsent ? null : val, absent:isAbsent }); }
       });
-      await storageSet(EXAM_RESULTS_KEY, examResults);
+      const ok = await storageSet(EXAM_RESULTS_KEY, examResults);
+      if(ok === false){
+        // Server did not accept the save (network down, server restarting, session
+        // ended). Keep the warning on screen, keep the leave-page guard, and retry
+        // by itself so nothing typed is silently lost.
+        if(status) status.textContent = '⚠️ NOT saved to the server yet — check your connection. Keep this page open; retrying…';
+        window.addEventListener('beforeunload', marksBeforeUnloadGuard);
+        if(!marksAutoSaveTimer) marksAutoSaveTimer = setTimeout(autoSaveMarksSheet, 5000);
+        return;
+      }
       if(status) status.textContent = hasInvalid ? '⚠️ Saved — fix the highlighted mark(s)' : '✅ All changes saved';
     } finally {
       if(!marksAutoSaveTimer) window.removeEventListener('beforeunload', marksBeforeUnloadGuard);
@@ -1087,8 +1097,15 @@ const ROOMS_KEY = "exam-rooms";
       if(r){ r.marks = isAbsent ? null : val; r.absent = isAbsent; }
       else { examResults.push({ id:'res_'+studentId+'_'+exam.id+'_'+subject.replace(/\s/g,''), examId:exam.id, studentId, subject, marks: isAbsent ? null : val, absent: isAbsent }); }
     });
-    await storageSet(EXAM_RESULTS_KEY, examResults);
+    const ok = await storageSet(EXAM_RESULTS_KEY, examResults);
     const status = document.getElementById('marksAutoSaveStatus');
+    if(ok === false){
+      if(status) status.textContent = '⚠️ NOT saved to the server yet — check your connection. Keep this page open; retrying…';
+      window.addEventListener('beforeunload', marksBeforeUnloadGuard);
+      if(!marksAutoSaveTimer) marksAutoSaveTimer = setTimeout(autoSaveMarksSheet, 5000);
+      showToast('Marks NOT saved to the server yet — keep this page open, it will retry automatically.');
+      return;
+    }
     if(status) status.textContent = '✅ All changes saved';
     showToast('Marks saved.', 'burst');
   }
