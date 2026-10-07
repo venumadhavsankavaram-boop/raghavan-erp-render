@@ -233,6 +233,9 @@ async function ensureSchema() {
     id VARCHAR(191) PRIMARY KEY, exam_id VARCHAR(191), student_id VARCHAR(191), subject TEXT, marks DECIMAL(10,2), absent BOOLEAN DEFAULT false,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
+  // Written / Internal split of `marks` (marks stays the TOTAL, so every report keeps working).
+  await addColumnIfMissing('exam_results', 'written_marks DECIMAL(10,2) NULL');
+  await addColumnIfMissing('exam_results', 'internal_marks DECIMAL(10,2) NULL');
   await sql`CREATE TABLE IF NOT EXISTS staff_attendance_records (
     id VARCHAR(191) PRIMARY KEY, staff_id VARCHAR(191), date VARCHAR(32), status TEXT,
     session VARCHAR(20), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1156,6 +1159,7 @@ const SIMPLE_RESOURCES = {
     fields: [
       { app: 'id', col: 'id' }, { app: 'examId', col: 'exam_id' }, { app: 'studentId', col: 'student_id' },
       { app: 'subject', col: 'subject' }, { app: 'marks', col: 'marks', numeric: true }, { app: 'absent', col: 'absent' },
+      { app: 'written', col: 'written_marks', numeric: true }, { app: 'internal', col: 'internal_marks', numeric: true },
     ],
   },
   'staff-attendance': {

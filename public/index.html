@@ -4506,8 +4506,16 @@
         <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:0 0 6px; display:block;">Staff</label>
         <div id="subjStaffBox" class="disc-checklist" style="max-height:130px; margin-bottom:16px;"></div>
         <div class="form-grid">
-          <div class="f-field"><label>Max Marks</label><input type="number" min="1" id="subjMaxMarks" value="100"></div>
+          <div class="f-field"><label>Total Marks</label><input type="number" min="1" id="subjMaxMarks" value="100" oninput="subjSplitSync('subj','t')"></div>
           <div class="f-field"><label>Exam Date <span class="required-star">*</span></label><input type="date" id="subjDate" required></div>
+        </div>
+                <div id="subjSplitBox" style="margin:2px 0 14px; padding:12px 14px; border:1px solid var(--border); border-radius:10px;">
+          <label class="admission-toggle"><input type="checkbox" id="subjInternalOn" onchange="subjSplitSync('subj','on')"> Include internal marks <span style="color:var(--ink-soft); font-weight:400;">(split the total into Written + Internal)</span></label>
+          <div id="subjSplitFields" style="display:none; margin-top:10px; grid-template-columns:1fr 1fr; gap:12px;">
+            <div class="f-field"><label>Written marks</label><input type="number" min="1" style="width:100%; box-sizing:border-box;" id="subjWrittenMax" oninput="subjSplitSync('subj','w')"></div>
+            <div class="f-field"><label>Internal marks</label><input type="number" min="1" style="width:100%; box-sizing:border-box;" id="subjInternalMax" oninput="subjSplitSync('subj','i')"></div>
+          </div>
+          <p id="subjSplitNote" style="font-size:0.76rem; color:var(--ink-soft); margin:8px 0 0;">Off: one mark per student for this subject. On: teachers enter Written and Internal separately and the report shows the total.</p>
         </div>
         <p style="font-size:0.76rem; color:var(--ink-soft); margin:2px 0 10px;">Every subject needs its own exam date before hall tickets (admit cards) can be generated for this class.</p>
         <div style="display:flex; gap:30px; margin:16px 0 4px; flex-wrap:wrap;">
@@ -4533,8 +4541,16 @@
       <form id="bulkSubjectForm" onsubmit="return saveBulkSubjectModal(event)">
         <div class="form-grid">
           <div class="f-field"><label>Subject Name <span class="required-star">*</span></label><input type="text" id="bsName" required placeholder="e.g. Mathematics" list="bulkMasterSubjectsDatalist" oninput="renderBulkSubjectPanels()"><datalist id="bulkMasterSubjectsDatalist"></datalist></div>
-          <div class="f-field"><label>Max Marks</label><input type="number" min="1" id="bsMaxMarks" value="100"></div>
+          <div class="f-field"><label>Total Marks</label><input type="number" min="1" id="bsMaxMarks" value="100" oninput="subjSplitSync('bs','t')"></div>
           <div class="f-field"><label>Exam Date <span class="required-star">*</span></label><input type="date" id="bsDate"></div>
+        </div>
+                <div id="bsSplitBox" style="margin:2px 0 14px; padding:12px 14px; border:1px solid var(--border); border-radius:10px;">
+          <label class="admission-toggle"><input type="checkbox" id="bsInternalOn" onchange="subjSplitSync('bs','on')"> Include internal marks <span style="color:var(--ink-soft); font-weight:400;">(split the total into Written + Internal)</span></label>
+          <div id="bsSplitFields" style="display:none; margin-top:10px; grid-template-columns:1fr 1fr; gap:12px;">
+            <div class="f-field"><label>Written marks</label><input type="number" min="1" style="width:100%; box-sizing:border-box;" id="bsWrittenMax" oninput="subjSplitSync('bs','w')"></div>
+            <div class="f-field"><label>Internal marks</label><input type="number" min="1" style="width:100%; box-sizing:border-box;" id="bsInternalMax" oninput="subjSplitSync('bs','i')"></div>
+          </div>
+          <p id="bsSplitNote" style="font-size:0.76rem; color:var(--ink-soft); margin:8px 0 0;">Off: one mark per student for this subject. On: teachers enter Written and Internal separately and the report shows the total.</p>
         </div>
         <div style="display:flex; gap:30px; margin:4px 0 16px; flex-wrap:wrap;">
           <label class="admission-toggle"><input type="checkbox" id="bsCountable" checked> Countable for Report Card</label>
@@ -4861,6 +4877,7 @@
 <script src="modules/10-attendance-exams.js"></script>
 <script src="modules/10b-progress-report-ui.js"></script>
 <script src="modules/10c-grading-wizard-ui.js"></script>
+<script src="modules/10d-marks-structure-ui.js"></script>
 <script src="modules/11-exams-marks-entry.js"></script>
 <script src="modules/12-exam-room-allotment-admitcards.js"></script>
 <script src="modules/13-reports-teacher-performance.js"></script>

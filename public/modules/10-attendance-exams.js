@@ -483,7 +483,7 @@ const ROOMS_KEY = "exam-rooms";
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToExamsList()">All Exams</a> &nbsp;/&nbsp; ${exam.name} — choose a class to manage its subjects</div>
       ${type && type.scopeClasses && type.scopeClasses.length ? `<p style="font-size:0.82rem; color:var(--ink-soft); margin:-8px 0 16px;">"${exam.examType}" is only offered to ${type.scopeClasses.join(', ')} — other classes are hidden here.</p>` : ''}
-      ${canCreate ? `<button class="btn btn-ghost btn-sm" style="margin-bottom:16px;" onclick="openBulkSubjectModal()">+ Add Subject to Multiple Classes</button>` : ''}
+      ${canCreate ? `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;"><button class="btn btn-ghost btn-sm" onclick="openBulkSubjectModal()">+ Add Subject to Multiple Classes</button><button class="btn btn-primary btn-sm" onclick="openMarksWizard()">⚙ Marks Structure Wizard</button></div>` : ''}
       <div class="class-compact-grid">${rows}</div>
     `;
   }
@@ -513,9 +513,9 @@ const ROOMS_KEY = "exam-rooms";
     const summary = getClassSubjectSummary(exam, examCurrentClass);
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToExamsList()">All Exams</a> &nbsp;/&nbsp; <a onclick="backToSubjConfigGrid()">${exam.name}</a> &nbsp;/&nbsp; ${examCurrentClass}</div>
-      ${canSub('exams_definitions','exams','edit') ? `<button class="btn btn-primary" style="margin-bottom:16px;" onclick="openSubjectModal()">+ Add Subject</button>` : ''}
+      ${canSub('exams_definitions','exams','edit') ? `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;"><button class="btn btn-primary" onclick="openSubjectModal()">+ Add Subject</button><button class="btn btn-ghost" onclick="openMarksWizard('${examCurrentClass}')">⚙ Marks Structure Wizard</button></div>` : ''}
       <div class="table-wrap">
-        <table><thead><tr><th>Subject</th><th>Code</th><th>Sections</th><th>Staff</th><th>Max Marks</th><th>Date</th><th>Countable</th><th>Elective</th><th></th></tr></thead>
+        <table><thead><tr><th>Subject</th><th>Code</th><th>Sections</th><th>Staff</th><th>Total Marks</th><th>Date</th><th>Countable</th><th>Elective</th><th></th></tr></thead>
         <tbody>
         ${summary.length ? summary.map(s => `
           <tr>
@@ -523,7 +523,7 @@ const ROOMS_KEY = "exam-rooms";
             <td>${s.code||'—'}</td>
             <td>${s.sections.map(sec => `<span class="pill">${sec}</span>`).join(' ')}</td>
             <td>${(s.staffIds||[]).map(id => { const st = staffList.find(x => x.id===id); return st ? st.firstName+' '+st.lastName : ''; }).filter(Boolean).join(', ') || '—'}</td>
-            <td>${s.maxMarks}</td>
+            <td>${marksStructureLabel(s)}</td>
             <td>${s.date||'—'}</td>
             <td>${s.countable!==false ? '✓' : '—'}</td>
             <td>${s.elective ? '✓' : '—'}</td>
@@ -556,6 +556,7 @@ const ROOMS_KEY = "exam-rooms";
     }
     document.getElementById('subjName').value = existing ? existing.name : '';
     document.getElementById('subjMaxMarks').value = existing ? existing.maxMarks : 100;
+    if(typeof subjSplitLoad === 'function') subjSplitLoad('subj', existing);
     document.getElementById('subjDate').value = existing ? (existing.date||'') : (exam.startDate||'');
     document.getElementById('subjCountable').checked = existing ? (existing.countable !== false) : true;
     document.getElementById('subjElective').checked = existing ? !!existing.elective : false;
@@ -612,6 +613,8 @@ const ROOMS_KEY = "exam-rooms";
     const name = document.getElementById('subjName').value.trim();
     const sections = Array.from(document.querySelectorAll('.subj-sec-check:checked')).map(c => c.value);
     if(sections.length === 0){ showToast('Select at least one section.'); return false; }
+    const split = (typeof subjSplitRead === 'function') ? subjSplitRead('subj') : { internalMax: 0 };
+    if(split.error){ showToast(split.error); return false; }
     const dateVal = document.getElementById('subjDate').value;
     if(!dateVal){ showToast('Set an exam date for this subject — it\'s required before hall tickets can be generated.'); return false; }
     const clashingHoliday = holidayFor(dateVal);
@@ -620,6 +623,7 @@ const ROOMS_KEY = "exam-rooms";
     const masterMatch = subjectsList.find(s => s.className === examCurrentClass && s.name.trim().toLowerCase() === name.toLowerCase());
     const subjectData = {
       name, code: masterMatch ? (masterMatch.code||'') : '', maxMarks: Number(document.getElementById('subjMaxMarks').value) || 100,
+      internalMax: split.internalMax,
       date: dateVal,
       staffIds, countable: document.getElementById('subjCountable').checked,
       elective: document.getElementById('subjElective').checked,
@@ -668,6 +672,7 @@ const ROOMS_KEY = "exam-rooms";
     if(!exam) return;
     document.getElementById('bulkSubjectForm').reset();
     document.getElementById('bsDate').value = exam.startDate || '';
+    if(typeof subjSplitLoad === 'function') subjSplitLoad('bs', null);
     document.getElementById('bulkMasterSubjectsDatalist').innerHTML = Array.from(new Set(subjectsList.map(s => s.name)))
       .map(n => `<option value="${n}">`).join('');
 
@@ -776,6 +781,8 @@ const ROOMS_KEY = "exam-rooms";
     const clashingHoliday = holidayFor(dateVal);
     if(clashingHoliday && !await showConfirmDialog(`${dateVal} is marked as a holiday (${clashingHoliday.name}). Schedule the exam on this date anyway?`)) return false;
 
+    const split = (typeof subjSplitRead === 'function') ? subjSplitRead('bs') : { internalMax: 0 };
+    if(split.error){ showToast(split.error); return false; }
     const maxMarks = Number(document.getElementById('bsMaxMarks').value) || 100;
     const countable = document.getElementById('bsCountable').checked;
     const elective = document.getElementById('bsElective').checked;
@@ -784,7 +791,7 @@ const ROOMS_KEY = "exam-rooms";
     classesWithSections.forEach(cls => {
       const masterMatch = subjectsList.find(s => s.className === cls && s.name.trim().toLowerCase() === name.toLowerCase());
       const staffIds = Array.from(bulkSubjClassStaff[cls] || []);
-      const subjectData = { name, code: masterMatch ? (masterMatch.code||'') : '', maxMarks, date: dateVal, staffIds, countable, elective };
+      const subjectData = { name, code: masterMatch ? (masterMatch.code||'') : '', maxMarks, internalMax: split.internalMax, date: dateVal, staffIds, countable, elective };
       const sections = bulkSubjClassSections[cls];
       sectionsForClass(cls).forEach(sec => {
         const key = classSecKey(cls, sec);
@@ -962,7 +969,7 @@ const ROOMS_KEY = "exam-rooms";
         <table><thead><tr>
           <th>Roll No</th>
           <th>Student</th>
-          ${subjects.map(s => `<th>${s.name} <span style="font-weight:400; color:var(--ink-soft);">(/${s.maxMarks}${s.date ? ' · '+s.date : ''})</span></th>`).join('')}
+          ${subjects.map(s => `<th>${s.name} <span style="font-weight:400; color:var(--ink-soft);">(/${s.maxMarks}${s.date ? ' · '+s.date : ''})</span>${subjInternalMax(s) ? `<div style="font-weight:500; font-size:0.68rem; color:var(--ink-soft);">Written ${subjWrittenMax(s)} + Internal ${subjInternalMax(s)}</div>` : ''}</th>`).join('')}
         </tr></thead>
         <tbody>
         ${list.map(s => `
@@ -972,13 +979,34 @@ const ROOMS_KEY = "exam-rooms";
             ${subjects.map(subj => {
               const r = getResult(s.id, subj.name);
               const isAbsent = r ? !!r.absent : false;
+              const sub = subj.name.replace(/"/g,'&quot;');
+              const dis = (isAbsent||!canEnterMarks) ? 'disabled' : '';
+              const absLbl = `<label style="font-size:0.68rem; color:var(--ink-soft); display:flex; align-items:center; gap:2px; cursor:pointer;" title="Mark absent for this subject">
+                    <input type="checkbox" class="marks-absent-check" data-student="${s.id}" data-subject="${sub}" ${isAbsent?'checked':''} ${!canEnterMarks?'disabled':''} onchange="onMarksAbsentToggle(this)"> Abs
+                  </label>`;
+              const im = subjInternalMax(subj);
+              if(im){
+                const wm = subjWrittenMax(subj);
+                const sp = marksSplitOf(r, subj);
+                const tot = (r && !isAbsent && r.marks != null) ? r.marks : '';
+                return `<td>
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                  <div style="display:flex; flex-direction:column; gap:2px;">
+                    <input type="number" class="marks-input" data-part="written" min="0" max="${wm}" step="any" placeholder="/${wm}" title="Written marks (out of ${wm})" data-student="${s.id}" data-subject="${sub}" value="${sp.written}" ${dis} style="width:62px;" oninput="marksInputChanged(this)">
+                    <input type="number" class="marks-input" data-part="internal" min="0" max="${im}" step="any" placeholder="/${im}" title="Internal marks (out of ${im})" data-student="${s.id}" data-subject="${sub}" value="${sp.internal}" ${dis} style="width:62px;" oninput="marksInputChanged(this)">
+                  </div>
+                  <div style="display:flex; flex-direction:column; gap:3px; align-items:flex-start;">
+                    <span class="mk-total" style="font-size:0.74rem; font-weight:700; color:var(--navy);">${tot === '' ? '—' : tot + ' / ' + subj.maxMarks}</span>
+                    ${absLbl}
+                  </div>
+                </div>
+              </td>`;
+              }
               const markVal = r && !isAbsent ? r.marks : '';
               return `<td>
                 <div style="display:flex; align-items:center; gap:5px;">
-                  <input type="number" class="marks-input" min="0" max="${subj.maxMarks}" data-student="${s.id}" data-subject="${subj.name.replace(/"/g,'&quot;')}" value="${markVal}" ${(isAbsent||!canEnterMarks)?'disabled':''} style="width:64px;" oninput="scheduleMarksAutoSave()">
-                  <label style="font-size:0.68rem; color:var(--ink-soft); display:flex; align-items:center; gap:2px; cursor:pointer;" title="Mark absent for this subject">
-                    <input type="checkbox" class="marks-absent-check" data-student="${s.id}" data-subject="${subj.name.replace(/"/g,'&quot;')}" ${isAbsent?'checked':''} ${!canEnterMarks?'disabled':''} onchange="onMarksAbsentToggle(this)"> Abs
-                  </label>
+                  <input type="number" class="marks-input" min="0" max="${subj.maxMarks}" data-student="${s.id}" data-subject="${sub}" value="${markVal}" ${dis} style="width:64px;" oninput="scheduleMarksAutoSave()">
+                  ${absLbl}
                 </div>
               </td>`;
             }).join('')}
@@ -989,13 +1017,99 @@ const ROOMS_KEY = "exam-rooms";
       </div>
       ${canEnterMarks ? `<div style="margin-top:16px;"><button class="btn btn-primary" onclick="saveMarksSheet()">Save Marks</button></div>` : ''}
     `;
+    // Show any saved mark that is above the (possibly just-changed) maximum straight away.
+    setTimeout(() => { try{ marksApplySheet(exam, true); }catch(e){} }, 0);
   }
   function onMarksAbsentToggle(el){
     const row = el.closest('td');
-    const input = row.querySelector('.marks-input');
-    if(el.checked){ input.value = ''; input.disabled = true; }
-    else { input.disabled = false; }
+    row.querySelectorAll('.marks-input').forEach(input => {
+      if(el.checked){ input.value = ''; input.disabled = true; }
+      else { input.disabled = false; }
+    });
+    const first = row.querySelector('.marks-input');
+    if(first) marksUpdateTotal(first);
     scheduleMarksAutoSave();
+  }
+
+  /* --- Marks structure: a subject may be split into Written + Internal. The
+     subject's maxMarks is always the TOTAL (e.g. 50 = 35 written + 15 internal),
+     and each result's `marks` is always the total scored, so reports, ranks,
+     grading and every other module keep working unchanged. `written` and
+     `internal` are stored alongside as the breakdown. --- */
+  function subjInternalMax(subj){
+    const i = Number(subj && subj.internalMax) || 0, t = Number(subj && subj.maxMarks) || 0;
+    return (i > 0 && i < t) ? i : 0;
+  }
+  function subjWrittenMax(subj){ return (Number(subj && subj.maxMarks) || 0) - subjInternalMax(subj); }
+  // What to show in the Written / Internal boxes for an existing result. Marks that
+  // were entered before the split existed have no breakdown, so they show as Written.
+  function marksSplitOf(r, subj){
+    if(!r || r.absent) return { written:'', internal:'' };
+    if(subjInternalMax(subj) && (r.written != null || r.internal != null))
+      return { written: r.written == null ? '' : r.written, internal: r.internal == null ? '' : r.internal };
+    return { written: r.marks == null ? '' : r.marks, internal:'' };
+  }
+  function marksStructureLabel(s){
+    const im = subjInternalMax(s);
+    return im ? `${s.maxMarks} <span class="pill" title="Written ${subjWrittenMax(s)} + Internal ${im}">W${subjWrittenMax(s)} + I${im}</span>` : `${s.maxMarks}`;
+  }
+  function marksUpdateTotal(inp){
+    const td = inp.closest('td');
+    if(!td) return;
+    const out = td.querySelector('.mk-total');
+    if(!out) return;
+    const parts = Array.from(td.querySelectorAll('.marks-input'));
+    const vals = parts.filter(i => i.value !== '' && !isNaN(Number(i.value))).map(i => Number(i.value));
+    const max = parts.reduce((sum, i) => sum + (Number(i.max) || 0), 0);
+    out.textContent = vals.length ? (Math.round(vals.reduce((a, b) => a + b, 0) * 100) / 100) + ' / ' + max : '—';
+  }
+  function marksInputChanged(inp){ marksUpdateTotal(inp); scheduleMarksAutoSave(); }
+  // Reads every cell on the sheet into examResults. Invalid cells are highlighted and
+  // skipped (never block the rest). With dry=true nothing is changed — it only reports.
+  function marksApplySheet(exam, dry){
+    const cells = new Map();
+    document.querySelectorAll('.marks-input').forEach(inp => {
+      if(!inp.dataset.student || !inp.dataset.subject) return;
+      const k = inp.dataset.student + '\u0001' + inp.dataset.subject;
+      if(!cells.has(k)) cells.set(k, []);
+      cells.get(k).push(inp);
+    });
+    let firstInvalid = null;
+    cells.forEach(arr => {
+      const studentId = arr[0].dataset.student, subject = arr[0].dataset.subject;
+      let bad = false;
+      const vals = {};
+      arr.forEach(inp => {
+        const part = inp.dataset.part || 'total';
+        const max = inp.max === '' ? null : Number(inp.max);
+        const raw = inp.value;
+        const val = raw === '' ? null : Number(raw);
+        const invalid = !inp.disabled && raw !== '' && (isNaN(val) || val < 0 || (max !== null && val > max));
+        inp.style.borderColor = invalid ? 'var(--magenta)' : '';
+        if(invalid){ bad = true; if(!firstInvalid) firstInvalid = inp; }
+        vals[part] = (inp.disabled || invalid) ? null : val;
+      });
+      if(bad || dry) return;
+      const absentBox = document.querySelector(`.marks-absent-check[data-student="${studentId}"][data-subject="${CSS.escape(subject)}"]`);
+      const isAbsent = absentBox ? absentBox.checked : false;
+      const split = arr.some(i => i.dataset.part === 'internal');
+      const entered = Object.values(vals).filter(v => v !== null);
+      const total = entered.length ? Math.round(entered.reduce((a, b) => a + b, 0) * 100) / 100 : null;
+      let r = examResults.find(x => x.examId===exam.id && x.studentId===studentId && x.subject===subject);
+      if(total === null && !isAbsent){
+        if(r) examResults = examResults.filter(x => x !== r);
+        return;
+      }
+      if(!r){
+        r = { id:'res_'+studentId+'_'+exam.id+'_'+subject.replace(/\s/g,''), examId:exam.id, studentId, subject };
+        examResults.push(r);
+      }
+      r.marks = isAbsent ? null : total;
+      r.absent = isAbsent;
+      if(split){ r.written = isAbsent ? null : (vals.written == null ? null : vals.written); r.internal = isAbsent ? null : (vals.internal == null ? null : vals.internal); }
+      else { delete r.written; delete r.internal; }
+    });
+    return { hasInvalid: !!firstInvalid, firstInvalid };
   }
 
   /* --- Auto-save for Marks Entry: teachers can enter marks for dozens of
@@ -1027,30 +1141,9 @@ const ROOMS_KEY = "exam-rooms";
       const exam = examDefs.find(e => e.id === examCurrentExamId);
       const status = document.getElementById('marksAutoSaveStatus');
       if(!exam) return;
-      const markInputs = document.querySelectorAll('.marks-input');
-      if(!markInputs.length) return;
+      if(!document.querySelector('.marks-input')) return;
       await ensureDataLoaded('examResults', loadExamResultsData);
-      let hasInvalid = false;
-      markInputs.forEach(inp => {
-        const studentId = inp.dataset.student;
-        const subject = inp.dataset.subject;
-        if(!studentId || !subject) return;
-        const maxAllowed = inp.max === '' ? null : Number(inp.max);
-        const raw = inp.value;
-        const val = raw === '' ? null : Number(raw);
-        const invalid = !inp.disabled && raw !== '' && (isNaN(val) || val < 0 || (maxAllowed !== null && val > maxAllowed));
-        inp.style.borderColor = invalid ? 'var(--magenta)' : '';
-        if(invalid){ hasInvalid = true; return; }
-        const absentBox = document.querySelector(`.marks-absent-check[data-student="${studentId}"][data-subject="${CSS.escape(subject)}"]`);
-        const isAbsent = absentBox ? absentBox.checked : false;
-        let r = examResults.find(r => r.examId===exam.id && r.studentId===studentId && r.subject===subject);
-        if(val === null && !isAbsent){
-          if(r) examResults = examResults.filter(x => x !== r);
-          return;
-        }
-        if(r){ r.marks = isAbsent ? null : val; r.absent = isAbsent; }
-        else { examResults.push({ id:'res_'+studentId+'_'+exam.id+'_'+subject.replace(/\s/g,''), examId:exam.id, studentId, subject, marks: isAbsent ? null : val, absent:isAbsent }); }
-      });
+      const { hasInvalid } = marksApplySheet(exam, false);
       const ok = await storageSet(EXAM_RESULTS_KEY, examResults);
       if(ok === false){
         // Server did not accept the save (network down, server restarting, session
@@ -1072,31 +1165,15 @@ const ROOMS_KEY = "exam-rooms";
     window.removeEventListener('beforeunload', marksBeforeUnloadGuard);
     await ensureDataLoaded('examResults', loadExamResultsData);
     const exam = examDefs.find(e => e.id === examCurrentExamId);
-    const markInputs = document.querySelectorAll('.marks-input');
-    for(const inp of markInputs){
-      if(inp.disabled || inp.value === '') continue;
-      const val = Number(inp.value);
-      const maxAllowed = inp.max === '' ? null : Number(inp.max);
-      if(isNaN(val) || val < 0 || (maxAllowed !== null && val > maxAllowed)){
-        showToast(`Marks for "${inp.dataset.subject}" must be between 0 and ${inp.max} — please fix the highlighted entry.`);
-        inp.focus();
-        return;
-      }
+    const check = marksApplySheet(exam, true);
+    if(check.hasInvalid){
+      const inp = check.firstInvalid;
+      const part = inp.dataset.part ? ' ' + inp.dataset.part : '';
+      showToast(`Marks for "${inp.dataset.subject}"${part} must be between 0 and ${inp.max} — please fix the highlighted entry.`);
+      inp.focus();
+      return;
     }
-    markInputs.forEach(inp => {
-      const studentId = inp.dataset.student;
-      const subject = inp.dataset.subject;
-      const absentBox = document.querySelector(`.marks-absent-check[data-student="${studentId}"][data-subject="${CSS.escape(subject)}"]`);
-      const isAbsent = absentBox ? absentBox.checked : false;
-      const val = inp.value === '' ? null : Number(inp.value);
-      let r = examResults.find(r => r.examId===exam.id && r.studentId===studentId && r.subject===subject);
-      if(val === null && !isAbsent){
-        if(r) examResults = examResults.filter(x => x !== r);
-        return;
-      }
-      if(r){ r.marks = isAbsent ? null : val; r.absent = isAbsent; }
-      else { examResults.push({ id:'res_'+studentId+'_'+exam.id+'_'+subject.replace(/\s/g,''), examId:exam.id, studentId, subject, marks: isAbsent ? null : val, absent: isAbsent }); }
-    });
+    marksApplySheet(exam, false);
     const ok = await storageSet(EXAM_RESULTS_KEY, examResults);
     const status = document.getElementById('marksAutoSaveStatus');
     if(ok === false){
@@ -1124,7 +1201,7 @@ const ROOMS_KEY = "exam-rooms";
         const wb = XLSX.read(data, { type:'array' });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
-        let updated = 0, notFound = 0;
+        let updated = 0, notFound = 0, badCells = 0;
         rows.forEach(rec => {
           const norm = {}; Object.keys(rec).forEach(k => norm[k.trim().toLowerCase()] = rec[k]);
           const admNo = (norm['admission no'] || norm['admissionno'] || '').toString().trim();
@@ -1132,20 +1209,42 @@ const ROOMS_KEY = "exam-rooms";
           if(!student){ notFound++; return; }
           subjects.forEach(subj => {
             const key = subj.name.trim().toLowerCase();
+            const im = subjInternalMax(subj);
+            const num = raw => { const t = (raw == null ? '' : raw).toString().trim(); return t === '' ? null : Number(t); };
+            const isAb = raw => ['AB','ABSENT'].includes((raw == null ? '' : raw).toString().trim().toUpperCase());
+            let r = examResults.find(r => r.examId===exam.id && r.studentId===student.id && r.subject===subj.name);
+            const put = (marks, absent, written, internal) => {
+              if(!r){ r = { id:'res_'+student.id+'_'+exam.id+'_'+subj.name.replace(/\s/g,''), examId:exam.id, studentId:student.id, subject:subj.name }; examResults.push(r); }
+              r.marks = marks; r.absent = absent;
+              if(im){ r.written = written; r.internal = internal; } else { delete r.written; delete r.internal; }
+              updated++;
+            };
+            // Split subject: "<Subject> Written" + "<Subject> Internal" columns (brackets optional).
+            const wKey = [key+' written', key+' (written)'].find(k => k in norm);
+            const iKey = [key+' internal', key+' (internal)'].find(k => k in norm);
+            if(im && (wKey || iKey)){
+              const rawW = wKey ? norm[wKey] : '', rawI = iKey ? norm[iKey] : '';
+              if(isAb(rawW) || isAb(rawI)){ put(null, true, null, null); return; }
+              const w = num(rawW), i = num(rawI);
+              if(w === null && i === null) return;
+              if((w !== null && (isNaN(w) || w < 0 || w > subjWrittenMax(subj))) || (i !== null && (isNaN(i) || i < 0 || i > im))){ badCells++; return; }
+              put(Math.round(((w||0) + (i||0)) * 100) / 100, false, w, i);
+              return;
+            }
             if(!(key in norm)) return;
             const raw = norm[key].toString().trim();
-            let r = examResults.find(r => r.examId===exam.id && r.studentId===student.id && r.subject===subj.name);
-            const isAbsent = raw.toUpperCase() === 'AB' || raw.toUpperCase() === 'ABSENT';
+            const isAbsent = isAb(raw);
             const marks = isAbsent ? null : (raw==='' ? null : Number(raw));
             if(marks === null && !isAbsent) return;
-            if(r){ r.marks = marks; r.absent = isAbsent; }
-            else { examResults.push({ id:'res_'+student.id+'_'+exam.id+'_'+subj.name.replace(/\s/g,''), examId:exam.id, studentId:student.id, subject:subj.name, marks, absent:isAbsent }); }
-            updated++;
+            if(marks !== null && (isNaN(marks) || marks < 0 || marks > (Number(subj.maxMarks)||Infinity))){ badCells++; return; }
+            // A plain column on a split subject is the TOTAL; it has no written/internal breakdown.
+            put(marks, isAbsent, null, null);
+            if(im){ delete r.written; delete r.internal; }
           });
         });
         await storageSet(EXAM_RESULTS_KEY, examResults);
         renderMarksSheet(document.getElementById('examBody'));
-        showToast(`${updated} mark(s) updated from Excel.${notFound ? ' '+notFound+' row(s) had no matching Admission No.' : ''}`, 'ringdraw');
+        showToast(`${updated} mark(s) updated from Excel.${notFound ? ' '+notFound+' row(s) had no matching Admission No.' : ''}${badCells ? ' '+badCells+' value(s) were skipped because they are above the maximum or not a number.' : ''}`, 'ringdraw');
       }catch(err){
         showToast('Could not read that file: ' + (err && err.message ? err.message : err));
       }
