@@ -59,14 +59,14 @@ function brandScaleLine(scheme, max, label){
     const hi = i === 0 ? max : lows[i - 1] - 1;
     const lo = lows[i];
     if(hi < lo) return '';                       // band too narrow to hold a whole mark at this maximum
-    return `<span style="white-space:nowrap;"><b>${lo === hi ? lo : lo + '–' + hi}</b> = ${brandEsc(b.grade)}</span>`;
-  }).filter(Boolean).join(' &nbsp;·&nbsp; ');
-  return `<div><b>${label || 'Subject marks out of'} ${max}:</b> ${parts}</div>`;
+    return `<span style="white-space:nowrap;"><b>${lo === hi ? lo : lo + '–' + hi}</b>=${brandEsc(b.grade)}</span>`;
+  }).filter(Boolean).join(' · ');
+  return `<span style="white-space:nowrap;"><b>Out of ${max}:</b> ${parts}</span>`;
 }
 function brandGradeScaleHtml(scheme, small, maxes, totalMax){
   if(!scheme || !scheme.bands || !scheme.bands.length || scheme.display === 'marks') return '';
   const list = Array.from(new Set((maxes || []).map(Number).filter(m => m > 0))).sort((a, b) => a - b).slice(0, 3);
   const tm = Number(totalMax) || 0;
   if(!list.length) return '';
-  return `<div class="brand-scale" style="font-size:${small ? '7px' : '8.4px'};line-height:1.5;color:#333;border:1px solid #bbb;border-radius:3px;padding:2px 5px;margin:4px 0;text-align:center;"><b>Grading scale</b> (marks → grade)${list.map(m => brandScaleLine(scheme, m)).join('')}</div>`;
+  return `<div class="brand-scale" style="font-size:${small ? '7px' : '8.4px'};line-height:1.35;color:#333;border:1px solid #bbb;border-radius:3px;padding:1px 4px;margin:3px 0;text-align:center;"><b>Grade scale</b> (marks) ${list.map(m => brandScaleLine(scheme, m)).join(' &nbsp;|&nbsp; ')}</div>`;
 }
