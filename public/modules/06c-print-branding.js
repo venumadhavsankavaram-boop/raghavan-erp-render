@@ -67,6 +67,6 @@ function brandGradeScaleHtml(scheme, small, maxes, totalMax){
   if(!scheme || !scheme.bands || !scheme.bands.length || scheme.display === 'marks') return '';
   const list = Array.from(new Set((maxes || []).map(Number).filter(m => m > 0))).sort((a, b) => a - b).slice(0, 3);
   const tm = Number(totalMax) || 0;
-  if(!list.length && !tm) return '';
-  return `<div class="brand-scale" style="font-size:${small ? '7px' : '8.4px'};line-height:1.5;color:#333;border:1px solid #bbb;border-radius:3px;padding:2px 5px;margin:4px 0;text-align:center;"><b>Grading scale</b> (marks → grade)${list.map(m => brandScaleLine(scheme, m)).join('')}${tm && !(list.length === 1 && list[0] === tm) ? brandScaleLine(scheme, tm, 'Total marks out of') : ''}</div>`;
+  if(!list.length) return '';
+  return `<div class="brand-scale" style="font-size:${small ? '7px' : '8.4px'};line-height:1.5;color:#333;border:1px solid #bbb;border-radius:3px;padding:2px 5px;margin:4px 0;text-align:center;"><b>Grading scale</b> (marks → grade)${list.map(m => brandScaleLine(scheme, m)).join('')}</div>`;
 }

@@ -1054,6 +1054,38 @@ async function handleKv(req, res, key) {
   }
   return res.status(405).json({ error: 'Method not allowed.' });
 }
+// Sign-in speed: loading the app used to fire ~45 separate /api/kv/:key requests, each
+// queued behind the others. This returns many settings keys in ONE response, applying the
+// very same per-key rules as handleKv (Admin-only keys, module permission, plan gating):
+// a key the caller isn't allowed to read is simply left out, and the client then falls
+// back to the normal per-key request (which answers 403 exactly as before).
+app.get('/api/kv-batch', async (req, res) => {
+  try {
+    const keys = Array.from(new Set(String(req.query.keys || '').split(',').map(k => k.trim()).filter(Boolean))).slice(0, 80);
+    const quiet = { denied: false, status() { return this; }, json() { this.denied = true; return this; }, setHeader() {} };
+    const allowed = [];
+    for (const key of keys) {
+      if (ADMIN_ONLY_KV_KEYS.includes(key) && (!req.authUser || req.authUser.role !== 'Admin')) continue;
+      const parentShared = req.authUser && PARENT_LOGIN_ROLES.includes(req.authUser.role) && PARENT_SHARED_REFERENCE_KV_KEYS.includes(key);
+      if (KV_KEY_TO_MODULE[key]) {
+        if (!(await checkPlanModuleAccess(req, quiet, KV_KEY_TO_MODULE[key]))) continue;
+        if (!parentShared && !(await checkModuleAccess(req, quiet, KV_KEY_TO_MODULE[key]))) continue;
+      }
+      allowed.push(key);
+    }
+    const out = {};
+    if (allowed.length) {
+      const rows = await sql`SELECT \`key\` AS k, value FROM kv_store WHERE \`key\` IN (${allowed})`;
+      const byKey = {};
+      rows.forEach(r => { byKey[r.k] = r.value; });
+      allowed.forEach(k => { out[k] = (k in byKey) ? byKey[k] : {}; });
+    }
+    return res.status(200).json(out);
+  } catch (err) {
+    console.error('kv-batch error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
 app.all('/api/kv/:key', async (req, res) => {
   try {
     return await handleKv(req, res, req.params.key);

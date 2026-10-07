@@ -516,6 +516,7 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
     // ordering requirement between any two of them — safe to run together.
     // Total wait time now tracks the single slowest request instead of the
     // sum of all 29.
+    try{ kvPrefetch(); }catch(e){}
     return Promise.all([
       loadClassLevels(), loadSectionLevels(), loadClassSectionOverrides(),
       loadSchoolInfo(), loadFinance(), loadFeeExtras(), loadFeeSchedule(), loadAttendance(),

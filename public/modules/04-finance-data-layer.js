@@ -129,6 +129,16 @@ const SETTINGS_KEY = "finance-settings";
       return false;
     }
   }
+  // One request for all the settings keys the app reads at sign-in (instead of ~45).
+  const KV_PREFETCH_KEYS = ['class-levels','section-levels','class-section-overrides','finance-settings','fee-types','fee-schedule','exam-holidays','report-templates','admit-card-templates','exam-coscholastic','pending-approvals','inventory-items','timetable-entries','syllabus-topics','transport-routes','library-books','hostel-rooms','acct-expense-categories','discount-types','timetable-days','acct-income-categories','library-issues','exam-types','inventory-sales','staff-departments','timetable-periods','acct-cost-centers','library-settings','academic-years','exam-groups','extra-fee-defs','staff-designations','current-academic-year','consol-schemes','inventory-returns','staff-job-types','year-end-print-config','notice-types','inventory-vendor-returns','consolidation-scale','late-fee-settings','grading-scale','receipt-settings','grading-schemes'];
+  function kvPrefetch(){
+    window.__kvPre = {};
+    window.__kvPrePromise = fetch('/api/kv-batch?keys=' + encodeURIComponent(KV_PREFETCH_KEYS.join(',')))
+      .then(r => r.ok ? r.json() : {})
+      .then(d => { window.__kvPre = (d && typeof d === 'object') ? d : {}; })
+      .catch(() => { window.__kvPre = {}; });
+    return window.__kvPrePromise;
+  }
   // Thin wrapper: drives the ambient "Loading (your file)" badge around every
   // storageGet call (and, by extension, every syncArrayToApi call reached via
   // storageSet below), without touching the actual fetch/fallback logic.
@@ -145,6 +155,18 @@ const SETTINGS_KEY = "finance-settings";
   }
   async function _storageGetImpl(key, fallback){
     if(OBJECT_BACKED_KEYS[key]){
+      // Sign-in speed: settings keys arrive together from /api/kv-batch (see kvPrefetch);
+      // each is used once, then later reads go to the server as usual.
+      try{
+        if(window.__kvPrePromise && String(OBJECT_BACKED_KEYS[key]).startsWith('/api/kv/')){
+          await window.__kvPrePromise;
+          if(window.__kvPre && Object.prototype.hasOwnProperty.call(window.__kvPre, key)){
+            const pre = window.__kvPre[key]; delete window.__kvPre[key];
+            usingLocalFallback = false;
+            return (pre && Object.keys(pre).length) ? pre : fallback;
+          }
+        }
+      }catch(e){}
       try{
         const res = await fetch(OBJECT_BACKED_KEYS[key]);
         if(!res.ok) throw new Error('bad response');
