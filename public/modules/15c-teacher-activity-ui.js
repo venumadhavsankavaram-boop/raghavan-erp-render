@@ -644,25 +644,167 @@ async function tacRemindAtt(staffId, cls, sec){
   }catch(e){ showToast('Could not send the reminder.'); }
 }
 
-/* ----- Homework & inbox tab ----- */
+/* ----- Homework & inbox tab: one feed of everything teachers are asked / assign / answer ----- */
+let tacFeedType = 'all';       // all | concern | submission | homework
+let tacFeedState = 'action';   // action | done | all
+let tacFeedStaff = '';         // '' = every teacher, '__mgmt' = management-addressed
+let tacFeedShown = 30;
+const tacOpenItems = new Set();
+function tacHoursBetween(a, b){ return Math.max(0, (new Date(b) - new Date(a)) / 36e5); }
+function tacFmtH(h){ return h == null ? '—' : h < 1 ? '<1h' : h < 48 ? Math.round(h) + 'h' : (Math.round(h / 24 * 10) / 10) + 'd'; }
+function tacFeedItems(){
+  const m = tacModel, out = [];
+  const nm = id => id ? tacStaffName(m.staffById.get(id)) : 'Management';
+  const subCount = new Map();
+  inboxSubmissions.forEach(s => { if(s.homeworkId) subCount.set(s.homeworkId, (subCount.get(s.homeworkId) || 0) + 1); });
+  inboxConcerns.forEach(c => out.push({
+    key: 'c' + c.id, kind: 'concern', ts: c.createdAt || '', staffId: c.recipientStaffId || '', teacher: c.recipientStaffId ? nm(c.recipientStaffId) : (c.recipientName || 'Management'),
+    student: c.studentName, cls: c.className, sec: c.section, level: tacLevelOf(c.className),
+    title: (c.subjectName ? c.subjectName + ' · ' : '') + 'Parent concern', body: c.message || '',
+    action: c.status === 'open', reply: c.replyMessage || '', replyBy: c.repliedBy || '', replyAt: c.repliedAt || '',
+    solved: c.status !== 'open', age: c.status === 'open' ? daysAgo(c.createdAt) : 0,
+    respH: c.repliedAt ? tacHoursBetween(c.createdAt, c.repliedAt) : null,
+  }));
+  inboxSubmissions.forEach(s => out.push({
+    key: 's' + s.id, kind: 'submission', ts: s.createdAt || '', staffId: s.recipientStaffId || '', teacher: s.recipientStaffId ? nm(s.recipientStaffId) : (s.recipientName || 'Management'),
+    student: s.studentName, cls: s.className, sec: s.section, level: tacLevelOf(s.className),
+    title: (s.subjectName ? s.subjectName + ' · ' : '') + (s.title || 'Submission'), body: s.description || '',
+    files: (s.attachments || []).length, action: s.status === 'submitted',
+    reply: s.feedback || '', replyBy: s.reviewedBy || '', replyAt: s.reviewedAt || '', marks: s.marks,
+    status: s.status, age: s.status === 'submitted' ? daysAgo(s.createdAt) : 0,
+    respH: s.reviewedAt ? tacHoursBetween(s.createdAt, s.reviewedAt) : null,
+  }));
+  homeworkItems.forEach(h => out.push({
+    key: 'h' + h.id, kind: 'homework', ts: h.assignedDate || h.createdAt || '', staffId: h.staffId || '', teacher: h.staffId ? nm(h.staffId) : 'Not set',
+    student: '', cls: h.className, sec: h.section, level: tacLevelOf(h.className),
+    title: (h.subject ? h.subject + ' · ' : '') + (h.title || 'Homework'), body: h.description || '',
+    action: false, due: h.dueDate || '', subs: subCount.get(h.id) || 0, age: 0,
+  }));
+  return out;
+}
+function tacFeedSet(type, state, staff){
+  tacFeedType = type; tacFeedState = state; if(staff !== undefined) tacFeedStaff = staff; tacFeedShown = 30; tacRender();
+}
+function tacFeedToggle(key){ if(tacOpenItems.has(key)) tacOpenItems.delete(key); else tacOpenItems.add(key); tacRender(); }
+function tacOpenInbox(){ tacCloseDrawer(); switchView('inbox'); }
+async function tacRemindInbox(staffId){
+  const tm = tacModel.teachers.find(t => t.id === staffId); if(!tm) return;
+  if(!tm.staff.linkedUserId){ showToast(tm.name + ' has no app login linked.'); return; }
+  const ok = await showConfirmDialog(`Remind ${tm.name} about ${tm.openCons} parent concern(s) and ${tm.pendSubs} submission(s) waiting in their inbox?`, { title: 'Send reminder', okText: 'Send reminder' });
+  if(!ok) return;
+  try{
+    const r = await fetch('/api/notifications/broadcast', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, actorHeaders()),
+      body: JSON.stringify({ title: 'Inbox waiting for you', body: `You have ${tm.openCons} parent concern(s) and ${tm.pendSubs} student submission(s) waiting for your reply or review. Please respond today.`, type: 'reminder', url: '/?view=inbox', staffIds: [staffId], push: true }) });
+    const j = await r.json(); showToast(j && j.notified ? 'Reminder sent to ' + tm.name + '.' : 'Could not notify (no active login).');
+  }catch(e){ showToast('Could not send the reminder.'); }
+}
+function tacFeedCard(it){
+  const kindMeta = { concern: ['chat', 'Parent concern', 'bad'], submission: ['pen', 'Submission', 'warn'], homework: ['book', 'Homework', 'info'] }[it.kind];
+  const when = it.ts ? new Date(it.ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  let status;
+  if(it.kind === 'homework') status = tacPill('mute', 'Assigned', 'book');
+  else if(it.action) status = tacPill(it.age >= 3 ? 'bad' : 'warn', (it.kind === 'concern' ? 'Awaiting reply' : 'Awaiting review') + (it.age ? ' · ' + it.age + 'd' : ' · today'), it.age >= 3 ? 'alert' : 'clock');
+  else status = tacPill('ok', it.kind === 'concern' ? (it.solved ? 'Solved' : 'Answered') : (it.status === 'reviewed' ? 'Reviewed' : tacEsc(String(it.status || 'Done'))), 'check');
+  const long = it.body.length > 200, open = tacOpenItems.has(it.key);
+  const bodyTxt = long && !open ? it.body.slice(0, 200) + '…' : it.body;
+  const reply = it.reply ? `<div class="tac-reply"><b>${it.kind === 'concern' ? 'Teacher’s reply' : 'Review feedback'}${it.replyBy ? ' — ' + tacEsc(it.replyBy) : ''}${it.replyAt ? ' · ' + tacEsc(new Date(it.replyAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : ''}${it.respH != null ? ' · took ' + tacFmtH(it.respH) : ''}${it.marks != null && it.marks !== '' ? ' · marks ' + tacEsc(it.marks) : ''}</b><p>${tacEsc(it.reply)}</p></div>` : '';
+  const meta = [it.student ? tacEsc(it.student) : '', it.cls ? tacEsc(it.cls) + ' ' + tacEsc(it.sec || '') : '', it.kind === 'homework' && it.due ? 'due ' + tacEsc(it.due) : '', it.kind === 'homework' ? it.subs + ' submission' + (it.subs === 1 ? '' : 's') : '', it.files ? it.files + ' file' + (it.files === 1 ? '' : 's') : ''].filter(Boolean).join(' · ');
+  return `<article class="tac-feed tac-f-${kindMeta[2]} ${it.action ? 'is-wait' : ''}">
+    <span class="tac-feed-ic">${tacIcon(kindMeta[0], 18)}</span>
+    <div class="tac-feed-b">
+      <div class="tac-feed-h"><span class="tac-feed-who">${it.staffId ? `<button type="button" class="tac-link" onclick="tacOpenDrawer('${tacJs(it.staffId)}',event)">${tacEsc(it.teacher)}</button>` : `<b>${tacEsc(it.teacher)}</b>`}</span><span class="tac-pill tac-p-mute">${kindMeta[1]}</span>${status}<time>${tacEsc(when)}</time></div>
+      <h4>${tacEsc(it.title)}</h4>
+      <small>${meta}</small>
+      ${it.body ? `<p class="tac-feed-t">${tacEsc(bodyTxt)}${long ? ` <button type="button" class="tac-link" aria-expanded="${open}" onclick="tacFeedToggle('${tacJs(it.key)}')">${open ? 'Show less' : 'Read more'}</button>` : ''}</p>` : ''}
+      ${reply}
+      ${it.action ? `<div class="tac-card-a">${it.staffId ? `<button type="button" class="tac-btn tac-btn-sm tac-btn-pri" onclick="tacRemindInbox('${tacJs(it.staffId)}')">${tacIcon('bell', 14)}Remind teacher</button>` : ''}<button type="button" class="tac-btn tac-btn-sm" onclick="tacOpenInbox()">${tacIcon('open', 14)}Open Inbox to reply</button></div>` : ''}
+    </div></article>`;
+}
 function tacInboxHtml(teachers){
-  const rows = teachers.map(t => ({ staff: t.staff, pendingSubmissions: t.pendSubs, openConcerns: t.openCons }));
-  const list = teachers.filter(t => t.hwCount || t.pendSubs || t.openCons || t.tasks.length).sort((a, b) => (b.pendSubs + b.openCons) - (a.pendSubs + a.openCons) || b.hwCount - a.hwCount);
+  const m = tacModel;
+  const since = new Date(); since.setDate(since.getDate() - tacRange); const sinceDate = localDateStr(since);
+  let all = tacFeedItems().filter(it => (tacLevel === 'ALL' || it.level === tacLevel || it.level === 'OTHER' && !it.cls) && tacSearchHit(it.teacher + ' ' + it.student + ' ' + it.title + ' ' + it.body + ' ' + it.cls));
+  const inRange = it => it.action || (String(it.ts).slice(0, 10) >= sinceDate);
+  const staffOK = it => !tacFeedStaff || (tacFeedStaff === '__mgmt' ? !it.staffId : it.staffId === tacFeedStaff);
+  const base = all.filter(staffOK);
+  const waitC = base.filter(i => i.kind === 'concern' && i.action), waitS = base.filter(i => i.kind === 'submission' && i.action);
+  const doneRecent = base.filter(i => i.kind !== 'homework' && !i.action && inRange(i));
+  const hwRecent = base.filter(i => i.kind === 'homework' && inRange(i));
+  const waits = waitC.concat(waitS);
+  const oldest = waits.length ? Math.max(...waits.map(i => i.age)) : 0;
+  const rt = doneRecent.filter(i => i.respH != null).map(i => i.respH);
+  const avgRt = rt.length ? rt.reduce((a, b) => a + b, 0) / rt.length : null;
+  const tile = (icon, label, val, sub, tone, type, state) => `<button type="button" class="tac-kpi tac-t-${tone}" onclick="tacFeedSet('${type}','${state}')" aria-label="${tacEsc(label)}: ${tacEsc(val)}. Filter the list"><span class="tac-kpi-ic">${tacIcon(icon, 18)}</span><span class="tac-kpi-v">${tacEsc(val)}</span><span class="tac-kpi-l">${tacEsc(label)}</span><span class="tac-kpi-s">${tacEsc(sub)}</span></button>`;
+  const kpis = `<section class="tac-kpis tac-kpis-sm" aria-label="Inbox numbers">
+    ${tile('chat', 'Concerns waiting', String(waitC.length), 'parents not yet answered', waitC.length ? 'bad' : 'ok', 'concern', 'action')}
+    ${tile('pen', 'Submissions to review', String(waitS.length), 'student work not reviewed', waitS.length ? 'warn' : 'ok', 'submission', 'action')}
+    ${tile('clock', 'Oldest waiting', waits.length ? oldest + 'd' : '—', 'days without action', oldest >= 3 ? 'bad' : waits.length ? 'warn' : 'mute', 'all', 'action')}
+    ${tile('check', 'Answered / reviewed', String(doneRecent.length), 'last ' + tacRange + ' days', 'ok', 'all', 'done')}
+    ${tile('target', 'Avg response time', tacFmtH(avgRt), 'concerns + reviews', avgRt != null && avgRt > 48 ? 'bad' : avgRt != null && avgRt > 24 ? 'warn' : 'ok', 'all', 'done')}
+    ${tile('book', 'Homework assigned', String(hwRecent.length), 'last ' + tacRange + ' days', 'mute', 'homework', 'all')}
+  </section>`;
+  // Chips + filtered feed
+  const typeOK = it => tacFeedType === 'all' || it.kind === tacFeedType;
+  const stateOK = it => tacFeedState === 'all' ? inRange(it) : tacFeedState === 'action' ? it.action : (!it.action && inRange(it));
+  const cnt = (t, s) => base.filter(it => (t === 'all' || it.kind === t) && (s === 'all' ? inRange(it) : s === 'action' ? it.action : (!it.action && inRange(it)))).length;
+  const typeChips = [['all', 'Everything'], ['concern', 'Parent concerns'], ['submission', 'Submissions'], ['homework', 'Homework']].map(([k, n]) => `<button type="button" class="tac-chip ${tacFeedType === k ? 'on' : ''}" aria-pressed="${tacFeedType === k}" onclick="tacFeedSet('${k}','${tacFeedState}')">${n}<em>${cnt(k, tacFeedState)}</em></button>`).join('');
+  const stateChips = [['action', 'Needs action'], ['done', 'Answered / done'], ['all', 'All']].map(([k, n]) => `<button type="button" class="tac-chip ${tacFeedState === k ? 'on' : ''}" aria-pressed="${tacFeedState === k}" onclick="tacFeedSet('${tacFeedType}','${k}')">${n}<em>${cnt(tacFeedType, k)}</em></button>`).join('');
+  const staffIds = new Set(all.map(i => i.staffId));
+  const opts = `<option value="">All teachers</option>` + (staffIds.has('') ? `<option value="__mgmt" ${tacFeedStaff === '__mgmt' ? 'selected' : ''}>Management</option>` : '') +
+    m.teachers.filter(t => staffIds.has(t.id)).sort((a, b) => a.name.localeCompare(b.name)).map(t => `<option value="${tacEsc(t.id)}" ${tacFeedStaff === t.id ? 'selected' : ''}>${tacEsc(t.name)}</option>`).join('');
+  let feed = base.filter(it => typeOK(it) && stateOK(it));
+  feed.sort((a, b) => (b.action - a.action) || (a.action ? (b.age - a.age) || String(a.ts).localeCompare(String(b.ts)) : String(b.ts).localeCompare(String(a.ts))));
+  const shown = feed.slice(0, tacFeedShown);
+  const feedHtml = shown.length ? `<div class="tac-feeds">${shown.map(tacFeedCard).join('')}</div>${feed.length > shown.length ? `<div class="tac-more"><button type="button" class="tac-btn" onclick="tacFeedShown+=40;tacRender()">Show more <small>(${feed.length - shown.length} hidden)</small></button></div>` : ''}`
+    : `<div class="tac-empty ${tacFeedState === 'action' ? 'tac-good' : ''}">${tacIcon(tacFeedState === 'action' ? 'check' : 'chat', 28)}<b>${tacFeedState === 'action' ? 'Nothing is waiting' : 'Nothing to show'}</b>${tacFeedState === 'action' ? 'Every concern has a reply and every submission is reviewed.' : 'Try another filter or a longer date range.'}</div>`;
+  const remindable = m.teachers.filter(t => (t.openCons + t.pendSubs) > 0 && t.staff.linkedUserId);
+
+  // Per-teacher workload with response speed
+  const resp = new Map();
+  doneRecent.concat(base.filter(i => !i.action && i.respH != null && !inRange(i))).forEach(i => { if(i.staffId && i.respH != null){ (resp.get(i.staffId) || resp.set(i.staffId, []).get(i.staffId)).push(i.respH); } });
+  const list = teachers.filter(t => t.hwCount || t.pendSubs || t.openCons || t.tasks.length || resp.has(t.id)).sort((a, b) => (b.pendSubs + b.openCons) - (a.pendSubs + a.openCons) || b.hwCount - a.hwCount);
   const totalHw = teachers.reduce((a, t) => a + t.hwCount, 0);
   const noHw = teachers.filter(t => t.tasks.length && !t.hwCount).length;
-  return `<div class="tac-grid2">
-    <div class="tac-panel"><div class="tac-panel-h"><h3>Homework assigned — last ${tacRange} days <small>${totalHw} total</small></h3>
-      <label class="tac-sel"><span class="tac-sr">Range</span><select onchange="tacSetRange(this.value)"><option value="7" ${tacRange === 7 ? 'selected' : ''}>Last 7 days</option><option value="14" ${tacRange === 14 ? 'selected' : ''}>Last 14 days</option><option value="30" ${tacRange === 30 ? 'selected' : ''}>Last 30 days</option></select></label></div>
+  const rows = teachers.map(t => ({ staff: t.staff, pendingSubmissions: t.pendSubs, openConcerns: t.openCons }));
+  return `${kpis}
+  <div class="tac-panel" id="tacFeedPanel"><div class="tac-panel-h"><h3>Teacher inbox <small>${feed.length} item${feed.length === 1 ? '' : 's'}</small></h3>
+      <div class="tac-panel-r">
+        <label class="tac-sel"><span class="tac-sr">Teacher</span><select onchange="tacFeedSet(tacFeedType,tacFeedState,this.value)">${opts}</select></label>
+        <label class="tac-sel"><span class="tac-sr">Date range</span><select onchange="tacSetRange(this.value)"><option value="7" ${tacRange === 7 ? 'selected' : ''}>Last 7 days</option><option value="14" ${tacRange === 14 ? 'selected' : ''}>Last 14 days</option><option value="30" ${tacRange === 30 ? 'selected' : ''}>Last 30 days</option></select></label>
+        ${remindable.length ? `<button type="button" class="tac-btn tac-btn-sm tac-btn-pri" onclick="tacRemindInboxAll()">${tacIcon('bell', 14)}Remind all waiting (${remindable.length})</button>` : ''}
+        <button type="button" class="tac-btn tac-btn-sm" onclick="tacOpenInbox()">${tacIcon('open', 14)}Open Inbox</button>
+      </div></div>
+    <div class="tac-chips" role="group" aria-label="Item type">${typeChips}</div>
+    <div class="tac-chips" role="group" aria-label="Item status" style="margin-top:8px">${stateChips}</div>
+    <div style="margin-top:14px">${feedHtml}</div></div>
+  <div class="tac-grid2">
+    <div class="tac-panel"><div class="tac-panel-h"><h3>Homework assigned — last ${tacRange} days <small>${totalHw} total</small></h3></div>
       ${countTrendChartSVG(dailyHomeworkTrend(tacRange), 'var(--navy)', 'Homework assigned per day')}
       <div class="tac-note">${noHw} teacher${noHw === 1 ? '' : 's'} with classes assigned no homework in this period.</div></div>
     <div class="tac-panel"><div class="tac-panel-h"><h3>Waiting for a reply</h3></div>${staffActivityLeaderboardHtml(rows)}</div>
   </div>
-  <div class="tac-panel"><div class="tac-panel-h"><h3>Per-teacher workload</h3></div><div class="tac-scroll"><table class="tac-table"><thead><tr><th scope="col">Teacher</th><th scope="col">Homework (${tacRange}d)</th><th scope="col">Submissions to review</th><th scope="col">Open concerns</th><th scope="col"><span class="tac-sr">Actions</span></th></tr></thead><tbody>
-  ${list.map(t => `<tr><td data-l="Teacher"><button type="button" class="tac-link" onclick="tacOpenDrawer('${tacJs(t.id)}',event)">${tacEsc(t.name)}</button></td>
+  <div class="tac-panel"><div class="tac-panel-h"><h3>Per-teacher workload &amp; response speed</h3></div><div class="tac-scroll"><table class="tac-table"><thead><tr><th scope="col">Teacher</th><th scope="col">Homework (${tacRange}d)</th><th scope="col">Submissions to review</th><th scope="col">Open concerns</th><th scope="col">Avg response</th><th scope="col"><span class="tac-sr">Actions</span></th></tr></thead><tbody>
+  ${list.map(t => { const r = resp.get(t.id); const avg = r && r.length ? r.reduce((a, b) => a + b, 0) / r.length : null; return `<tr><td data-l="Teacher"><button type="button" class="tac-link" onclick="tacOpenDrawer('${tacJs(t.id)}',event)">${tacEsc(t.name)}</button></td>
     <td data-l="Homework">${t.hwCount ? t.hwCount : tacPill(t.tasks.length ? 'warn' : 'mute', 'None')}</td>
     <td data-l="Submissions">${t.pendSubs ? tacPill(t.oldestSub >= 3 ? 'bad' : 'warn', t.pendSubs + (t.oldestSub ? ' · oldest ' + t.oldestSub + 'd' : '')) : '<span class="tac-mute-t">0</span>'}</td>
     <td data-l="Concerns">${t.openCons ? tacPill(t.oldestCon >= 3 ? 'bad' : 'warn', t.openCons + (t.oldestCon ? ' · oldest ' + t.oldestCon + 'd' : '')) : '<span class="tac-mute-t">0</span>'}</td>
-    <td class="tac-act"><button type="button" class="tac-btn tac-btn-sm" onclick="tacOpenDrawer('${tacJs(t.id)}',event)">Details</button></td></tr>`).join('')}</tbody></table></div></div>`;
+    <td data-l="Avg response">${avg == null ? '<span class="tac-mute-t">—</span>' : tacPill(avg > 48 ? 'bad' : avg > 24 ? 'warn' : 'ok', tacFmtH(avg))}</td>
+    <td class="tac-act"><button type="button" class="tac-btn tac-btn-sm" onclick="tacFeedSet('all','all','${tacJs(t.id)}');document.getElementById('tacFeedPanel').scrollIntoView({behavior:'smooth'})">View items</button></td></tr>`; }).join('')}</tbody></table></div></div>`;
+}
+async function tacRemindInboxAll(){
+  const list = tacModel.teachers.filter(t => (t.openCons + t.pendSubs) > 0 && t.staff.linkedUserId);
+  if(!list.length) return;
+  const ok = await showConfirmDialog(`Send an inbox reminder to ${list.length} teacher(s) who have concerns or submissions waiting?`, { title: 'Remind all', okText: 'Send reminders' });
+  if(!ok) return;
+  let sent = 0, failed = 0;
+  for(const t of list){
+    try{
+      const r = await fetch('/api/notifications/broadcast', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, actorHeaders()),
+        body: JSON.stringify({ title: 'Inbox waiting for you', body: `You have ${t.openCons} parent concern(s) and ${t.pendSubs} student submission(s) waiting for your reply or review. Please respond today.`, type: 'reminder', url: '/?view=inbox', staffIds: [t.id], push: true }) });
+      const j = await r.json(); if(j && j.notified) sent++; else failed++;
+    }catch(_){ failed++; }
+  }
+  showToast(`Reminders sent to ${sent} teacher(s)` + (failed ? `, ${failed} failed.` : '.'));
 }
 
 /* ----- Drawer ----- */
@@ -681,7 +823,7 @@ function tacDrawerHtml(){
       <button type="button" id="tacDrawerClose" class="tac-icon-btn" onclick="tacCloseDrawer()" aria-label="Close details">${tacIcon('x', 18)}</button></header>
     <div class="tac-dbody">
       <div class="tac-dstats"><div><b>${pend.length}</b><span>Pending</span></div><div><b>${done.length}</b><span>Complete</span></div><div><b>${t.pct == null ? '—' : t.pct + '%'}</b><span>Entered</span></div><div><b>${t.pendSubs + t.openCons}</b><span>Inbox</span></div></div>
-      <div class="tac-card-a" style="margin:0 0 14px">${pend.length ? `<button type="button" class="tac-btn tac-btn-pri" onclick="tacRemind('${tacJs(t.id)}')">${tacIcon('bell', 15)}Send reminder</button><button type="button" class="tac-btn" onclick="tacWhatsApp('${tacJs(t.id)}')">${tacIcon('wa', 15)}WhatsApp</button>` : ''}${t.staff.phone ? `<a class="tac-btn" href="tel:${tacEsc(t.staff.phone)}">Call</a>` : ''}</div>
+      <div class="tac-card-a" style="margin:0 0 14px">${pend.length ? `<button type="button" class="tac-btn tac-btn-pri" onclick="tacRemind('${tacJs(t.id)}')">${tacIcon('bell', 15)}Send reminder</button><button type="button" class="tac-btn" onclick="tacWhatsApp('${tacJs(t.id)}')">${tacIcon('wa', 15)}WhatsApp</button>` : ''}<button type="button" class="tac-btn" onclick="tacFeedSet('all','all','${tacJs(t.id)}');tacCloseDrawer();tacSetTab('inbox')">${tacIcon('chat', 15)}Inbox items</button>${t.staff.phone ? `<a class="tac-btn" href="tel:${tacEsc(t.staff.phone)}">Call</a>` : ''}</div>
       <h4>Today</h4>
       <p class="tac-line">${tacIcon('user', 14)} Own attendance: <b>${tacEsc(t.own)}</b></p>
       ${t.homeroom ? `<p class="tac-line">${tacIcon('home', 14)} Homeroom ${tacEsc(t.homeroom.cls)} ${tacEsc(t.homeroom.sec)}: <b>${{ done: 'attendance done', none: 'attendance NOT marked', partial: t.homeroom.marked + ' of ' + t.homeroom.total + ' marked', holiday: 'holiday', empty: 'no students' }[t.homeroom.state]}</b></p>` : ''}
@@ -818,6 +960,19 @@ button.tac-hm:hover{transform:scale(1.05)}.tac-hm.on{border-color:var(--ink);box
   .tac-hero{padding:18px}.tac-search{min-width:100%}
   .tac-table thead{position:absolute;left:-9999px}.tac-table tr{display:block;border:1px solid var(--tac-line);border-radius:12px;margin-bottom:10px;padding:6px 4px}.tac-table td{display:flex;justify-content:space-between;gap:12px;border:0;padding:6px 10px}.tac-table td::before{content:attr(data-l);font-size:.68rem;text-transform:uppercase;color:var(--ink-soft);font-weight:700}.tac-act{justify-content:flex-start}.tac-act::before{content:none!important}
 }
+.tac-kpis-sm{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}.tac-kpis-sm .tac-kpi-v{font-size:1.5rem}
+.tac-panel-r{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tac-feeds{display:flex;flex-direction:column;gap:10px}
+.tac-feed{display:flex;gap:12px;border:1px solid var(--tac-line);border-radius:14px;padding:12px 14px;background:var(--white);border-left:4px solid var(--tac-mute)}
+.tac-feed.is-wait{background:var(--cream)}
+.tac-f-bad{border-left-color:var(--tac-bad)}.tac-f-warn{border-left-color:var(--tac-warn)}.tac-f-info{border-left-color:var(--info)}
+.tac-feed-ic{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none;background:var(--cream);color:var(--navy)}
+.tac-feed-b{min-width:0;flex:1}
+.tac-feed-h{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:.78rem}.tac-feed-h time{margin-left:auto;color:var(--ink-soft);font-size:.72rem}
+.tac-feed h4{margin:6px 0 2px;font-size:.92rem;color:var(--navy)}.tac-feed small{color:var(--ink-soft);font-size:.74rem}
+.tac-feed-t{margin:6px 0;white-space:pre-wrap;word-break:break-word;color:var(--ink)}
+.tac-reply{margin-top:8px;padding:9px 12px;border-radius:10px;background:var(--success-bg);border-left:3px solid var(--tac-ok)}.tac-reply b{font-size:.72rem;color:var(--success-ink)}.tac-reply p{margin:4px 0 0;white-space:pre-wrap;word-break:break-word}
+.tac-feed .tac-card-a{margin-top:10px}
 @media(prefers-reduced-motion:reduce){.tac *{animation:none!important;transition:none!important}}
 [data-theme="dark"] .tac{--tac-surface:#1a1530}
 `;
