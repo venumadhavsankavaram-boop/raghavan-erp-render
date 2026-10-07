@@ -774,6 +774,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         @page{ size:A4; margin:8mm; }
         body{ font-family:Arial,Helvetica,sans-serif; color:#111; margin:0; }
         ${built.css}
+        ${brandWmCss('.ac-strip, .acg-card, .acf-sheet', { size:'50%', opacity:0.06 })}
       </style></head>
       <body onload="window.print()">
         ${built.html}
@@ -800,6 +801,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
           <img class="ac-logo" src="${logoSrc}">
           <div class="ac-school">${schoolInfo.name}</div>
           <div class="ac-addr">${schoolInfo.address||''}</div>
+          ${brandLineHtml({ size:'6px', margin:'0 0 1px' })}
           <div class="ac-examname">Admit Card<br>${exam.name}<br>${examPeriod}</div>
         </div>
         <div class="ac-col-student">
@@ -893,6 +895,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
           <img class="acg-logo" src="${logoSrc}">
           <div class="acg-head-text">
             <div class="acg-school">${schoolInfo.name}</div>
+            ${brandLineHtml({ size:'7px', align:'left', margin:'0' })}
             <div class="acg-cardtitle">${cardTitle}</div>
           </div>
           <div class="acg-photo">${s.photo ? `<img src="${s.photo}">` : initials(s)}</div>
@@ -964,6 +967,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
             <div class="acf-head-text">
               <div class="acf-school">${schoolInfo.name}</div>
               <div class="acf-addr">${schoolInfo.address||''}</div>
+              ${brandLineHtml({ size:'11px', align:'left', margin:'2px 0 0' })}
             </div>
           </div>
           <div class="acf-title">${cardTitle}</div>
@@ -1204,6 +1208,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         <div class="rc-head"><img src="${logoSrc}"></div>
         <div class="rc-school">${schoolInfo.name}</div>
         <div class="rc-addr">${schoolInfo.address}</div>
+        ${brandLineHtml({ size:'11px' })}${brandFixedWmHtml()}
         <div class="rc-title">${consolTitle}</div>
         <div class="rc-info">
           <div>Student Name: <b>${s.firstName} ${s.lastName}</b></div>
@@ -1823,6 +1828,7 @@ const PAGE_SIZES_MM = { A4: [210, 297], Legal: [215.9, 355.6] };
         <div class="yec-head"><img src="${logoSrc}"></div>
         <div class="yec-school">${schoolInfo.name||''}</div>
         <div class="yec-addr">${schoolInfo.address||''}</div>
+        ${brandLineHtml({ size:'10px' })}${brandFixedWmHtml()}
         <div class="${finalized ? 'yec-final' : 'yec-provisional'}">${finalized ? `FINAL — ISSUED ${finalized.generatedAt ? new Date(finalized.generatedAt).toLocaleDateString() : ''}` : 'PROVISIONAL — SUBJECT TO CHANGE UNTIL FINALIZED'}</div>
         <div class="yec-title">YEAR-END MARKS CARD — ${currentAcademicYearValue || ''}</div>
         <div class="yec-info">

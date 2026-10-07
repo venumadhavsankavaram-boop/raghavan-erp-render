@@ -1627,6 +1627,7 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       udise: document.getElementById('siUdise').value.trim(),
       schoolCode: document.getElementById('siSchoolCode').value.trim(),
       regNumber: document.getElementById('siRegNumber').value.trim(),
+      recognition: (document.getElementById('siRecognition') ? document.getElementById('siRecognition').value.trim() : (schoolInfo.recognition || '')),
       email: document.getElementById('siEmail').value.trim(),
       phone: document.getElementById('siPhone').value.trim(),
       whatsapp: siWhatsappVal,

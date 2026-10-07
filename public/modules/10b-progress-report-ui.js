@@ -160,7 +160,7 @@
   /* ---------- the printed report ---------- */
   function prcLogoCss(src){ return src ? `.rc-logo{ background-image:url("${src}"); }` : ''; }
   function prcPrintCss(){
-    return `
+    return brandWmCss('.rc-card', { size:'55%', opacity:0.06 }) + `
       @page{ size:A4; margin:9mm; }
       *{ box-sizing:border-box; }
       body{ font-family:Arial,Helvetica,sans-serif; color:#111; margin:0; }
@@ -417,6 +417,7 @@
           <div class="rc-head">${opts.logoSrc ? (opts.logoInline ? `<img src="${opts.logoSrc}">` : '<div class="rc-logo"></div>') : ''}</div>
           <div class="rc-school">${escapeHtml(schoolInfo.name||'')}</div>
           <div class="rc-addr">${escapeHtml(schoolInfo.address||'')}</div>
+          ${brandLineHtml({ size: opts.perPage === 2 ? '8px' : '9.6px', color:'#8a6a00' })}
         </div>
         <div class="rc-body">
           <div class="rc-title">${escapeHtml(title)}</div>
@@ -427,6 +428,7 @@
           <div class="rc-sum">${boxes.join('')}</div>
           ${coScholasticSectionHtml(s, src.coExam, t)}
           ${t.footerNote ? `<p class="rc-foot">${escapeHtml(t.footerNote)}</p>` : ''}
+          ${brandGradeScaleHtml(scheme, opts.perPage === 2, sc.rows.filter(r => r.countable && r.max > 0).map(r => r.max), sc.totalMax)}
           <div class="rc-grow"></div>
           ${prcSignHtml(s, t, title)}
         </div>

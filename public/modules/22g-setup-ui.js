@@ -101,6 +101,7 @@ function renderSchoolProfileTab(body){
             ${scxIn('siUdise', 'UDISE Code', schoolInfo.udise, `inputmode="numeric" maxlength="11" ${digits(11)}`, false, '11 digits')}
             ${scxIn('siSchoolCode', 'School Code', schoolInfo.schoolCode)}
             ${scxIn('siRegNumber', 'Reg. / Affiliation Number', schoolInfo.regNumber, '', true)}
+            ${scxIn('siRecognition', 'Recognition line', schoolInfo.recognition, 'placeholder="Recognised by Govt. of AP"', false, 'Printed under the school name on receipts, progress reports, admit cards and certificates')}
           </div>`)}
         ${scxCard('Contact', 'Shown on documents and the public website.', `
           <div class="form-grid">

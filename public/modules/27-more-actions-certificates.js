@@ -4,6 +4,7 @@ function certLetterheadTop(){
       ${logo ? `<div style="text-align:center;"><img src="${logo}" style="width:52px; height:52px; border-radius:50%; object-fit:cover; margin-bottom:4px;"></div>` : ''}
       <h2 style="text-align:center; margin-bottom:2px;">${schoolInfo.name}</h2>
       <p style="text-align:center; margin:0;">${schoolInfo.address}</p>
+      ${brandLineHtml({ size:'0.85em' })}${brandFixedWmHtml()}
       ${schoolInfo.udise || schoolInfo.regNumber ? `<p style="text-align:center; margin:2px 0; font-size:0.85em;">${schoolInfo.udise?('UDISE: '+schoolInfo.udise):''}${schoolInfo.udise && schoolInfo.regNumber?' · ':''}${schoolInfo.regNumber?('Reg No: '+schoolInfo.regNumber):''}</p>` : ''}
       <hr>
     `;

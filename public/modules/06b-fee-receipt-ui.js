@@ -43,6 +43,7 @@ function frcCopyHtml(label, d){
         ${d.logo ? `<img class="logo" src="${frcEsc(d.logo)}" alt="">` : ''}
         <div><div class="school">${frcEsc(schoolInfo.name || 'School')}</div>
           <div class="addr">${frcEsc(schoolInfo.address || '')}</div>
+          <div class="recog">${frcEsc(brandRecognition())}${brandAY() ? ' · AY ' + frcEsc(brandAY()) : ''}</div>
           <div class="addr">${[schoolInfo.phone && 'Ph: ' + frcEsc(schoolInfo.phone), schoolInfo.email && frcEsc(schoolInfo.email)].filter(Boolean).join(' &nbsp;·&nbsp; ')}</div></div>
       </div>
       <div class="hd-r"><div class="ttl">FEE RECEIPT</div><div class="copylbl">${label}</div></div>
@@ -99,6 +100,8 @@ function frcDocHtml(d){
     .logo{width:30px;height:30px;border-radius:50%;background:#fff;object-fit:cover;flex:none;border:1.5px solid #E9B949}
     .school{font-size:11px;font-weight:800;line-height:1.15}
     .addr{font-size:7px;opacity:.88;line-height:1.25}
+    .recog{font-size:7px;font-weight:700;color:#E9B949;letter-spacing:.3px;line-height:1.3}
+    ${brandWmCss('.copy', { size:'58%', opacity:0.07 })}
     .hd-r{width:100%;display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,.22);padding-top:3px}
     .ttl{font-size:10.5px;font-weight:800;color:#E9B949;letter-spacing:1.2px}
     .copylbl{font-size:6.5px;font-weight:700;letter-spacing:.6px;padding:1px 8px;border-radius:99px;background:rgba(255,255,255,.16)}
