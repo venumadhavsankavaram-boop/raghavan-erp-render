@@ -1598,7 +1598,7 @@ async function handleUsers(req, res) {
         shaped.deletedByName = r.deleted_by_name;
         shaped.purgesAt = r.deleted_at ? new Date(new Date(r.deleted_at).getTime() + TRASH_RETENTION_DAYS * 86400000).toISOString() : null;
       }
-      return shaped;
+      return table === 'staff' ? staffMediaLight(shaped) : shaped;
     }));
   }
   if (req.method === 'POST' || req.method === 'PUT') {
@@ -1689,6 +1689,70 @@ function splitCoreExtra(body, core) {
   core.forEach(f => { coreVals[f.app] = body[f.app] !== undefined ? body[f.app] : (f.app === 'status' ? 'Active' : ''); });
   return { coreVals, extra };
 }
+// ---------- Staff photos / signatures: served as images, not inline ----------
+// A staff record's photo and signature are stored as base64 data URLs inside the
+// record itself. Sent inline, 30-odd staff came to ~6 MB for the Staff list that every
+// login loads - the single biggest cause of slow sign-in. The list now carries a short
+// URL for each image instead (cacheable by the browser), and the image itself comes from
+// GET /api/staff-media/:id/:field. Saving a record that still holds one of these URLs
+// keeps the stored image untouched (see staffMediaKeepStored).
+const STAFF_MEDIA_FIELDS = ['photo', 'signature'];
+function staffMediaVersion(v) {
+  return crypto.createHash('md5').update(v).digest('hex').slice(0, 10);
+}
+function staffMediaLight(shaped) {
+  if (!shaped || !shaped.id) return shaped;
+  STAFF_MEDIA_FIELDS.forEach(f => {
+    const v = shaped[f];
+    if (typeof v === 'string' && v.startsWith('data:')) {
+      shaped[f] = `/api/staff-media/${encodeURIComponent(shaped.id)}/${f}?v=${staffMediaVersion(v)}`;
+    }
+  });
+  return shaped;
+}
+async function staffMediaKeepStored(body) {
+  const needs = STAFF_MEDIA_FIELDS.filter(f => typeof body[f] === 'string' && body[f].includes('/api/staff-media/'));
+  if (!needs.length) return;
+  const rows = await sql.query('SELECT extra FROM staff WHERE id = $1', [body.id]);
+  let extra = rows.length ? rows[0].extra : {};
+  if (typeof extra === 'string') { try { extra = JSON.parse(extra); } catch (e) { extra = {}; } }
+  extra = extra || {};
+  needs.forEach(f => { body[f] = extra[f] || ''; });
+}
+app.get('/api/staff-media/:id/:field', async (req, res) => {
+  try {
+    const { id, field } = req.params;
+    if (!STAFF_MEDIA_FIELDS.includes(field)) return res.status(404).end();
+    const rows = await sql.query('SELECT extra FROM staff WHERE id = $1', [id]);
+    if (!rows.length) return res.status(404).end();
+    let extra = rows[0].extra;
+    if (typeof extra === 'string') { try { extra = JSON.parse(extra); } catch (e) { extra = {}; } }
+    extra = extra || {};
+    const role = req.authUser && req.authUser.role;
+    const own = extra.linkedUserId && req.authUser && extra.linkedUserId === req.authUser.id;
+    let allowed = MANAGEMENT_ROLES.includes(role) || own;
+    if (!allowed && req.authUser && !PARENT_LOGIN_ROLES.includes(role)) {
+      const override = await getRoleOverride(role);
+      const defaults = SERVER_ROLE_VIEWS[role] || [];
+      allowed = (override && override.staff !== undefined) ? !!override.staff.view : defaults.includes('staff');
+    }
+    if (!allowed) return res.status(403).end();
+    const v = extra[field];
+    const m = typeof v === 'string' ? /^data:([^;,]+)(;base64)?,(.*)$/s.exec(v) : null;
+    if (!m) return res.status(404).end();
+    const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]));
+    const etag = '"' + staffMediaVersion(v) + '"';
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+    res.setHeader('Content-Type', m[1] || 'image/jpeg');
+    return res.status(200).send(buf);
+  } catch (err) {
+    console.error('staff-media error:', err);
+    return res.status(500).end();
+  }
+});
+
 async function handleHybrid(req, res, config) {
   const { table, core, softDelete, deleteViaApprovalOnly } = config;
   if (req.method === 'GET') {
@@ -1743,6 +1807,7 @@ async function handleHybrid(req, res, config) {
     }
     const body = req.body || {};
     if (!body.id) return res.status(400).json({ error: 'Missing id.' });
+    if (table === 'staff') await staffMediaKeepStored(body);
     const { coreVals, extra } = splitCoreExtra(body, core);
     const cols = core.map(f => f.col);
     const vals = core.map(f => coreVals[f.app]);
@@ -4656,7 +4721,7 @@ app.all('/api/:resource', async (req, res) => {
         const shapedCore = {};
         HYBRID_RESOURCES.staff.core.forEach(f => { shapedCore[f.app] = r[f.col]; });
         const extra = r.extra || {};
-        if (extra.linkedUserId === req.authUser.id) return { ...shapedCore, ...extra };
+        if (extra.linkedUserId === req.authUser.id) return staffMediaLight({ ...shapedCore, ...extra });
         const safeExtra = {};
         if (extra.classTeacherClass !== undefined) safeExtra.classTeacherClass = extra.classTeacherClass;
         if (extra.classTeacherSection !== undefined) safeExtra.classTeacherSection = extra.classTeacherSection;

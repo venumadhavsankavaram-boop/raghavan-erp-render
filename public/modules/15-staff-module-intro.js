@@ -20,6 +20,9 @@ const STAFF_KEY = "staff-records";
   }
   async function loadStaff(){
     staffList = await storageGet(STAFF_KEY, []);
+    // Photos / signatures arrive as short image URLs (see staff-media in server.js); make
+    // them absolute so they also work inside print windows opened from this page.
+    try{ (staffList || []).forEach(st => { ['photo','signature'].forEach(f => { if(typeof st[f] === 'string' && st[f].startsWith('/api/staff-media/')) st[f] = location.origin + st[f]; }); }); }catch(e){}
     staffDepartments = await storageGet(STAFF_DEPTS_KEY, ['Teaching','Administration','Accounts','Support Staff']);
     staffDesignations = await storageGet(STAFF_DESIGNATIONS_KEY, ['Principal','Vice Principal','Teacher','Accountant','Office Assistant','Librarian','Lab Assistant','Peon','Driver','Security Guard']);
     staffJobTypes = await storageGet(STAFF_JOB_TYPES_KEY, ['Subject Teacher','Class Teacher','Sports Coach','Exam Duty','Warden','Lab Incharge','Transport Incharge']);
