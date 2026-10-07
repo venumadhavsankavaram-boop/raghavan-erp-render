@@ -599,6 +599,9 @@ const CUSTOM_ROLES_KEY = "custom-roles";
       currentUser = null;
       sessionStorage.removeItem('rgv_current_user');
       showLoginScreen();
+      // Public school name/logo for the login card (the rest of the data
+      // loads after sign-in, see submitLogin()).
+      try{ loadSchoolInfo().catch(()=>{}); }catch(e){}
     }
   }
 

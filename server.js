@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import zlib from 'zlib';
 import bcrypt from 'bcryptjs';
 import { sql, nextDocSeq, insertNotificationEventIfNew, addColumnIfMissing, createIndexIfMissing } from './db.js';
 import webpush from 'web-push';
@@ -4793,10 +4794,40 @@ function renderIndexHtml(){
   const raw = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
   return raw.replace(/(<script src="modules\/[^"]+\.js)(")/g, `$1?v=${APP_BUILD}$2`);
 }
-function sendIndexHtml(res){
+// gzip for the big static files. The ~2 MB of module JavaScript and the 370 KB
+// shell page were going out uncompressed, which is most of the wait on a slow
+// connection when the ERP first opens (and again after every publish). Built-in
+// zlib only (no new dependency), compressed once per file version and cached.
+const _gzCache = new Map();
+function acceptsGzip(req){ return /\bgzip\b/.test(String(req.headers['accept-encoding'] || '')); }
+function sendGzipped(req, res, key, version, contentType, getBuffer){
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.setHeader('Vary', 'Accept-Encoding');
+  res.type(contentType);
+  let hit = _gzCache.get(key);
+  if (!hit || hit.version !== version) {
+    const raw = getBuffer();
+    hit = { version, raw, gz: zlib.gzipSync(raw, { level: 6 }), etag: '"' + crypto.createHash('sha1').update(raw).digest('hex').slice(0, 20) + '"' };
+    _gzCache.set(key, hit);
+  }
+  res.setHeader('ETag', hit.etag);
+  if (req.headers['if-none-match'] === hit.etag) return res.status(304).end();
+  if (acceptsGzip(req)) { res.setHeader('Content-Encoding', 'gzip'); return res.end(hit.gz); }
+  return res.end(hit.raw);
+}
+function sendIndexHtml(res, req){
+  if (req) return sendGzipped(req, res, 'index.html', APP_BUILD, 'html', () => Buffer.from(renderIndexHtml(), 'utf8'));
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.type('html').send(renderIndexHtml());
 }
+// Module scripts: served here (before express.static) so they can be gzipped.
+app.get(/^\/modules\/([A-Za-z0-9._-]+\.js)$/, (req, res, next) => {
+  const file = path.join(__dirname, 'public', 'modules', req.params[0]);
+  let st;
+  try { st = fs.statSync(file); } catch (e) { return next(); }
+  if (!st.isFile()) return next();
+  return sendGzipped(req, res, file, st.mtimeMs + ':' + st.size, 'application/javascript', () => fs.readFileSync(file));
+});
 app.use(express.static(path.join(__dirname, 'public'), {
   // 'allow' (not the Express default 'ignore') so /.well-known/assetlinks.json
   // is actually servable — that file is how the Android app (a Trusted Web
@@ -4832,10 +4863,10 @@ app.use(express.static(path.join(__dirname, 'public'), {
   },
 }));
 app.get(['/', '/index.html'], (req, res) => {
-  sendIndexHtml(res);
+  sendIndexHtml(res, req);
 });
 app.get(/.*/, (req, res) => {
-  sendIndexHtml(res);
+  sendIndexHtml(res, req);
 });
 
 const PORT = process.env.PORT || 3000;

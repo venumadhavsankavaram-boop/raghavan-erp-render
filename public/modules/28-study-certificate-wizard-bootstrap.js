@@ -529,4 +529,11 @@ const WIZARD_TABS = ['new','parent','previous','transport'];
       loadUsers(), loadBiometricStatus(),
     ]);
   }
-  loadAllAppData().then(() => initAuth()).then(() => applyTheme(document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'));
+  // Sign-in speed: this used to run all 34 loaders here FIRST (a whole pass of
+  // requests that mostly just fail with 401 before anyone has signed in), and
+  // only then check the session — so the login screen waited several seconds,
+  // and a returning signed-in visitor then loaded everything a second time
+  // inside initAuth(). initAuth() now runs straight away: it loads the data
+  // once if there is a session, or shows the login screen immediately (and
+  // fetches just the public school name/logo for it).
+  initAuth().then(() => applyTheme(document.documentElement.getAttribute('data-theme')==='dark' ? 'dark' : 'light'));
