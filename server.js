@@ -1598,7 +1598,7 @@ async function handleUsers(req, res) {
         shaped.deletedByName = r.deleted_by_name;
         shaped.purgesAt = r.deleted_at ? new Date(new Date(r.deleted_at).getTime() + TRASH_RETENTION_DAYS * 86400000).toISOString() : null;
       }
-      return table === 'staff' ? staffMediaLight(shaped) : shaped;
+      return shaped;
     }));
   }
   if (req.method === 'POST' || req.method === 'PUT') {
@@ -1783,7 +1783,7 @@ async function handleHybrid(req, res, config) {
         shaped.deletedByName = r.deleted_by_name;
         shaped.purgesAt = r.deleted_at ? new Date(new Date(r.deleted_at).getTime() + TRASH_RETENTION_DAYS * 86400000).toISOString() : null;
       }
-      return shaped;
+      return table === 'staff' ? staffMediaLight(shaped) : shaped;
     }));
   }
   if (req.method === 'POST' || req.method === 'PUT') {
