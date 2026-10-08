@@ -3687,7 +3687,8 @@
     </div>
 
     <div id="view-accounting" style="display:none;">
-      <div class="topbar"><div><h1>Accounting</h1><p>What's coming in, what's going out, and your current cash position — all in one place.</p></div></div>
+      <div class="topbar"><div><h1>Accounting</h1><p>What's coming in, what's going out, and your current cash position — all in one place.</p></div>
+        <div style="display:flex; align-items:center; gap:10px;"><button type="button" class="btn btn-ghost" id="acctRefreshBtn" onclick="refreshAccounting()" style="display:none;" title="Reload the latest fee payments, vouchers and inventory sales from the server">🔄 Refresh</button></div></div>
       <div class="mf-tabs">
         <button type="button" class="mf-tab active" id="acttab-overview" onclick="switchAccountingTab('overview')">📊 Overview</button>
         <button type="button" class="mf-tab" id="acttab-dailycollections" onclick="switchAccountingTab('dailycollections')" style="display:none;">🧾 Daily Collections</button>

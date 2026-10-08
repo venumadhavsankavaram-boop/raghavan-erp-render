@@ -491,6 +491,8 @@ const COMMS_MESSAGES_KEY = "comms-messages";
       ensureDataLoaded('acctLedger', loadAccountingLedgerData),
       ensureDataLoaded('payments', loadPaymentsData),
     ]);
+    const acctRefreshBtn = document.getElementById('acctRefreshBtn');
+    if(acctRefreshBtn) acctRefreshBtn.style.display = currentUser.role === 'Admin' ? '' : 'none';
     const accessibleTabs = ACCT_TABS.filter(t => getAccountingTabAccess(currentUser.role, ACCT_TAB_PERM_KEYS[t]));
     ACCT_TABS.forEach(t => {
       const btn = document.getElementById('acttab-'+t);
@@ -509,6 +511,28 @@ const COMMS_MESSAGES_KEY = "comms-messages";
       accountingTab = accessibleTabs[0] || 'overview';
     }
     switchAccountingTab(accountingTab);
+  }
+  // Admin-only: Accounting keeps what it loaded the first time it was opened, so fee
+  // receipts, vouchers and inventory sales entered since (by other users, or in other
+  // sections) do not show up until the page is reloaded. This re-fetches all of it.
+  async function refreshAccounting(){
+    if(currentUser.role !== 'Admin') return;
+    const btn = document.getElementById('acctRefreshBtn');
+    if(btn){ btn.disabled = true; btn.textContent = '🔄 Refreshing…'; }
+    try{
+      await Promise.all([
+        reloadDataset('acctTransactions', loadAcctTransactionsData),
+        reloadDataset('acctLedger', loadAccountingLedgerData),
+        reloadDataset('payments', loadPaymentsData),
+        reloadDataset('inventorySales', loadInventory),
+      ]);
+      await renderAccountingBody();
+      showToast('Accounting refreshed with the latest data.');
+    }catch(e){
+      showToast('Could not refresh Accounting — please check your connection and try again.');
+    }finally{
+      if(btn){ btn.disabled = false; btn.textContent = '🔄 Refresh'; }
+    }
   }
   function switchAccountingTab(tab){
     accountingTab = tab;
