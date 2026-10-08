@@ -111,6 +111,7 @@ function switchView(view){
     document.getElementById('navWebsiteGallery').classList.toggle('active', view === 'websitegallery');
     document.getElementById('navContactVendor').classList.toggle('active', view === 'contactvendor');
     document.getElementById('navMyProfile').classList.toggle('active', view === 'myprofile');
+    qlUpdateQuickLinks();
     if(view === 'dashboard') renderDashboard();
     if(view === 'admissions'){ admissionsView = 'grid'; renderAdmissionsBody(); }
     if(view === 'managefee'){ initManageFeeView(); }
@@ -149,3 +150,14 @@ function switchView(view){
 
   /* ===== FINANCE DATA LAYER ===== */
   
+// Quick links between Manage Fee and Inventory (students often buy an item and pay fees in one visit).
+// Each shortcut shows only when the signed-in role can open the other section.
+function qlUpdateQuickLinks(){
+  try{
+    const views = getRoleViews(currentUser.role) || [];
+    const a = document.getElementById('qlFeeToInventory');
+    const b = document.getElementById('qlInventoryToFee');
+    if(a) a.style.display = views.includes('inventory') ? '' : 'none';
+    if(b) b.style.display = views.includes('managefee') ? '' : 'none';
+  }catch(e){}
+}

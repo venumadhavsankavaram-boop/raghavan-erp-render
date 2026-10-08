@@ -3372,7 +3372,8 @@
           <h1>Manage Fee</h1>
           <p>Fee structure, types, discounts, extra &amp; late fees — and who still owes what.</p>
         </div>
-        <div style="display:flex; align-items:center; gap:10px;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <button type="button" class="btn btn-ghost" id="qlFeeToInventory" onclick="switchView('inventory')" style="display:none;" title="Open Inventory to sell an item to a student">📦 Inventory</button>
           <span class="ay-badge" id="mfAyBadge"></span>
           <select id="mfAySelect" onchange="changeAcademicYearFromFee()" style="font-size:0.78rem; padding:8px 10px; border-radius:8px; border:1.5px solid var(--border);"></select>
         </div>
@@ -3629,7 +3630,8 @@
     </div>
 
     <div id="view-inventory" style="display:none;">
-      <div class="topbar"><div><h1>Inventory Management</h1><p>Sellable items — uniforms, books, stationery — with stock levels, pricing, and profit tracking.</p></div></div>
+      <div class="topbar"><div><h1>Inventory Management</h1><p>Sellable items — uniforms, books, stationery — with stock levels, pricing, and profit tracking.</p></div>
+        <div style="display:flex; align-items:center; gap:10px;"><button type="button" class="btn btn-ghost" id="qlInventoryToFee" onclick="switchView('managefee')" style="display:none;" title="Open Manage Fee to collect or check a student's fees">💰 Manage Fee</button></div></div>
       <div id="inventoryBody"></div>
     </div>
 
