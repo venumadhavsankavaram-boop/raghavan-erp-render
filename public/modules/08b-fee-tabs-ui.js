@@ -223,6 +223,7 @@ function renderLateFeesTab(body){
       <section class="sf-card ft-card">
         ${ftCardHead('Receipt numbering', 'Switching over from another system? Set where receipt numbers should continue (if your last printed receipt was 001666, enter 1667).')}
         <div class="ft-form">
+          <label class="ft-field"><span>School code on receipts (e.g. SPS → SPS-26-000001)</span><input type="text" maxlength="8" class="input" id="rsPrefix" value="${String(receiptSettings.prefix || 'REHS').replace(/[^A-Za-z0-9]/g,'')}"></label>
           <label class="ft-field"><span>Next receipt starts at</span><input type="number" min="1" class="input" id="rsStart" value="${Number(receiptSettings.startNumber) || 1}"></label>
         </div>
         ${canEdit ? sfBtn('primary', 'check', 'Save receipt numbering', 'saveReceiptSettings()') : ''}

@@ -120,7 +120,13 @@ function openPaymentModal(presetStudentId){
   // server cannot be reached, nextReceiptNo() falls back to the old count-based formula but
   // skips any number already on record.
   let rcPool = [];
-  function receiptPrefix(){ return 'REHS-' + String(new Date().getFullYear()).slice(2) + '-'; }
+  function receiptPrefix(){
+    // School code is a setting (Manage Fee > Settings > Receipt numbering). Older installs
+    // that never set one keep 'REHS' so their existing numbering carries on unchanged.
+    let code = String((receiptSettings && receiptSettings.prefix) || 'REHS').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
+    if(code.length < 2) code = 'REHS';
+    return code + '-' + String(new Date().getFullYear()).slice(2) + '-';
+  }
   // Display-only number for a receipt that is not being saved (never reserves a real one).
   function previewReceiptNo(){
     const seq = (Number(receiptSettings.startNumber) || 1) + payments.length;
