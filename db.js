@@ -170,6 +170,29 @@ export async function nextDocSeq(series, period) {
   }
 }
 
+// Reserves `count` consecutive numbers from a doc_counters series in one atomic step
+// and returns the first one (the caller formats first .. first+count-1). `minNext`
+// only ever RAISES the counter (first-time seed, or a raised "next receipt starts at"
+// setting) — it never moves it backwards, so a number is never handed out twice.
+export async function reserveDocSeqRange(series, period, count, minNext) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.query(
+      `INSERT INTO doc_counters (series, period, next_seq) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE next_seq = GREATEST(next_seq, ?)`,
+      [series, period, minNext, minNext]
+    );
+    await conn.query(
+      `UPDATE doc_counters SET next_seq = LAST_INSERT_ID(next_seq + ?) WHERE series = ? AND period = ?`,
+      [count, series, period]
+    );
+    const [[row]] = await conn.query('SELECT LAST_INSERT_ID() AS v');
+    return Number(row.v) - count;
+  } finally {
+    conn.release();
+  }
+}
+
 // Inserts a notification_events row unless one already exists for this
 // (student_id, kind, ref_key) — replaces:
 //   INSERT ... ON CONFLICT DO NOTHING RETURNING id

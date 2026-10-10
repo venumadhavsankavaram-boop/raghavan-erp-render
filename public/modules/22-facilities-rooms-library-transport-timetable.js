@@ -725,10 +725,17 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
     const box = document.getElementById('invCheckoutStudentSuggestions');
     if(box) box.classList.remove('open');
   }
-  async function completeInventorySale(){
+  function completeInventorySale(){ return rcGuard(() => completeInventorySaleImpl()); }
+  async function completeInventorySaleImpl(){
     // A stock-purchase sale to a student becomes its own `payments` row
     // (category:'extra') — must not push onto an unloaded array.
     await ensureDataLoaded('payments', loadPaymentsData);
+    if(invCheckoutBuyerType==='Student'){
+      // Only lines that actually receive money get a receipt number — reserve exactly that many.
+      let rem = Number((document.getElementById('invCheckoutPaidAmount') || {}).value) || 0, nRcpt = 0;
+      invCart.forEach(c => { const lp = Math.max(0, Math.min(rem, c.price*c.qty - c.discount)); rem -= lp; if(lp > 0) nRcpt++; });
+      if(nRcpt > 0) await rcEnsure(nRcpt);
+    }
     if(invCheckoutBuyerType==='Student' && !invCheckoutStudentId){ showToast('Select a student.'); return; }
     for(const c of invCart){
       const it = inventoryItems.find(x => x.id === c.itemId);
@@ -955,9 +962,11 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       refundBox.innerHTML = `<p style="font-size:0.78rem; color:var(--ink-soft);">Nothing was collected for this quantity yet, so nothing needs to be refunded — the amount due will simply be reduced.</p>`;
     }
   }
-  async function submitInventoryReturn(){
+  function submitInventoryReturn(){ return rcGuard(() => submitInventoryReturnImpl()); }
+  async function submitInventoryReturnImpl(){
     // A cash refund on a return can push a new `payments` row too.
     await ensureDataLoaded('payments', loadPaymentsData);
+    { const cr = document.getElementById('invRetCashRefund'); if(cr && Number(cr.value) > 0) await rcEnsure(1); }
     const saleId = document.getElementById('invRetSaleId').value;
     const s = inventorySales.find(x => x.id === saleId);
     if(!s) return;

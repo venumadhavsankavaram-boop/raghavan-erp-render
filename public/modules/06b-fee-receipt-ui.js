@@ -165,7 +165,7 @@ function frcBuildData(recs){
   const netPaid = recs.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
   const modes = Array.from(new Set(recs.map(r => r.mode).filter(Boolean)));
   return {
-    recs, s, receiptNo: p.receiptNo || nextReceiptNo(), date: p.date || '—', mode: modes.join(' + ') || '—',
+    recs, s, receiptNo: p.receiptNo || previewReceiptNo(), date: p.date || '—', mode: modes.join(' + ') || '—',
     contact: frcContact(s), parentName: s.fatherName || s.motherName || s.guardianName || '—',
     address: s.fatherAddress || s.motherAddress || s.guardianAddress || '—',
     netPaid, disc: recs.reduce((sum, r) => sum + (Number(r.discount) || 0), 0),

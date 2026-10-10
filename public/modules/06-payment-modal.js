@@ -48,9 +48,23 @@ function openPaymentModal(presetStudentId){
   function closePaymentModal(){
     document.getElementById('paymentModalOverlay').classList.remove('open');
   }
-  async function savePayment(e){
+  // One money-recording action at a time: a double-click, a held Enter key or a slow save used to
+  // run the same save again and again, creating the same receipt several times with new numbers.
+  let rcBusy = false;
+  async function rcGuard(fn){
+    if(rcBusy) return;
+    rcBusy = true;
+    try{ return await fn(); }
+    finally{ setTimeout(() => { rcBusy = false; }, 500); }
+  }
+  function savePayment(e){
+    if(e && e.preventDefault) e.preventDefault();
+    return rcGuard(() => savePaymentImpl(e));
+  }
+  async function savePaymentImpl(e){
     e.preventDefault();
     await ensureDataLoaded('payments', loadPaymentsData);
+    await rcEnsure(1);
     const studentId = document.getElementById('pStudent').value;
     const student = students.find(s => s.id === studentId);
     if(!student){ showToast('Please select a student.'); return false; }
@@ -72,6 +86,8 @@ function openPaymentModal(presetStudentId){
     closePaymentModal();
     renderDashboard();
     if(document.getElementById('view-managefee').style.display !== 'none') renderFeeBody();
+    // The server refuses an identical payment saved moments ago; the extra copy is removed from the list.
+    if(!payments.includes(record)) return;
     showToast('Payment recorded.', 'radial', record.amount);
     if(await showConfirmDialog('Payment recorded. Print receipt now?')){
       printReceipt(record.id);
@@ -98,10 +114,43 @@ function openPaymentModal(presetStudentId){
     return str.trim();
   }
 
-  function nextReceiptNo(){
-    const yy = String(new Date().getFullYear()).slice(2);
+  // ---- Receipt numbers are issued by the server, so two people can never get the same one ----
+  // Callers do `await rcEnsure(n)` first (it asks the server for n numbers and keeps them in
+  // rcPool), then nextReceiptNo() hands one out synchronously, exactly as before. If the
+  // server cannot be reached, nextReceiptNo() falls back to the old count-based formula but
+  // skips any number already on record.
+  let rcPool = [];
+  function receiptPrefix(){ return 'REHS-' + String(new Date().getFullYear()).slice(2) + '-'; }
+  // Display-only number for a receipt that is not being saved (never reserves a real one).
+  function previewReceiptNo(){
     const seq = (Number(receiptSettings.startNumber) || 1) + payments.length;
-    return 'REHS-' + yy + '-' + String(seq).padStart(6,'0');
+    return receiptPrefix() + String(seq).padStart(6,'0');
+  }
+  async function rcEnsure(n){
+    n = Math.max(1, Math.min(Number(n) || 1, 20));
+    const prefix = receiptPrefix();
+    rcPool = rcPool.filter(x => x.indexOf(prefix) === 0);
+    if(rcPool.length >= n) return true;
+    try{
+      const res = await fetch('/api/receipt-numbers', {
+        method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()},
+        body: JSON.stringify({ prefix, start: Number(receiptSettings.startNumber) || 1, count: n - rcPool.length })
+      });
+      if(!res.ok) throw new Error('bad response');
+      const data = await res.json();
+      if(Array.isArray(data.numbers)) rcPool = rcPool.concat(data.numbers);
+      return true;
+    }catch(e){ return false; }
+  }
+  function nextReceiptNo(){
+    const prefix = receiptPrefix();
+    rcPool = rcPool.filter(x => x.indexOf(prefix) === 0);
+    if(rcPool.length) return rcPool.shift();
+    const used = new Set(payments.map(p => p.receiptNo));
+    let seq = (Number(receiptSettings.startNumber) || 1) + payments.length;
+    let no = prefix + String(seq).padStart(6,'0');
+    while(used.has(no)){ seq++; no = prefix + String(seq).padStart(6,'0'); }
+    return no;
   }
 
   // Prints one payment record exactly as before — unchanged for every

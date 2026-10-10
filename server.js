@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import zlib from 'zlib';
 import bcrypt from 'bcryptjs';
-import { sql, nextDocSeq, insertNotificationEventIfNew, addColumnIfMissing, createIndexIfMissing } from './db.js';
+import { sql, nextDocSeq, reserveDocSeqRange, insertNotificationEventIfNew, addColumnIfMissing, createIndexIfMissing } from './db.js';
 import webpush from 'web-push';
 // Fleet reporting + support-login — see ../reporting-client/ for the
 // canonical copies and full wiring docs (also README.md, "Reporting
@@ -1132,6 +1132,41 @@ app.post('/api/next-doc-number', async (req, res) => {
   }
 });
 
+// Fee receipt numbers. The browser used to work the next number out from how many payments
+// IT had loaded, so two clerks collecting at the same time (or one with a stale page) could
+// print the same number. Now the browser asks here, and every number is handed out once,
+// in order, from a counter shared by everyone. The counter starts above the highest number
+// already on record for that prefix, and only moves forward.
+app.post('/api/receipt-numbers', async (req, res) => {
+  try {
+    if (!req.authUser || PARENT_LOGIN_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Not allowed.' });
+    }
+    const b = req.body || {};
+    const prefix = String(b.prefix || '');
+    if (!/^[A-Za-z0-9-]{2,20}$/.test(prefix)) return res.status(400).json({ error: 'Invalid receipt prefix.' });
+    const count = Math.max(1, Math.min(parseInt(b.count, 10) || 1, 20));
+    const start = Math.max(1, parseInt(b.start, 10) || 1);
+    let minNext = start;
+    const existing = await sql.query('SELECT next_seq FROM doc_counters WHERE series = $1 AND period = $2', ['fee_receipt', prefix]);
+    if (!existing.length) {
+      const rows = await sql.query('SELECT receipt_no FROM payments WHERE receipt_no LIKE $1', [prefix + '%']);
+      let max = 0;
+      rows.forEach(r => {
+        const m = /(\d+)$/.exec(String(r.receipt_no || ''));
+        if (m) max = Math.max(max, parseInt(m[1], 10));
+      });
+      minNext = Math.max(start, max + 1);
+    }
+    const first = await reserveDocSeqRange('fee_receipt', prefix, count, minNext);
+    const numbers = Array.from({ length: count }, (_, i) => prefix + String(first + i).padStart(6, '0'));
+    return res.status(200).json({ numbers });
+  } catch (err) {
+    console.error('receipt-numbers error:', err);
+    return res.status(500).json({ error: 'Could not issue receipt numbers.' });
+  }
+});
+
 // ---------- Resource configuration (unchanged from the tested version) ----------
 const SIMPLE_RESOURCES = {
   users: {
@@ -1547,6 +1582,43 @@ function notifyAfterResourceWrite(resourceName, body, method) {
       .catch(err => console.error('discount request notification failed:', err));
   }
 }
+// ---- Duplicate-save protection for money records ----------------------------
+// A double-click / held Enter / retry used to create the same payment or
+// voucher again under a new number. These tables get a server-side check:
+// an identical, non-voided entry in the last 2 minutes is refused (409).
+const _keyLocks = new Map();
+async function withKeyLock(key, fn) {
+  const prev = _keyLocks.get(key) || Promise.resolve();
+  let release;
+  const gate = new Promise(r => { release = r; });
+  const tail = prev.then(() => gate);
+  _keyLocks.set(key, tail);
+  await prev.catch(() => {});
+  try { return await fn(); }
+  finally { release(); if (_keyLocks.get(key) === tail) _keyLocks.delete(key); }
+}
+const DUP_GUARDS = {
+  payments: { noCol: 'receipt_no', lockBy: 'studentId',
+    match: [['student_id','studentId'],['category','category'],['extra_fee_id','extraFeeId'],['instalment','instalment'],['amount','amount'],['discount','discount'],['mode','mode'],['date','date'],['note','note']] },
+  acct_income: { noCol: 'voucher_no', lockBy: null,
+    match: [['date','date'],['category','category'],['cost_center','costCenter'],['amount','amount'],['party','party'],['mode','mode'],['reference_no','referenceNo'],['description','description'],['added_by','addedBy']] },
+  acct_expenses: { noCol: 'voucher_no', lockBy: null,
+    match: [['date','date'],['category','category'],['cost_center','costCenter'],['amount','amount'],['party','party'],['mode','mode'],['reference_no','referenceNo'],['description','description'],['added_by','addedBy']] },
+};
+async function findRecentDuplicate(table, guard, body) {
+  const conds = [], params = [];
+  guard.match.forEach(([col, app], i) => {
+    let v = body[app];
+    if (v === undefined || v === '') v = null;
+    conds.push(`${col} <=> $${i + 1}`);
+    params.push(v);
+  });
+  const rows = await sql.query(
+    `SELECT * FROM ${table} WHERE ${conds.join(' AND ')} AND COALESCE(voided, 0) = 0 AND created_at > (NOW() - INTERVAL 120 SECOND) LIMIT 1`,
+    params);
+  return rows[0] || null;
+}
+
 async function handleSimple(req, res, config, resourceName) {
   const { table, fields } = config;
   if (req.method === 'GET') {
@@ -1570,9 +1642,28 @@ async function handleSimple(req, res, config, resourceName) {
     const vals = fields.map(f => (body[f.app] === undefined ? null : body[f.app]));
     if (req.method === 'POST') {
       const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
-      await sql.query(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`, vals);
-      notifyAfterResourceWrite(resourceName, body, 'POST');
-      return res.status(201).json({ ok: true });
+      const guard = DUP_GUARDS[table];
+      const doInsert = async () => {
+        // Idempotent: the same record id arriving twice (retry, double-send) is one record.
+        const same = await sql.query(`SELECT id FROM ${table} WHERE id = $1`, [body.id]);
+        if (same.length) return res.status(200).json({ ok: true, alreadySaved: true });
+        if (guard) {
+          const dup = await findRecentDuplicate(table, guard, body);
+          if (dup) {
+            return res.status(409).json({
+              error: 'An identical entry was already saved a moment ago (' + (dup[guard.noCol] || 'no number') + '). The extra copy was not saved.',
+              code: 'DUPLICATE', existing: { number: dup[guard.noCol] || '' },
+            });
+          }
+        }
+        await sql.query(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`, vals);
+        notifyAfterResourceWrite(resourceName, body, 'POST');
+        return res.status(201).json({ ok: true });
+      };
+      // Serialise writes per student (payments) / per table (vouchers) so two
+      // simultaneous identical requests cannot both pass the check.
+      if (guard) return withKeyLock(table + ':' + (guard.lockBy ? (body[guard.lockBy] || '') : ''), doInsert);
+      return doInsert();
     } else {
       const setClause = cols.filter(c => c !== 'id').map((c, i) => `${c} = $${i + 2}`).join(', ');
       const updateVals = [body.id, ...fields.filter(f => f.col !== 'id').map(f => (body[f.app] === undefined ? null : body[f.app]))];

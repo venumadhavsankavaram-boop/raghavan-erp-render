@@ -295,8 +295,13 @@ let refundPaymentId = null;
     if(unallocEl) unallocEl.textContent = fmtMoney(unallocated);
     updateFamilyTotalToPay();
   }
-  async function submitFamilyPayments(){
+  function submitFamilyPayments(){ return rcGuard(() => submitFamilyPaymentsImpl()); }
+  async function submitFamilyPaymentsImpl(){
     await ensureDataLoaded('payments', loadPaymentsData);
+    await rcEnsure(new Set(Array.from(document.querySelectorAll('.ff-head-row')).filter(r => {
+      const c = document.getElementById('ffChk_'+r.dataset.hid), a = document.getElementById('ffAmt_'+r.dataset.hid);
+      return c && c.checked && (Number(a ? a.value : 0) || 0) > 0;
+    }).map(r => r.dataset.studentId)).size || 1);
     const mode = document.getElementById('ffMode').value;
     const date = document.getElementById('ffDate').value || new Date().toISOString().slice(0,10);
     const note = document.getElementById('ffNote').value.trim();
@@ -799,7 +804,7 @@ let refundPaymentId = null;
     if(!student) return;
     printReceipt({
       id: 'synthetic_' + fee.id,
-      receiptNo: nextReceiptNo(),
+      receiptNo: previewReceiptNo(),
       studentId: fee.studentId, studentName: student.name,
       category: 'extra', extraFeeName: fee.name,
       mode: 'Cash', amount: Number(fee.paidAmount) || Number(fee.amount) || 0, discount: 0,

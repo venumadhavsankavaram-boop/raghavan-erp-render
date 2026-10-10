@@ -597,7 +597,8 @@ const COMMS_MESSAGES_KEY = "comms-messages";
     const wrap = document.getElementById(refFieldId);
     if(wrap) wrap.style.display = (sel.value === 'Cheque' || sel.value === 'Bank Transfer' || sel.value === 'UPI' || sel.value === 'Online') ? 'block' : 'none';
   }
-  async function saveIncomeVoucher(){
+  function saveIncomeVoucher(){ return rcGuard(() => saveIncomeVoucherImpl()); }
+  async function saveIncomeVoucherImpl(){
     const date = document.getElementById('acctIncDate').value;
     const amount = Number(document.getElementById('acctIncAmount').value) || 0;
     let category = document.getElementById('acctIncCategory').value;
@@ -624,16 +625,19 @@ const COMMS_MESSAGES_KEY = "comms-messages";
       showToast("Could not get a voucher number from the server (" + e.message + ") — not saved. Try again once you're back online.");
       return;
     }
-    acctIncome.push({ id:'inc_'+Date.now(), voucherNo, date, category, costCenter, amount, party, mode, referenceNo, bankAccountId, description, addedBy:currentUser.name, voided:false });
+    const incRec = { id:'inc_'+Date.now(), voucherNo, date, category, costCenter, amount, party, mode, referenceNo, bankAccountId, description, addedBy:currentUser.name, voided:false };
+    acctIncome.push(incRec);
     await storageSet(ACCT_INCOME_KEY, acctIncome);
     renderDashboard();
     renderAcctIncomeTab(document.getElementById('accountingBody'));
+    if(!acctIncome.includes(incRec)) return; // duplicate refused by the server
     showToast('Income voucher ' + voucherNo + ' saved.');
   }
 
   /* --- Expense vouchers --- */
   let acctExpenseSearch = '';
-  async function saveExpenseVoucher(){
+  function saveExpenseVoucher(){ return rcGuard(() => saveExpenseVoucherImpl()); }
+  async function saveExpenseVoucherImpl(){
     const date = document.getElementById('acctExpDate').value;
     const amount = Number(document.getElementById('acctExpAmount').value) || 0;
     let category = document.getElementById('acctExpCategory').value;
@@ -660,10 +664,12 @@ const COMMS_MESSAGES_KEY = "comms-messages";
       showToast("Could not get a voucher number from the server (" + e.message + ") — not saved. Try again once you're back online.");
       return;
     }
-    acctExpenses.push({ id:'exp_'+Date.now(), voucherNo, date, category, costCenter, amount, party, mode, referenceNo, bankAccountId, description, addedBy:currentUser.name, voided:false });
+    const expRec = { id:'exp_'+Date.now(), voucherNo, date, category, costCenter, amount, party, mode, referenceNo, bankAccountId, description, addedBy:currentUser.name, voided:false };
+    acctExpenses.push(expRec);
     await storageSet(ACCT_EXPENSES_KEY, acctExpenses);
     renderDashboard();
     renderAcctExpenseTab(document.getElementById('accountingBody'));
+    if(!acctExpenses.includes(expRec)) return; // duplicate refused by the server
     showToast('Expense voucher ' + voucherNo + ' saved.');
   }
 
@@ -864,7 +870,8 @@ const COMMS_MESSAGES_KEY = "comms-messages";
   }
   function addJvLine(){ syncJvLinesFromInputs(); jvDraftLines.push(jvBlankLine()); renderAcctJournalTab(document.getElementById('accountingBody')); }
   function removeJvLine(i){ syncJvLinesFromInputs(); jvDraftLines.splice(i,1); renderAcctJournalTab(document.getElementById('accountingBody')); }
-  async function saveJournalVoucher(){
+  function saveJournalVoucher(){ return rcGuard(() => saveJournalVoucherImpl()); }
+  async function saveJournalVoucherImpl(){
     syncJvLinesFromInputs();
     const date = document.getElementById('jvDate').value;
     const type = document.getElementById('jvType').value;

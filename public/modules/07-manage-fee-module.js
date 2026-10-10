@@ -293,8 +293,10 @@ const FEE_TYPES_KEY = "fee-types";
     const el = document.getElementById('ledgerTotalToPay');
     if(el) el.textContent = fmtMoney(total);
   }
-  async function submitLedgerPayments(studentId){
+  function submitLedgerPayments(studentId){ return rcGuard(() => submitLedgerPaymentsImpl(studentId)); }
+  async function submitLedgerPaymentsImpl(studentId){
     await ensureDataLoaded('payments', loadPaymentsData);
+    await rcEnsure(1);
     const modeSel = document.getElementById('ledgerPayMode');
     const mode = modeSel ? modeSel.value : 'Cash';
     const entries = Array.from(document.querySelectorAll('.ledger-pay-input'))
@@ -346,6 +348,7 @@ const FEE_TYPES_KEY = "fee-types";
     await storageSet(STUDENT_EXTRA_FEES_KEY, studentExtraFees);
     renderDashboard();
     renderFeeBody();
+    if(lastId && !payments.some(p => p.id === lastId)) return; // duplicate refused by the server
     showToast(entries.length > 1 ? `Receipt ${sharedReceiptNo} generated for ${entries.length} fee heads.` : 'Payment recorded.', 'radial', entries.reduce((s,e)=>s+e.amt,0));
     if(lastId && await showConfirmDialog('Payment(s) recorded. Print receipt now?')){
       printReceiptByNo(sharedReceiptNo);
