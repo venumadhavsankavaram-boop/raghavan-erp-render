@@ -840,9 +840,7 @@ let refundPaymentId = null;
     showToast('Late fee rule saved.', 'burst');
   }
   async function saveReceiptSettings(){
-    const rsCode = String(document.getElementById('rsPrefix').value || '').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
-    if(rsCode.length < 2){ showToast('School code must be 2–8 letters or numbers (e.g. SPS).'); return; }
-    receiptSettings = { startNumber: Number(document.getElementById('rsStart').value) || 1, prefix: rsCode };
+    receiptSettings = { startNumber: Number(document.getElementById('rsStart').value) || 1 };
     await storageSet(RECEIPT_SETTINGS_KEY, receiptSettings);
     showToast('Receipt numbering updated.', 'burst');
   }

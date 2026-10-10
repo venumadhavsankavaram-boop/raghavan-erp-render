@@ -100,6 +100,7 @@ function renderSchoolProfileTab(body){
             <div class="f-field full"><label for="siTagline">Tagline / Motto</label><textarea id="siTagline" rows="2">${escapeHtml(schoolInfo.tagline || '')}</textarea></div>
             ${scxIn('siUdise', 'UDISE Code', schoolInfo.udise, `inputmode="numeric" maxlength="11" ${digits(11)}`, false, '11 digits')}
             ${scxIn('siSchoolCode', 'School Code', schoolInfo.schoolCode)}
+            ${scxIn('siReceiptCode', 'Receipt Code', schoolInfo.receiptCode || 'REHS', 'maxlength="8" style="text-transform:uppercase;"', false, '2–8 letters/numbers. Starts every fee receipt number, e.g. SPS → SPS-26-000001. Change only when setting up a new school.')}
             ${scxIn('siRegNumber', 'Reg. / Affiliation Number', schoolInfo.regNumber, '', true)}
             ${scxIn('siRecognition', 'Recognition line', schoolInfo.recognition, 'placeholder="Recognised by Govt. of AP"', false, 'Printed under the school name on receipts, progress reports, admit cards and certificates')}
           </div>`)}

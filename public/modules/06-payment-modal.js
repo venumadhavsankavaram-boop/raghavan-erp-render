@@ -121,9 +121,9 @@ function openPaymentModal(presetStudentId){
   // skips any number already on record.
   let rcPool = [];
   function receiptPrefix(){
-    // School code is a setting (Manage Fee > Settings > Receipt numbering). Older installs
-    // that never set one keep 'REHS' so their existing numbering carries on unchanged.
-    let code = String((receiptSettings && receiptSettings.prefix) || 'REHS').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
+    // Receipt code comes from School Profile > Identity. Installs that never set one keep
+    // 'REHS' so their existing numbering carries on unchanged.
+    let code = String((typeof schoolInfo !== 'undefined' && schoolInfo && schoolInfo.receiptCode) || 'REHS').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
     if(code.length < 2) code = 'REHS';
     return code + '-' + String(new Date().getFullYear()).slice(2) + '-';
   }

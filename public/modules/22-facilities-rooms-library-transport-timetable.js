@@ -1630,11 +1630,19 @@ const SYLLABUS_TAB_PERM_KEYS = { tracker:'syllabus_tracker', homework:'syllabus_
       document.getElementById('siPin').focus();
       return;
     }
+    const siReceiptEl = document.getElementById('siReceiptCode');
+    const siReceiptVal = siReceiptEl ? siReceiptEl.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8) : (schoolInfo.receiptCode || '');
+    if(siReceiptEl && siReceiptVal.length < 2){
+      showToast('Receipt Code must be 2–8 letters or numbers (e.g. SPS).');
+      siReceiptEl.focus();
+      return;
+    }
     schoolInfo = {
       name: document.getElementById('siName').value.trim(),
       tagline: document.getElementById('siTagline').value.trim(),
       udise: document.getElementById('siUdise').value.trim(),
       schoolCode: document.getElementById('siSchoolCode').value.trim(),
+      receiptCode: siReceiptVal,
       regNumber: document.getElementById('siRegNumber').value.trim(),
       recognition: (document.getElementById('siRecognition') ? document.getElementById('siRecognition').value.trim() : (schoolInfo.recognition || '')),
       email: document.getElementById('siEmail').value.trim(),
