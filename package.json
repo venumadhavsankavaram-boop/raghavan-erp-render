@@ -2,6 +2,8 @@
   "name": "raghavan-erp-server",
   "version": "1.0.0",
   "private": true,
+  "license": "UNLICENSED",
+  "author": "SVM EdTech",
   "type": "module",
   "main": "server.js",
   "scripts": {
